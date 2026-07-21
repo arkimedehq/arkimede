@@ -1,0 +1,34 @@
+<!-- connecting.svg -->
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+        <filter id="glow">
+            <feGaussianBlur stdDeviation="8" result="blur"/>
+            <feMerge>
+                <feMergeNode in="blur"/>
+                <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+        </filter>
+    </defs>
+
+    <!-- Soft glow -->
+    <circle cx="128" cy="128" r="70" fill="#EAB308" opacity="0.18" filter="url(#glow)"/>
+
+    <!-- Progress ring -->
+    <circle
+            cx="128"
+            cy="128"
+            r="92"
+            stroke="#EAB308"
+            stroke-width="12"
+            stroke-linecap="round"
+            stroke-dasharray="120 500"
+            transform="rotate(-90 128 128)"
+    />
+
+    <!-- Nodes -->
+    <circle cx="72" cy="128" r="20" fill="#EAB308"/>
+    <circle cx="184" cy="128" r="20" fill="#EAB308"/>
+
+    <!-- Bridge -->
+    <rect x="92" y="112" width="72" height="32" rx="16" fill="#EAB308"/>
+</svg>

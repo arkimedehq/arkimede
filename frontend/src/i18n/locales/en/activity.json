@@ -1,0 +1,44 @@
+{
+  "title": "Current activity",
+  "subtitle": "Everything running or scheduled for you. Auto-refresh every 10s.",
+  "loadError": "Unable to load activity.",
+
+  "counts": {
+    "daemons": "Active daemons",
+    "automationsActive": "Active automations",
+    "automationsPending_one": "{{count}} pending",
+    "automationsPending_other": "{{count}} pending",
+    "scheduledFlows": "Scheduled flows",
+    "recentRuns": "Recent runs"
+  },
+
+  "daemon": {
+    "blockTitle": "Skill daemons",
+    "empty": "No daemon running.",
+    "startedPrefix": "started",
+    "lastEventPrefix": "last evt"
+  },
+
+  "automation": {
+    "blockTitle": "Automations",
+    "empty": "No automation scheduled.",
+    "untitled": "(untitled)",
+    "badgePending": "pending",
+    "badgePaused": "paused",
+    "oncePrefix": "once",
+    "lastRunPrefix": "last",
+    "tokSuffix": "tok"
+  },
+
+  "scheduledFlow": {
+    "blockTitle": "Scheduled flows",
+    "empty": "No flow with active cron/scheduled trigger.",
+    "oncePrefix": "once"
+  },
+
+  "recentRun": {
+    "blockTitle": "Recent runs",
+    "empty": "No run recorded.",
+    "deletedFlow": "(deleted flow)"
+  }
+}

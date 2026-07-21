@@ -1,0 +1,27 @@
+{
+  "section": {
+    "title": "Feedback loop",
+    "subtitle": "Memoria attiva dai feedback degli utenti e gestione delle correzioni raccolte."
+  },
+  "memory": {
+    "title": "Feedback-memory attiva",
+    "descPre": "Quando attiva, i feedback con correzione vengono vettorizzati e reiniettati nel system prompt sulle richieste simili future, così l'agente evita di ripetere gli stessi errori. All'attivazione viene creata la collection",
+    "descPost": ".",
+    "noVectorDB": "Nessun vector DB raggiungibile: configura Vector DB ed Embedding per abilitare la memoria.",
+    "updateError": "Errore durante l'aggiornamento"
+  },
+  "dashboard": {
+    "title": "Feedback raccolti",
+    "empty": "Nessun feedback ancora.",
+    "table": {
+      "rating": "Voto",
+      "question": "Domanda",
+      "correction": "Correzione",
+      "scope": "Scope",
+      "status": "Stato"
+    },
+    "changeScope": "Cambia scope",
+    "approved": "approvato",
+    "pending": "da approvare"
+  }
+}

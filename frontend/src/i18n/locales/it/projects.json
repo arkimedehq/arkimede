@@ -1,0 +1,31 @@
+{
+  "modal": {
+    "editTitle": "Modifica progetto",
+    "newTitle": "Nuovo progetto",
+    "nameLabel": "Nome progetto *",
+    "namePlaceholder": "Progetto Rossi",
+    "descLabel": "Descrizione",
+    "descPlaceholder": "Note sul progetto…",
+    "colorLabel": "Colore",
+    "aiLabel": "Istruzioni AI (opzionale)",
+    "aiPlaceholder": "Contesto specifico per questo progetto:\n- Cliente: Acme S.r.l., Milano\n- Budget: €120.000\n- Note: priorità alla qualità",
+    "aiHint": "Aggiunto al prompt base dell'assistente solo nelle chat di questo progetto.",
+    "deleteCta": "Elimina progetto",
+    "deleteConfirm": "Eliminare il progetto? Chat e file non vengono cancellati (escono dal progetto).",
+    "deleting": "Elimino…",
+    "createCta": "Crea progetto",
+    "saving": "Salvataggio…",
+    "error": "Errore"
+  },
+  "teams": {
+    "label": "Condivisione con i team",
+    "assignedEmpty": "Nessun team: il progetto è privato.",
+    "roleCollaborator": "Collaboratore",
+    "roleViewer": "Sola lettura",
+    "removeTeam": "Rimuovi team",
+    "addPlaceholder": "Aggiungi team…",
+    "noneAvailable": "Nessun team disponibile",
+    "assign": "Assegna",
+    "error": "Errore"
+  }
+}

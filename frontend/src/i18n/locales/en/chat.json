@@ -1,0 +1,105 @@
+{
+  "disclaimer": "AI can make mistakes. Always verify important information.",
+  "colleagueFallback": "Colleague",
+  "userLabel": "You",
+  "toolCall": {
+    "runningPre": "Running",
+    "donePost": "completed",
+    "failedPost": "failed",
+    "called_one": "{{count}} tool called",
+    "called_other": "{{count}} tools called"
+  },
+  "memory": {
+    "askRemember": "Do you want me to remember this?",
+    "remember": "Remember",
+    "ignore": "Ignore",
+    "updateTitle": "Extract and update user memory from this conversation",
+    "update": "Update memory"
+  },
+  "truncate": {
+    "title": "Delete this message and all following ones",
+    "confirm": "Delete this message and all following ones? This cannot be undone."
+  },
+  "readOnly": "{{author}}'s chat — read-only",
+  "readOnlyAuthorFallback": "another member",
+  "team": {
+    "title": "Run this chat with a team of agents",
+    "single": "Single agent",
+    "option": "Team: {{name}}"
+  },
+  "voice": {
+    "start": "Dictate a message",
+    "stop": "Stop recording",
+    "recording": "Recording… press stop when you're done",
+    "transcribing": "Transcribing…",
+    "error": "Transcription failed. Please try again.",
+    "micDenied": "Cannot access the microphone. Check your browser permissions."
+  },
+  "attach": {
+    "embedRag": "Embed into RAG",
+    "embedRagDesc": "Index for semantic search",
+    "extractedText": "Extracted text",
+    "extractedTextDesc": "Extracts and injects the text into the AI",
+    "native": "Native attachment",
+    "toMessage": "Attach to message",
+    "nativeDesc": "Passes the file directly to Claude",
+    "skillDesc": "Makes the file available to skills",
+    "binaryNotePre": "Binary format — RAG and extracted text unavailable. The file will be accessible to skills via",
+    "attachFile": "Attach file",
+    "tagText": "·text",
+    "tagNative": "·native",
+    "tagRag": "·rag"
+  },
+  "embedMsg": {
+    "text": "I indexed the file \"{{name}}\" (fileId: {{fileId}}) into RAG — scope {{scope}}{{collection}}. The operation already ran server-side: no confirmation or verification is needed, just acknowledge it.",
+    "collectionSuffix": ", collection \"{{collection}}\"",
+    "scopeUniversal": "universal",
+    "scopeProject": "project",
+    "scopePersonal": "personal"
+  },
+  "collection": {
+    "howToIndexPre": "How to index",
+    "loading": "Loading collections…",
+    "default": "— Default collection —",
+    "defaultNotePre": "Leave it on",
+    "defaultNoteEm": "Default collection",
+    "defaultNotePost": "to use the one configured by the admin.",
+    "index": "Index"
+  },
+  "scope": {
+    "universal": "🌐 Universal (company)",
+    "project": "📁 Project",
+    "projectSuffix": " (no-project chat)",
+    "personal": "🔒 Personal"
+  },
+  "composer": {
+    "processing": "The AI is processing…",
+    "placeholder": "Write a message… (Shift+Enter for a new line)"
+  },
+  "uploadError": "Error uploading the file",
+  "download": {
+    "failed": "Download failed — retry",
+    "click": "Click to download",
+    "loading": "Download…",
+    "error": "⚠ Download error"
+  },
+  "view": {
+    "failed": "Open failed — retry",
+    "click": "Click to open",
+    "loading": "Opening…",
+    "error": "⚠ Open error"
+  },
+  "image": {
+    "loading": "Loading image…"
+  },
+  "feedback": {
+    "useful": "Helpful answer",
+    "toCorrect": "Answer to correct",
+    "editCorrection": "edit correction",
+    "addCorrection": "add correction",
+    "saved": "saved ✓",
+    "placeholder": "What should have been answered? The correction will help the agent avoid repeating the mistake.",
+    "saving": "Saving…",
+    "saveCorrection": "Save correction"
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "actions": {
+    "save": "Salva",
+    "cancel": "Annulla",
+    "delete": "Elimina",
+    "edit": "Modifica",
+    "create": "Crea",
+    "close": "Chiudi",
+    "confirm": "Conferma",
+    "add": "Aggiungi",
+    "remove": "Rimuovi",
+    "search": "Cerca",
+    "back": "Indietro",
+    "next": "Avanti",
+    "retry": "Riprova",
+    "loading": "Caricamento…",
+    "no": "No",
+    "deleteConfirm": "Eliminare?"
+  },
+  "scope": {
+    "personal": "personale",
+    "team": "team",
+    "org": "org",
+    "visibility": "Visibilità",
+    "personalLabel": "Personale",
+    "teamLabel": "Team",
+    "orgLabel": "Org",
+    "descPersonal": "Visibile e usabile solo da te.",
+    "descTeam": "Visibile ai membri del team selezionato.",
+    "descOrg": "Visibile a tutta l'organizzazione (gestione riservata agli admin).",
+    "chooseTeam": "Scegli un team…",
+    "noTeams": "Non appartieni a nessun team. Chiedi a un admin di aggiungerti o crearne uno."
+  },
+  "dashboard": {
+    "greeting": "Ciao, {{name}} 👋",
+    "intro": "Sono il tuo assistente AI. Posso interrogare i database, cercare nei documenti e aiutarti nel tuo lavoro.",
+    "card1Title": "Analisi dati",
+    "card1Desc": "Interroga i tuoi dati in linguaggio naturale",
+    "card2Title": "Documenti",
+    "card2Desc": "Cerca nei documenti caricati",
+    "card3Title": "Progetti",
+    "card3Desc": "Organizza il lavoro e genera output",
+    "startChat": "Inizia una nuova chat"
+  },
+  "language": {
+    "label": "Lingua",
+    "en": "English",
+    "it": "Italiano",
+    "hint": "Lingua dell'interfaccia e delle risposte dell'assistente."
+  },
+  "state": {
+    "enabled": "Abilitato",
+    "disabled": "Disabilitato",
+    "empty": "Ancora nulla qui"
+  },
+  "nav": {
+    "newChat": "Nuova chat",
+    "projects": "Progetti",
+    "recentChats": "Chat recenti",
+    "settings": "Impostazioni",
+    "logout": "Esci",
+    "noChats": "Nessuna chat",
+    "unread": "Non letta",
+    "chatOf": "Chat di {{name}}"
+  },
+  "theme": {
+    "light": "Chiaro",
+    "auto": "Auto",
+    "dark": "Scuro"
+  },
+  "header": {
+    "rename": "Rinomina chat",
+    "dblToRename": "Doppio clic per rinominare",
+    "stop": "Interrompi generazione",
+    "stopShort": "Stop",
+    "filePanel": "Pannello file",
+    "filesLabel": "File"
+  }
+}

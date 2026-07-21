@@ -1,0 +1,6 @@
+{
+  "internalKeyNotConfigured": "Token interno non configurato sul server (RUN_TOKEN_SECRET mancante)",
+  "internalKeyInvalid": "Token interno non valido o scaduto",
+  "adminOnly": "Accesso riservato agli amministratori",
+  "sessionInvalid": "Sessione non valida"
+}

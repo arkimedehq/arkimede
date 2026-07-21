@@ -1,0 +1,31 @@
+{
+  "heading": "Automations",
+  "subheading": "Scheduled tasks. Create them from chat: «every morning at 8 check the mail and summarise».",
+  "empty": "No automations. Ask the assistant in chat to schedule something.",
+  "badge": {
+    "pending": "pending"
+  },
+  "schedule": {
+    "once": "once · {{datetime}}"
+  },
+  "info": {
+    "lastRun": "last: {{datetime}}",
+    "totalTokens": "total {{count}}",
+    "toolLabel": "tools",
+    "toolNone": "none",
+    "toolAll": "all",
+    "runStarted": "Run started: you'll get a notification when it finishes, with the outcome in chat too."
+  },
+  "actions": {
+    "activate": "Activate",
+    "runNow": "Run now",
+    "enableLabel": "enable",
+    "deleteConfirm": "Delete this automation?"
+  },
+  "errors": {
+    "operationFailed": "Operation failed",
+    "deleteFailed": "Deletion failed",
+    "activationFailed": "Activation failed",
+    "runFailed": "Could not start the run"
+  }
+}

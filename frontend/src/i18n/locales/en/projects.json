@@ -1,0 +1,31 @@
+{
+  "modal": {
+    "editTitle": "Edit project",
+    "newTitle": "New project",
+    "nameLabel": "Project name *",
+    "namePlaceholder": "Acme project",
+    "descLabel": "Description",
+    "descPlaceholder": "Project notes…",
+    "colorLabel": "Color",
+    "aiLabel": "AI instructions (optional)",
+    "aiPlaceholder": "Specific context for this project:\n- Client: Acme Inc., Milan\n- Budget: €120,000\n- Notes: prioritize quality",
+    "aiHint": "Added to the assistant's base prompt only in this project's chats.",
+    "deleteCta": "Delete project",
+    "deleteConfirm": "Delete the project? Chats and files are not deleted (they leave the project).",
+    "deleting": "Deleting…",
+    "createCta": "Create project",
+    "saving": "Saving…",
+    "error": "Error"
+  },
+  "teams": {
+    "label": "Share with teams",
+    "assignedEmpty": "No teams: the project is private.",
+    "roleCollaborator": "Collaborator",
+    "roleViewer": "Read-only",
+    "removeTeam": "Remove team",
+    "addPlaceholder": "Add team…",
+    "noneAvailable": "No teams available",
+    "assign": "Assign",
+    "error": "Error"
+  }
+}

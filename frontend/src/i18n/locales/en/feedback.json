@@ -1,0 +1,27 @@
+{
+  "section": {
+    "title": "Feedback loop",
+    "subtitle": "Active memory from user feedback and management of collected corrections."
+  },
+  "memory": {
+    "title": "Feedback-memory active",
+    "descPre": "When active, feedback with corrections is vectorised and re-injected into the system prompt on similar future requests, so the agent avoids repeating the same mistakes. On activation the collection",
+    "descPost": "is created.",
+    "noVectorDB": "No vector DB reachable: configure a Vector DB and Embedding to enable memory.",
+    "updateError": "Error while updating"
+  },
+  "dashboard": {
+    "title": "Collected feedback",
+    "empty": "No feedback yet.",
+    "table": {
+      "rating": "Rating",
+      "question": "Question",
+      "correction": "Correction",
+      "scope": "Scope",
+      "status": "Status"
+    },
+    "changeScope": "Change scope",
+    "approved": "approved",
+    "pending": "pending approval"
+  }
+}

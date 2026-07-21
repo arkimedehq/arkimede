@@ -1,0 +1,32 @@
+# docker-compose.override.yml — DEVELOPMENT layer (auto-merge with `docker compose up`).
+#
+# Re-adds the host ports of the internal services so they can be reached from the
+# local machine (psql, Redis client, Qdrant dashboard, etc.) and sets a development
+# password for Postgres, so the dev environment works without configuring
+# DB_PASSWORD.
+#
+# NOT loaded in production: in prod you run `docker compose -f docker-compose.yml up`.
+
+services:
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}   # development default
+    ports:
+      - "5432:5432"
+
+  qdrant:
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+
+  redis:
+    ports:
+      - "6379:6379"
+
+  embedding:
+    ports:
+      - "8000:8000"
+
+  whisper:
+    ports:
+      - "9000:9000"

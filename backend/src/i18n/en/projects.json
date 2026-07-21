@@ -1,0 +1,7 @@
+{
+  "notFound": "Project not found",
+  "teamAlreadyAssigned": "Team already assigned to this project.",
+  "teamNotAssigned": "Team not assigned to this project.",
+  "onlyOwner": "Only the project owner or a global admin can manage it.",
+  "invalidRole": "Invalid role (collaborator | viewer)."
+}

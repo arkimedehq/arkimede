@@ -1,0 +1,231 @@
+# docker-compose.yml — BASE configuration, production-safe.
+#
+# The internal services (postgres, qdrant, redis, embedding) do NOT expose ports
+# to the host: they are reachable only by the other services via the internal
+# Docker network (by service name). Only backend and frontend are exposed.
+#
+# Local development uses docker-compose.override.yml (auto-merge) which re-adds
+# the host ports and a development password.
+#
+#   Prod:  docker compose -f docker-compose.yml up -d   (this file only)
+#   Dev:   docker compose up -d                          (base + override)
+#
+# In prod set DB_PASSWORD, RUN_TOKEN_SECRET and SERVICE_API_KEY in the environment:
+# without DB_PASSWORD postgres won't start (fail-closed); without RUN_TOKEN_SECRET the
+# /internal/* endpoints return 401; without SERVICE_API_KEY the executor rejects the
+# backend's requests (backend→executor→broker auth mesh, fail-closed).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD}     # no default: must be set in prod (empty → postgres won't start)
+      POSTGRES_DB: ${DB_NAME:-arkimede}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+    # Qdrant's image ships no curl/wget/shell → no in-container HTTP healthcheck is
+    # possible; backend's depends_on uses `service_started` for qdrant instead.
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  embedding:
+    build:
+      context: ./embedding-service
+      dockerfile: Dockerfile
+      args:
+        MODEL_NAME: ${EMBEDDING_MODEL:-mixedbread-ai/mxbai-embed-large-v1}
+        # Also a build-arg, not just runtime: on 'cpu' the image is built without the
+        # CUDA wheels (see embedding-service/Dockerfile). Rebuild after changing it.
+        EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-cpu}
+    restart: unless-stopped
+    environment:
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-mixedbread-ai/mxbai-embed-large-v1}
+      EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-cpu}
+      EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-32}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  whisper:
+    build:
+      context: ./whisper-service
+      dockerfile: Dockerfile
+      args:
+        WHISPER_MODEL: ${WHISPER_MODEL:-small}
+        WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
+    restart: unless-stopped
+    environment:
+      WHISPER_MODEL: ${WHISPER_MODEL:-small}
+      WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
+      WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:9000/health').status==200 else 1)"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s          # loading the Whisper model may take a while
+    # No port exposed to the host: reachable only by the backend (internal network)
+
+  skill-executor:
+    build:
+      context: ./executor
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: '1.0'
+          pids: 256                       # contains fork-bombs at the container level
+    # ── Execution hardening (D1) ────────────────────────────────────────────────
+    cap_drop: [ALL]                       # skills don't need Linux capabilities
+    security_opt:
+      - no-new-privileges:true            # no escalation via setuid
+    ulimits:
+      nofile: { soft: 1024, hard: 2048 }  # max file descriptors (anti fd-exhaustion)
+      nproc:  512                         # max processes
+      fsize:  268435456                   # 256MB = max single file (anti disk-fill)
+    # read_only: true + tmpfs requires writable dirs for pip/npm/nix cache:
+    # enable AFTER verifying the install against the real stack.
+    #   read_only: true
+    #   tmpfs: [/tmp, /home/executor/.cache, /home/executor/.npm]
+    environment:
+      PORT: 4000
+      HOST: ${EXECUTOR_HOST:-0.0.0.0}          # bind address INSIDE the container — KEEP 0.0.0.0
+      SKILLS_BASE_PATH: /app/skills
+      MAX_TIMEOUT_MS: ${SKILL_MAX_TIMEOUT_MS:-30000}
+      MAX_OUTPUT_BYTES: ${SKILL_MAX_OUTPUT_BYTES:-524288}
+      MAX_CONCURRENT: ${SKILL_MAX_CONCURRENT:-5}
+      JS_MEMORY_LIMIT_MB: ${SKILL_JS_MEMORY_MB:-128}
+      INSTALL_TIMEOUT_MS: ${SKILL_INSTALL_TIMEOUT_MS:-300000}
+      BACKEND_INTERNAL_URL: http://backend:3000
+      SERVICE_API_KEY: ${SERVICE_API_KEY}      # auth mesh: backend→executor (and executor→broker)
+      # In-process sandbox fallback (L1, no broker): 1 = run the run_in_sandbox tool
+      # IN-PROCESS (NOT isolated) — dev/trusted only. Default 0 = fail-closed. With the
+      # broker overlay the jobs are isolated regardless and this stays 0.
+      SANDBOX_ALLOW_INPROCESS: ${SANDBOX_ALLOW_INPROCESS:-0}
+      # Sandbox session workspaces (per-chat): GC + disk quota + execution timeout.
+      SANDBOX_SESSION_TTL_MS:    ${SANDBOX_SESSION_TTL_MS:-86400000}      # 24h idle → reclaimed
+      SANDBOX_GC_INTERVAL_MS:    ${SANDBOX_GC_INTERVAL_MS:-3600000}       # GC sweep every 1h
+      SANDBOX_SESSION_MAX_BYTES: ${SANDBOX_SESSION_MAX_BYTES:-524288000}  # 500MB per session (0 = off)
+      SANDBOX_TIMEOUT_MS:        ${SANDBOX_TIMEOUT_MS:-120000}            # 120s (runtime installs need >30s)
+    volumes:
+      - nix_store:/nix           # persistent Nix store — survives container rebuilds
+      - skills_data:/app/skills
+      - uploads:/app/uploads     # shared with backend → PDFs are servable via /api/files
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      # On the FIRST start with an empty /nix volume the entrypoint installs single-user
+      # Nix + updates the nixpkgs channel synchronously before node listens — this can take
+      # a couple of minutes. Without a grace window the container is marked unhealthy at ~45s
+      # and the backend's depends_on aborts the whole `up`. Failures during start_period do
+      # not count, so node has time to come up on a cold /nix volume.
+      start_period: 180s
+    # No port exposed to the host: reachable only by the backend (internal network)
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    # Authoritative overrides for the container: the .env (single, at the root)
+    # carries the local DEV defaults (host=localhost, path ./uploads); here we bring
+    # them back to the container-internal values, so the same .env serves dev and Docker.
+    environment:
+      NODE_ENV: production
+      # Enable the legacy OpenSSL provider: SMB share NTLM auth uses DES/MD4 (legacy,
+      # disabled by default in OpenSSL 3) → without it, SMB connections throw
+      # ERR_OSSL_EVP_UNSUPPORTED and crash the process.
+      NODE_OPTIONS: --openssl-legacy-provider
+      DB_HOST: postgres
+      QDRANT_URL: http://qdrant:6333
+      EMBEDDING_BASE_URL: http://embedding:8000/v1
+      TRANSCRIPTION_BASE_URL: http://whisper:9000/v1
+      SKILL_EXECUTOR_URL: http://skill-executor:4000
+      REDIS_URL: redis://redis:6379
+      UPLOAD_DIR: /app/uploads
+      SKILLS_BASE_PATH: /app/skills
+      SKILLS_OUTPUT_DIR: /app/uploads/skills-output
+      BACKUP_DIR: /app/backups           # admin backup archives (persisted volume)
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      embedding:
+        condition: service_healthy
+      whisper:
+        condition: service_started   # on-demand transcription: does not block boot on model loading
+      skill-executor:
+        condition: service_healthy
+    ports:
+      - "3000:3000"              # public API entry point
+    healthcheck:
+      # Public /api/health probe (no JWT). Uses busybox wget (node:20-alpine has it,
+      # not curl). --spider = HEAD-less GET, returns non-zero on 5xx (e.g. 503 when DB down).
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    volumes:
+      - uploads:/app/uploads
+      - skills_data:/app/skills
+      - backups:/app/backups
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: /api
+        VITE_APP_NAME: ${VITE_APP_NAME:-Arkimede}
+    restart: unless-stopped
+    environment:
+      # Upload cap for the nginx proxy (client_max_body_size, via the envsubst
+      # template). Same env drives the backend Multer limit (there via env_file).
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-50}
+    ports:
+      - "5173:80"                # public SPA entry point
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  qdrant_data:
+  redis_data:
+  uploads:
+  skills_data:
+  backups:               # admin backup archives (pg_dump + volumes), downloadable from the UI
+  nix_store:             # persistent /nix/store for the executor — avoids re-download on rebuild

@@ -1,0 +1,164 @@
+# Overlay D2 — container-per-job via broker (OPT-IN, not auto-merge).
+#
+#   # strong isolation, jobs without network (network=none):
+#   docker compose -f docker-compose.yml -f docker-compose.broker.yml up -d
+#
+#   # strong isolation + per-job egress allowlist (combines the two overlays):
+#   docker compose -f docker-compose.yml -f docker-compose.egress.yml \
+#                  -f docker-compose.broker.yml up -d
+#   # …with BROKER_ALLOWED_NETWORKS=sandboxnet and JOB_EGRESS_NETWORK=sandboxnet in the .env,
+#   # and uncommenting the broker's `networks:` block below. Egress jobs are then multi-homed
+#   # on arkimede-internal (backend) + sandboxnet (external via squid).
+#
+# What it does: every python/node skill execution becomes an ephemeral, hardened
+# CONTAINER-JOB (cap-drop ALL, no-new-privileges, read-only, non-root uid, pids/mem
+# limit), launched by the `broker` — the ONLY component with the Docker socket.
+# Executor and backend never touch the socket: they call the broker's narrow API.
+#
+# ── Host path constraint (sibling-container) ──────────────────────────────────
+# The jobs are "sibling" containers on the host's daemon: the broker passes HOST
+# paths to `docker run`. For this reason the shared folders are BIND-MOUNTs mounted
+# at the SAME absolute path inside the containers (host == container), so the path
+# the executor writes matches the one the job mounts.
+#
+# Set HOST_DATA_DIR (absolute host path) in the .env. The subfolders
+# skills/work/state/skills-output must be created writable by the executor's uid:
+#   mkdir -p "$HOST_DATA_DIR"/{skills,work,state,skills-output,sandbox}
+#   chmod 0777 "$HOST_DATA_DIR"/{work,state,skills-output,sandbox}
+#
+# ── Runner image prerequisite ─────────────────────────────────────────────────
+# The jobs run in the `pa-runner` image (runner/). Build it once:
+#   docker build -t pa-runner ./runner
+# (or: docker compose -f docker-compose.yml -f docker-compose.broker.yml \
+#          --profile build build runner)
+
+services:
+  broker:
+    build:
+      context: ./broker
+      dockerfile: Dockerfile
+    image: pa-broker
+    restart: unless-stopped
+    environment:
+      PORT: 4100
+      SERVICE_API_KEY: ${SERVICE_API_KEY}
+      BROKER_SKILLS_ROOT: ${HOST_DATA_DIR}/skills
+      BROKER_WORK_ROOT:   ${HOST_DATA_DIR}/work
+      BROKER_STATE_ROOT:  ${HOST_DATA_DIR}/state
+      BROKER_SANDBOX_ROOT: ${HOST_DATA_DIR}/sandbox    # persistent workspaces of the run_in_sandbox tool
+      BROKER_SANDBOX_OUTPUT: ${HOST_DATA_DIR}/skills-output  # mounted /output in the job → file delivery (local fileshare)
+      BROKER_RUNNER_IMAGE: pa-runner
+      BROKER_NETWORK: none                                  # default network of the jobs
+      # All KNOWN networks are allowed by default so every sandbox network mode works
+      # out of the box: arkimede-internal (Phase 1 baseline → backend:3000/internal/*),
+      # the egress net (allowlist proxy) and the sandbox 'open' net (full internet, default
+      # bridge). Extra/reserved networks (LAN/VPN, …) are appended from BROKER_ALLOWED_NETWORKS
+      # in the .env; the operator can restrict this list at install time.
+      BROKER_ALLOWED_NETWORKS: arkimede-internal,${SANDBOX_OPEN_NETWORK:-bridge},${JOB_EGRESS_NETWORK:-},${BROKER_ALLOWED_NETWORKS:-}
+      BROKER_ALLOW_RUNSC: ${BROKER_ALLOW_RUNSC:-0}          # 1 = allow runtime=runsc (gVisor)
+      BROKER_ALLOW_PRIVILEGED_SANDBOX: ${BROKER_ALLOW_PRIVILEGED_SANDBOX:-0}  # 1 = allow the 'trusted' sandbox profile (writable rootfs + root); off → forces hardened
+      # Nix store shared into system.nix jobs. Default: the executor's own `nix_store`
+      # named volume (project-prefixed → arkimede_nix_store), mounted /nix:ro in each job
+      # by name. This is the SAME store the executor installs into, so no second store and
+      # no host-path guessing. Override with BROKER_NIX_STORE (host path) for a real host Nix.
+      BROKER_NIX_VOLUME: ${BROKER_NIX_VOLUME:-arkimede_nix_store}
+      BROKER_NIX_STORE: ${BROKER_NIX_STORE:-}               # host path of the /nix store (alternative to the volume)
+      JOB_MEMORY: ${JOB_MEMORY:-256m}
+      JOB_PIDS: ${JOB_PIDS:-128}
+      JOB_TIMEOUT_MS: ${JOB_TIMEOUT_MS:-120000}
+    volumes:
+      # Broker's only privilege: the Docker socket. No other mount: the broker
+      # validates the paths (string-check under the *_ROOT) and passes them to `docker run`.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # For skills with SYSTEM deps (system.nix) the broker mounts the host /nix store
+      # into the jobs: it must be accessible to the broker too if BROKER_NIX_STORE is set.
+      # - ${BROKER_NIX_STORE:-/nix}:${BROKER_NIX_STORE:-/nix}:ro
+    # Networks: by default the broker is on the `default` network (reachable by the executor).
+    # EGRESS COMBO: to make it reachable by the executor isolated on sandboxnet,
+    # uncomment and use the 3 files together:
+    # networks: [appnet, sandboxnet]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4100/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    # Never exposed to the host: reachable only by the internal Docker network.
+
+  # Build-only: produces the pa-runner image of the container-jobs. Does not run as
+  # a service ("build" profile). Alternatively: docker build -t pa-runner ./runner
+  runner:
+    build:
+      context: ./runner
+      dockerfile: Dockerfile
+    image: pa-runner
+    profiles: ["build"]
+    command: ["true"]
+    restart: "no"
+
+  skill-executor:
+    depends_on:
+      broker:
+        condition: service_healthy
+    environment:
+      # Activates the container-per-job mode (feature flag): without BROKER_URL
+      # the executor uses the usual in-process runners.
+      BROKER_URL: http://broker:4100
+      # Shared host paths (== internal path, bind-mount below).
+      SKILLS_BASE_PATH:         ${HOST_DATA_DIR}/skills
+      SKILLS_HOST_BASE:         ${HOST_DATA_DIR}/skills
+      WORK_HOST_BASE:           ${HOST_DATA_DIR}/work
+      SKILL_STATE_HOST_BASE:    ${HOST_DATA_DIR}/state
+      SKILLS_OUTPUT_HOST_BASE:  ${HOST_DATA_DIR}/skills-output
+      SKILLS_OUTPUT_DIR:        ${HOST_DATA_DIR}/skills-output
+      # Sandbox: per-session persistent workspaces (host == container, mounted in the job by the broker)
+      SANDBOX_SESSIONS_BASE:    ${HOST_DATA_DIR}/sandbox
+      SANDBOX_SESSION_HOST_BASE: ${HOST_DATA_DIR}/sandbox
+      # Docker network for the sandboxNetwork='open' mode (full internet). To enable it
+      # you ALSO need to add this network to the broker's BROKER_ALLOWED_NETWORKS (double gate).
+      SANDBOX_OPEN_NETWORK:     ${SANDBOX_OPEN_NETWORK:-bridge}
+      JOB_RUNTIME:        ${JOB_RUNTIME:-runc}
+      JOB_EGRESS_NETWORK: ${JOB_EGRESS_NETWORK:-}
+      # Baseline internal network for skill jobs: reaches backend:3000/internal/*
+      # (the standard skill API) with NO route to the WAN. Must match the compose
+      # network below and be present in the broker's BROKER_ALLOWED_NETWORKS.
+      JOB_INTERNAL_NETWORK: ${JOB_INTERNAL_NETWORK:-arkimede-internal}
+      # "Global" bucket (Phase 3): extra networks attached to EVERY skill job (always-on,
+      # e.g. an operator LAN all skills may use). Comma-separated docker network names;
+      # each must ALSO be in the broker's BROKER_ALLOWED_NETWORKS. Default empty.
+      BROKER_GLOBAL_NETWORKS: ${BROKER_GLOBAL_NETWORKS:-}
+    volumes:
+      # Host-identical bind-mounts (host == container): consistent with the path passed to the broker.
+      - ${HOST_DATA_DIR}/skills:${HOST_DATA_DIR}/skills
+      - ${HOST_DATA_DIR}/work:${HOST_DATA_DIR}/work
+      - ${HOST_DATA_DIR}/state:${HOST_DATA_DIR}/state
+      - ${HOST_DATA_DIR}/skills-output:${HOST_DATA_DIR}/skills-output
+      - ${HOST_DATA_DIR}/sandbox:${HOST_DATA_DIR}/sandbox
+
+  backend:
+    environment:
+      # Same host path of the skills and outputs (for upload/install and download ?rel=).
+      SKILLS_BASE_PATH:  ${HOST_DATA_DIR}/skills
+      SKILLS_OUTPUT_DIR: ${HOST_DATA_DIR}/skills-output
+      # "Grantable" bucket (Phase 3): catalog of reserved networks an admin can grant
+      # per-skill, as a JSON array of {id,dockerNetwork,label,description}. Each
+      # `dockerNetwork` must ALSO be in the broker's BROKER_ALLOWED_NETWORKS. Default empty.
+      SKILL_NETWORK_CATALOG: ${SKILL_NETWORK_CATALOG:-}
+    volumes:
+      - ${HOST_DATA_DIR}/skills:${HOST_DATA_DIR}/skills
+      - ${HOST_DATA_DIR}/skills-output:${HOST_DATA_DIR}/skills-output
+    # Attach the backend to the baseline internal network so the skill container-jobs
+    # can reach its /internal/* API. `default` is re-listed explicitly because naming
+    # any network disables the implicit default (backend must still reach postgres/redis).
+    networks:
+      - default
+      - arkimede-internal
+
+# Baseline internal network for the skill container-jobs (Phase 1).
+# `internal: true` → no gateway → the jobs reach the backend but have NO route to the
+# internet. Fixed `name:` so the broker/executor reference the same real Docker network
+# regardless of the compose project prefix.
+networks:
+  arkimede-internal:
+    name: arkimede-internal
+    driver: bridge
+    internal: true

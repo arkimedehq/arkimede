@@ -1,0 +1,68 @@
+{
+  "header": {
+    "title": "Users",
+    "subtitle": "Manage organisation accounts: roles, status, and access.",
+    "newUser": "New user"
+  },
+  "filter": {
+    "searchPlaceholder": "Search by name or email…",
+    "allRoles": "All roles",
+    "allStatuses": "All statuses",
+    "roleUser": "User",
+    "roleAdmin": "Admin",
+    "statusActive": "Active",
+    "statusDisabled": "Disabled"
+  },
+  "table": {
+    "colName": "Name",
+    "colEmail": "Email",
+    "colRole": "Role",
+    "colStatus": "Status",
+    "colActions": "Actions",
+    "self": "(you)",
+    "empty": "No users found."
+  },
+  "actions": {
+    "edit": "Edit",
+    "makeAdmin": "Make admin",
+    "makeUser": "Make user",
+    "disable": "Disable",
+    "enable": "Enable",
+    "resetPassword": "Reset password",
+    "delete": "Delete"
+  },
+  "confirm": {
+    "deleteUser": "Permanently delete \"{{name}}\"?"
+  },
+  "pagination": {
+    "total_one": "{{count}} user",
+    "total_other": "{{count}} users"
+  },
+  "errors": {
+    "operationFailed": "Operation failed",
+    "createFailed": "Failed to create user",
+    "updateFailed": "Failed to update user",
+    "resetFailed": "Failed to reset password"
+  },
+  "modal": {
+    "createTitle": "New user",
+    "editTitle": "Edit {{name}}",
+    "resetTitle": "Reset password — {{name}}",
+    "fieldName": "Name",
+    "fieldEmail": "Email",
+    "fieldPassword": "Password (min 6)",
+    "fieldNewPassword": "New password (min 6)",
+    "fieldRole": "Role",
+    "passwordUpdated": "Password updated. Share it with the user through a secure channel.",
+    "close": "Close",
+    "resetConfirmLabel": "Reset"
+  },
+  "role": {
+    "user": "user",
+    "admin": "admin"
+  },
+  "status": {
+    "active": "active",
+    "disabled": "disabled"
+  }
+}

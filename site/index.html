@@ -1,0 +1,1064 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1" name="viewport"/>
+    <title>Arkimede — the sovereign, self-hosted AI platform for teams</title>
+    <meta content="Run AI agents, deterministic workflows and sandboxed custom code on your own infrastructure. Multi-tenant, AGPL-3.0, bring your own LLM. Your data never leaves the perimeter."
+          name="description"/>
+    <link href="https://arkimedehq.github.io/arkimede/" rel="canonical"/>
+
+    <meta content="website" property="og:type"/>
+    <meta content="https://arkimedehq.github.io/arkimede/" property="og:url"/>
+    <meta content="Arkimede — the sovereign, self-hosted AI platform for teams" property="og:title"/>
+    <meta content="Agents, deterministic workflows and sandboxed skills. Multi-tenant, on infrastructure you control. AGPL-3.0."
+          property="og:description"/>
+    <meta content="https://arkimedehq.github.io/arkimede/social-preview.png" property="og:image"/>
+    <meta content="summary_large_image" name="twitter:card"/>
+    <meta content="Arkimede — the sovereign, self-hosted AI platform for teams" name="twitter:title"/>
+    <meta content="Agents, deterministic workflows and sandboxed skills. Multi-tenant, on infrastructure you control. AGPL-3.0."
+          name="twitter:description"/>
+    <meta content="https://arkimedehq.github.io/arkimede/social-preview.png" name="twitter:image"/>
+
+    <link href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230B1020'/><rect x='6.5' y='6.5' width='19' height='19' rx='4' fill='none' stroke='%233B82F6' stroke-width='2'/><circle cx='16' cy='16' r='3.4' fill='%23F5A524'/></svg>"
+          rel="icon"/>
+
+    <!-- Self-hosted fonts (SIL OFL 1.1). No third-party CDN: no visitor data leaves this origin. -->
+    <link href="fonts/fonts.css" rel="stylesheet"/>
+
+    <style>
+        :root {
+            --ink: #0B1020;
+            --ink-2: #080C18;
+            --panel: #121A2E;
+            --line: #22304F;
+            --brand: #3B82F6;
+            --brand-dim: #1D4ED8;
+            --signal: #F5A524;
+            --text: #E6EDF7;
+            --muted: #8FA3C0;
+
+            --display: 'Space Grotesk', system-ui, sans-serif;
+            --body: 'IBM Plex Sans', system-ui, sans-serif;
+            --mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+            --gutter: clamp(20px, 5vw, 64px);
+            --maxw: 1180px;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            margin: 0;
+            background: var(--ink);
+            color: var(--text);
+            font-family: var(--body);
+            font-size: 17px;
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+            overflow-x: hidden;
+        }
+
+        a {
+            color: var(--brand);
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        :focus-visible {
+            outline: 2px solid var(--signal);
+            outline-offset: 3px;
+            border-radius: 3px;
+        }
+
+        img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .wrap {
+            max-width: var(--maxw);
+            margin: 0 auto;
+            padding-inline: var(--gutter);
+        }
+
+        /* ── Utility label: the mono eyebrow. Used only where it names a real thing. ── */
+        .label {
+            font-family: var(--mono);
+            font-size: 12px;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+
+        h1, h2, h3 {
+            font-family: var(--display);
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            line-height: 1.1;
+            margin: 0;
+        }
+
+        /* ── Nav ─────────────────────────────────────────────────────────── */
+        header {
+            position: sticky;
+            top: 0;
+            z-index: 40;
+            background: rgba(11, 16, 32, 0.82);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--line);
+        }
+
+        .nav {
+            display: flex;
+            align-items: center;
+            gap: 28px;
+            height: 62px;
+        }
+
+        .brandmark {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-family: var(--display);
+            font-weight: 700;
+            font-size: 19px;
+            letter-spacing: -0.01em;
+            color: var(--text);
+        }
+
+        .brandmark:hover {
+            text-decoration: none;
+        }
+
+        .brandmark svg {
+            flex: none;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 22px;
+            margin-left: auto;
+            align-items: center;
+        }
+
+        .nav-links a {
+            color: var(--muted);
+            font-size: 15px;
+        }
+
+        .nav-links a:hover {
+            color: var(--text);
+            text-decoration: none;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 18px;
+            border-radius: 8px;
+            font-family: var(--body);
+            font-weight: 600;
+            font-size: 15px;
+            border: 1px solid transparent;
+            cursor: pointer;
+        }
+
+        .btn:hover {
+            text-decoration: none;
+        }
+
+        .btn-primary {
+            background: var(--brand);
+            color: #fff;
+        }
+
+        .btn-primary:hover {
+            background: #2f74e6;
+        }
+
+        .btn-ghost {
+            border-color: var(--line);
+            color: var(--text);
+            background: transparent;
+        }
+
+        .btn-ghost:hover {
+            border-color: var(--brand);
+        }
+
+        /* ── Hero ────────────────────────────────────────────────────────── */
+        .hero {
+            padding: clamp(56px, 8vw, 104px) 0 clamp(48px, 6vw, 88px);
+        }
+
+        .hero-grid {
+            display: grid;
+            grid-template-columns: 1.05fr 1.05fr;
+            gap: clamp(32px, 5vw, 72px);
+            align-items: center;
+        }
+
+        .hero h1 {
+            font-size: clamp(34px, 4.3vw, 52px);
+            text-wrap: balance;
+        }
+
+        .hero h1 .accent {
+            color: var(--brand);
+        }
+
+        .hero .sub {
+            color: var(--muted);
+            font-size: clamp(17px, 1.6vw, 20px);
+            margin: 22px 0 0;
+            max-width: 34ch;
+        }
+
+        .hero .eyebrow {
+            margin-bottom: 20px;
+            display: block;
+        }
+
+        .cmd {
+            margin-top: 32px;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            background: var(--ink-2);
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 14px 14px;
+            font-family: var(--mono);
+            font-size: 13.5px;
+            line-height: 1.75;
+            max-width: 520px;
+        }
+
+        /* Two real lines — a truncated install command reads as a broken page. */
+        .cmd .lines {
+            flex: 1;
+            min-width: 0;
+            display: grid;
+            gap: 2px;
+        }
+
+        .cmd .line {
+            display: flex;
+            gap: 9px;
+            min-width: 0;
+        }
+
+        .cmd .dollar {
+            color: var(--signal);
+            flex: none;
+        }
+
+        .cmd code {
+            color: var(--text);
+            min-width: 0;
+            overflow-wrap: anywhere;
+        }
+
+        .copy {
+            flex: none;
+            background: transparent;
+            border: 1px solid var(--line);
+            color: var(--muted);
+            border-radius: 6px;
+            padding: 5px 9px;
+            font-family: var(--mono);
+            font-size: 11px;
+            cursor: pointer;
+        }
+
+        .copy:hover {
+            color: var(--text);
+            border-color: var(--brand);
+        }
+
+        .hero-cta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-top: 24px;
+        }
+
+        .hero-meta {
+            margin-top: 26px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 20px;
+        }
+
+        .hero-meta span {
+            font-family: var(--mono);
+            font-size: 12.5px;
+            color: var(--muted);
+        }
+
+        .hero-meta b {
+            color: var(--text);
+            font-weight: 500;
+        }
+
+        /* ── Signature: the perimeter diagram ────────────────────────────── */
+        .perimeter {
+            width: 100%;
+            height: auto;
+        }
+
+        .p-boundary {
+            fill: none;
+            stroke: var(--brand);
+            stroke-width: 1.5;
+            stroke-dasharray: 7 5;
+            opacity: 0.9;
+        }
+
+        .p-node {
+            fill: var(--panel);
+            stroke: var(--line);
+            stroke-width: 1;
+        }
+
+        .p-node-label {
+            font-family: var(--mono);
+            font-size: 10.5px;
+            fill: var(--text);
+        }
+
+        .p-cap {
+            font-family: var(--mono);
+            font-size: 10px;
+            fill: var(--muted);
+            letter-spacing: 0.08em;
+        }
+
+        .p-outside {
+            font-family: var(--mono);
+            font-size: 10px;
+            fill: var(--muted);
+            letter-spacing: 0.08em;
+        }
+
+        .p-gate {
+            fill: none;
+            stroke: var(--signal);
+            stroke-width: 1.5;
+        }
+
+        .p-wire {
+            stroke: var(--line);
+            stroke-width: 1;
+            fill: none;
+        }
+
+        .p-cloud {
+            fill: none;
+            stroke: var(--line);
+            stroke-width: 1;
+            stroke-dasharray: 3 3;
+        }
+
+        @keyframes travel {
+            0% {
+                offset-distance: 0%;
+                opacity: 0;
+            }
+            8% {
+                opacity: 1;
+            }
+            55% {
+                offset-distance: 100%;
+                opacity: 1;
+            }
+            70% {
+                opacity: 1;
+            }
+            100% {
+                offset-distance: 100%;
+                opacity: 0;
+            }
+        }
+
+        @keyframes gatePulse {
+            0%, 100% {
+                opacity: 0.35;
+            }
+            50% {
+                opacity: 1;
+            }
+        }
+
+        .packet {
+            offset-path: path('M 89 100 L 89 58 L 338 58');
+            animation: travel 4.2s cubic-bezier(.5, .05, .5, .95) infinite;
+        }
+
+        .gate-ring {
+            animation: gatePulse 4.2s ease-in-out infinite;
+            transform-origin: center;
+        }
+
+        .p-dash {
+            stroke-dasharray: 4 4;
+            animation: dashmove 3s linear infinite;
+        }
+
+        @keyframes dashmove {
+            to {
+                stroke-dashoffset: -32;
+            }
+        }
+
+        /* ── Section frame ───────────────────────────────────────────────── */
+        section {
+            padding: clamp(56px, 7vw, 96px) 0;
+            border-top: 1px solid var(--line);
+        }
+
+        .sec-head {
+            max-width: 62ch;
+            margin-bottom: clamp(32px, 4vw, 52px);
+        }
+
+        .sec-head h2 {
+            font-size: clamp(28px, 3.4vw, 40px);
+            margin-top: 14px;
+        }
+
+        .sec-head p {
+            color: var(--muted);
+            margin: 16px 0 0;
+        }
+
+        /* ── Lanes ───────────────────────────────────────────────────────── */
+        .lanes {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1px;
+            background: var(--line);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .lane {
+            background: var(--ink);
+            padding: 26px 24px;
+        }
+
+        .lane h3 {
+            font-size: 18px;
+            margin-bottom: 10px;
+        }
+
+        .lane p {
+            color: var(--muted);
+            font-size: 15px;
+            margin: 0;
+        }
+
+        .lane .who {
+            font-family: var(--mono);
+            font-size: 11px;
+            color: var(--muted);
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            display: block;
+            margin-bottom: 14px;
+        }
+
+        .lane-all {
+            background: linear-gradient(180deg, rgba(59, 130, 246, 0.10), rgba(59, 130, 246, 0.02));
+        }
+
+        .lane-all h3 {
+            color: var(--brand);
+        }
+
+        /* ── Pillars ─────────────────────────────────────────────────────── */
+        .pillars {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 18px;
+        }
+
+        .pillar {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 26px 24px;
+        }
+
+        .pillar h3 {
+            font-size: 19px;
+            margin-bottom: 10px;
+        }
+
+        .pillar p {
+            color: var(--muted);
+            font-size: 15px;
+            margin: 0;
+        }
+
+        .pillar .tag {
+            font-family: var(--mono);
+            font-size: 11px;
+            color: var(--signal);
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            display: block;
+            margin-bottom: 12px;
+        }
+
+        /* ── Demo ────────────────────────────────────────────────────────── */
+        .demo {
+            margin: 0;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            overflow: hidden;
+            background: var(--panel);
+            box-shadow: 0 24px 60px -30px rgba(0, 0, 0, 0.8);
+        }
+
+        .demo video {
+            display: block;
+            width: 100%;
+            height: auto;
+        }
+
+        /* ── Shots ───────────────────────────────────────────────────────── */
+        .shots {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+        }
+
+        figure {
+            margin: 0;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            overflow: hidden;
+            background: var(--panel);
+        }
+
+        figure img {
+            width: 100%;
+            height: auto;
+            aspect-ratio: 2880 / 1800;
+        }
+
+        figcaption {
+            padding: 14px 18px;
+            font-size: 14.5px;
+            color: var(--muted);
+            border-top: 1px solid var(--line);
+        }
+
+        figcaption b {
+            color: var(--text);
+            font-weight: 600;
+        }
+
+        /* ── Security list ───────────────────────────────────────────────── */
+        .caps {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 14px 40px;
+            margin-top: 8px;
+            padding: 0;
+            list-style: none;
+        }
+
+        .caps li {
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+            font-size: 15.5px;
+            color: var(--muted);
+            padding-bottom: 14px;
+            border-bottom: 1px solid var(--line);
+        }
+
+        .caps li b {
+            color: var(--text);
+            font-weight: 600;
+        }
+
+        .caps .k {
+            font-family: var(--mono);
+            color: var(--signal);
+            font-size: 13px;
+            flex: none;
+            padding-top: 2px;
+        }
+
+        /* ── Closer ──────────────────────────────────────────────────────── */
+        .closer {
+            text-align: center;
+        }
+
+        .closer h2 {
+            font-size: clamp(28px, 3.6vw, 42px);
+        }
+
+        .closer p {
+            color: var(--muted);
+            max-width: 52ch;
+            margin: 18px auto 0;
+        }
+
+        .closer .cmd {
+            margin: 32px auto 0;
+        }
+
+        .closer .hero-cta {
+            justify-content: center;
+        }
+
+        footer {
+            border-top: 1px solid var(--line);
+            padding: 34px 0;
+        }
+
+        .foot {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .foot p {
+            margin: 0;
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .foot nav {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .foot nav a {
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        /* ── Reveal ──────────────────────────────────────────────────────── */
+        .reveal {
+            opacity: 0;
+            transform: translateY(14px);
+            transition: opacity .6s ease, transform .6s ease;
+        }
+
+        .reveal.in {
+            opacity: 1;
+            transform: none;
+        }
+
+        @media (max-width: 900px) {
+            .hero-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .hero .sub {
+                max-width: none;
+            }
+
+            .lanes {
+                grid-template-columns: 1fr;
+            }
+
+            .pillars, .shots, .caps {
+                grid-template-columns: 1fr;
+            }
+
+            .nav-links a:not(.btn) {
+                display: none;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            html {
+                scroll-behavior: auto;
+            }
+
+            *, *::before, *::after {
+                animation: none !important;
+                transition: none !important;
+            }
+
+            .reveal {
+                opacity: 1;
+                transform: none;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="wrap nav">
+        <a class="brandmark" href="#top">
+            <svg aria-hidden="true" height="26" viewBox="0 0 32 32" width="26">
+                <rect fill="#0B1020" height="30" rx="7" stroke="#22304F" width="30" x="1" y="1"/>
+                <rect fill="none" height="19" rx="4" stroke="#3B82F6" stroke-dasharray="3 2" stroke-width="2" width="19"
+                      x="6.5"
+                      y="6.5"/>
+                <circle cx="16" cy="16" fill="#F5A524" r="3.4"/>
+            </svg>
+            Arkimede
+        </a>
+        <nav class="nav-links">
+            <a href="#demo">Demo</a>
+      <a href="#platform">Platform</a>
+            <a href="#security">Security</a>
+            <a href="https://github.com/arkimedehq/arkimede#readme">Docs</a>
+            <a class="btn btn-primary" href="https://github.com/arkimedehq/arkimede">
+                <svg aria-hidden="true" fill="currentColor" height="16" viewBox="0 0 16 16" width="16">
+                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+                </svg>
+                Star on GitHub
+            </a>
+        </nav>
+    </div>
+</header>
+
+<main id="top">
+
+    <!-- ── Hero: the thesis is the perimeter ───────────────────────────── -->
+    <div class="hero wrap">
+        <div class="hero-grid">
+            <div>
+                <span class="label eyebrow">Self-hosted · Multi-tenant · AGPL-3.0</span>
+                <h1>Your AI runs<br/>inside <span class="accent">your perimeter</span>.</h1>
+                <p class="sub">Agents, deterministic workflows and sandboxed custom code — for a whole organization, on
+                    infrastructure you control. Nothing leaves unless you say so.</p>
+
+                <div class="cmd">
+                    <div class="lines" id="install-cmd">
+                        <div class="line">
+                            <span aria-hidden="true" class="dollar">$</span>
+                            <code>git clone https://github.com/arkimedehq/arkimede</code>
+                        </div>
+                        <div class="line">
+                            <span aria-hidden="true" class="dollar">$</span>
+                            <code>cd arkimede &amp;&amp; ./scripts/install.sh</code>
+                        </div>
+                    </div>
+                    <button class="copy" data-copy="#install-cmd" type="button">copy</button>
+                </div>
+
+                <div class="hero-cta">
+                    <a class="btn btn-primary" href="https://github.com/arkimedehq/arkimede">Get started</a>
+                    <a class="btn btn-ghost" href="#platform">See what it does</a>
+                </div>
+
+                <div class="hero-meta">
+                    <span>LLM: <b>bring your own</b></span>
+                    <span>Install: <b>one command</b></span>
+                    <span>License: <b>AGPL-3.0</b></span>
+                </div>
+            </div>
+
+            <!-- Signature element: the boundary, and the one thing that crosses it -->
+            <div>
+                <svg aria-labelledby="perimeter-title perimeter-desc" class="perimeter" role="img"
+                     viewBox="0 0 480 310">
+                    <title id="perimeter-title">The Arkimede perimeter</title>
+                    <desc id="perimeter-desc">Agents, flows, skills, your data and the vector store all run inside your
+                        infrastructure. The only traffic that leaves is the LLM call, and it crosses the boundary
+                        through a declared egress gate.
+                    </desc>
+
+                    <!-- outside the boundary -->
+                    <text class="p-outside" x="338" y="30">OUTSIDE</text>
+                    <rect class="p-node" height="32" rx="6" width="134" x="338" y="42"/>
+                    <text class="p-node-label" x="351" y="63">LLM API (optional)</text>
+
+                    <!-- the boundary itself -->
+                    <rect class="p-boundary p-dash" height="200" rx="12" width="292" x="8" y="84"/>
+                    <text class="p-cap" x="20" y="302">YOUR INFRASTRUCTURE</text>
+
+                    <!-- the one route out, and the gate it must pass -->
+                    <path class="p-wire" d="M89 100 L89 58 L338 58" opacity="0.45"/>
+                    <g class="gate-ring">
+                        <circle class="p-gate" cx="89" cy="84" r="10"/>
+                        <path class="p-gate" d="M84 84 h10 M89 79 v10"/>
+                    </g>
+                    <text class="p-cap" fill="#F5A524" x="106" y="76">EGRESS GATE · ALLOWLIST</text>
+                    <circle class="packet" fill="#F5A524" r="3.5"/>
+
+                    <!-- inside nodes -->
+                    <rect class="p-node" height="32" rx="6" width="118" x="30" y="100"/>
+                    <text class="p-node-label" x="43" y="121">Agent</text>
+
+                    <rect class="p-node" height="32" rx="6" width="118" x="162" y="100"/>
+                    <text class="p-node-label" x="175" y="121">Flows</text>
+
+                    <rect class="p-node" height="32" rx="6" width="118" x="30" y="146"/>
+                    <text class="p-node-label" x="43" y="167">Skills</text>
+
+                    <rect class="p-node" height="32" rx="6" width="118" x="162" y="146"/>
+                    <text class="p-node-label" x="175" y="167">RAG</text>
+
+                    <rect class="p-node" height="32" rx="6" width="250" x="30" y="192"/>
+                    <text class="p-node-label" x="43" y="213">Your SQL · files · shares</text>
+
+                    <rect class="p-node" height="32" rx="6" width="250" x="30" y="238"/>
+                    <text class="p-node-label" x="43" y="259">Org · Teams · Users</text>
+
+                    <!-- wires -->
+                    <path class="p-wire" d="M148 116 h14"/>
+                    <path class="p-wire" d="M89 132 v14"/>
+                    <path class="p-wire" d="M221 132 v14"/>
+                    <path class="p-wire" d="M89 178 v14"/>
+                    <path class="p-wire" d="M221 178 v14"/>
+                    <path class="p-wire" d="M155 224 v14"/>
+                </svg>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── The demo: the product doing the thing the page claims ────────── -->
+    <section id="demo">
+        <div class="wrap">
+            <div class="sec-head reveal">
+                <span class="label">45 seconds, no cuts</span>
+                <h2>Watch it improvise, then watch it repeat.</h2>
+                <p>The agent is asked which regions lost revenue. It picks the SQL tool, queries the warehouse, and
+                    answers. Then the same work — pull the numbers, write the digest, post it to the team — runs as a
+                    deterministic flow on a cron.</p>
+            </div>
+            <figure class="demo reveal">
+                <video autoplay loop muted playsinline preload="metadata" width="1440" height="900"
+                       aria-label="Arkimede: an agent answers a revenue question using a SQL tool, then the same work runs as a scheduled flow.">
+                    <source src="images/demo.mp4" type="video/mp4"/>
+                </video>
+            </figure>
+        </div>
+    </section>
+
+    <!-- ── Lanes: the positioning argument ─────────────────────────────── -->
+    <section id="platform">
+        <div class="wrap">
+            <div class="sec-head reveal">
+                <span class="label">Positioning</span>
+                <h2>Most tools pick one lane. An organization needs all three.</h2>
+                <p>You end up running a chat UI, plus an agent builder, plus a workflow automator — three deployments,
+                    three permission models, three places your data can leak. Arkimede is the one place that does all
+                    three, under a single multi-tenant governance model.</p>
+            </div>
+
+            <div class="lanes reveal">
+                <div class="lane">
+                    <span class="who">The chat lane</span>
+                    <h3>A chat UI</h3>
+                    <p>Great for talking to a model. It won't run your Tuesday-morning report on a cron.</p>
+                </div>
+                <div class="lane">
+                    <span class="who">The builder lane</span>
+                    <h3>An agent builder</h3>
+                    <p>Great for prototyping an agent. Its governance usually stops at one workspace.</p>
+                </div>
+                <div class="lane">
+                    <span class="who">The automation lane</span>
+                    <h3>A workflow automator</h3>
+                    <p>Great at deterministic pipelines. It doesn't improvise when the task is fuzzy.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── Pillars ─────────────────────────────────────────────────────── -->
+    <section>
+        <div class="wrap">
+            <div class="sec-head reveal">
+                <span class="label">What you get</span>
+                <h2>Improvisation and repeatability, in the same system.</h2>
+                <p>The four subsystems interconnect: a flow is a tool an agent can call, a flow can invoke an agent or a
+                    whole team, and an automation runs any of it headless on a schedule.</p>
+            </div>
+
+            <div class="pillars reveal">
+                <div class="pillar">
+                    <span class="tag">Agent</span>
+                    <h3>Stateful agents that pick their own tools</h3>
+                    <p>A LangGraph ReAct loop with your custom tools, MCP servers and RAG, on a four-layer system
+                        prompt. It decides what to call, calls it, and answers with the result.</p>
+                </div>
+                <div class="pillar">
+                    <span class="tag">Flows</span>
+                    <h3>Deterministic DAG workflows</h3>
+                    <p>A visual canvas with 12 node types — tool, LLM, condition, HTTP, skill, transform, sub-flow,
+                        agent, team, loop, join, chat. Trigger them manually, on a cron, by webhook, or from chat.</p>
+                </div>
+                <div class="pillar">
+                    <span class="tag">Multi-agent</span>
+                    <h3>Agents composed into teams</h3>
+                    <p>Supervisor, sequential and parallel topologies. Any team can be exposed as a single tool, so
+                        delegation nests as deep as the work needs.</p>
+                </div>
+                <div class="pillar">
+                    <span class="tag">Skills</span>
+                    <h3>Executable code, safely</h3>
+                    <p>Install Python/Node/JS packages that run as real code in a hardened per-job container — cap-drop,
+                        read-only rootfs, non-root, egress allowlist, optional gVisor.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── Screenshots ─────────────────────────────────────────────────── -->
+    <section>
+        <div class="wrap">
+            <div class="sec-head reveal">
+                <span class="label">The product</span>
+                <h2>It's a product, not a demo.</h2>
+            </div>
+            <div class="shots reveal">
+                <figure>
+                    <img alt="The Arkimede chat: an agent picks a tool, runs it, and answers with the result."
+                         height="1800"
+                         loading="lazy" src="images/chat.png" width="2880"/>
+                    <figcaption><b>Chat</b> — the agent picks the right tool, runs it, and answers with the result.
+                    </figcaption>
+                </figure>
+                <figure>
+                    <img alt="The flow canvas: a DAG of HTTP, LLM, condition and tool nodes." height="1800"
+                         loading="lazy" src="images/flows.png" width="2880"/>
+                    <figcaption><b>Flows</b> — deterministic DAG workflows, on a cron or as a tool.</figcaption>
+                </figure>
+                <figure>
+                    <img alt="The skills marketplace, listing installable executable packages."
+                         height="1800" loading="lazy"
+                         src="images/skills-marketplace.png" width="2880"/>
+                    <figcaption><b>Skills</b> — install executable packages; they run in a sandbox.</figcaption>
+                </figure>
+                <figure>
+                    <img alt="Agent teams composed with a supervisor topology." height="1800"
+                         loading="lazy" src="images/agent-teams.png" width="2880"/>
+                    <figcaption><b>Agent teams</b> — compose agents with a topology, expose the team as a tool.
+                    </figcaption>
+                </figure>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── Security ────────────────────────────────────────────────────── -->
+    <section id="security">
+        <div class="wrap">
+            <div class="sec-head reveal">
+                <span class="label">The capability model</span>
+                <h2>Every power is declared, approved, and bounded by identity.</h2>
+                <p>Untrusted third-party code runs here. So nothing is implicit and global: network, filesystem, SQL
+                    operations and local MCP processes are each a capability something has to be granted.</p>
+            </div>
+            <ul class="caps reveal">
+                <li><span class="k">net</span><span><b>Egress allowlist.</b> A skill reaches the network only through a proxy that knows which hosts it declared.</span>
+                </li>
+                <li><span class="k">exe</span><span><b>Per-job containers.</b> cap-drop, read-only rootfs, non-root, optional gVisor — one container per run.</span>
+                </li>
+                <li><span class="k">fs</span><span><b>Per-tenant filesystem.</b> Access-aware paths; a tenant cannot read across the boundary.</span>
+                </li>
+                <li><span class="k">key</span><span><b>AES-256-GCM at rest.</b> Authenticated encryption for secrets, with fail-fast on a missing key.</span>
+                </li>
+                <li><span class="k">ssrf</span><span><b>SSRF guard.</b> Cloud metadata, link-local and private ranges are blocked on every outbound integration.</span>
+                </li>
+                <li><span class="k">log</span><span><b>Structured audit.</b> Auth, admin, executions, files, SQL and MCP — each with a runs-as identity.</span>
+                </li>
+            </ul>
+        </div>
+    </section>
+
+    <!-- ── Closer ──────────────────────────────────────────────────────── -->
+    <section class="closer">
+        <div class="wrap reveal">
+            <h2>Run it this afternoon.</h2>
+            <p>Docker and Docker Compose are the only prerequisites. The guided installer generates every secret, asks
+                you to pick an isolation level, and brings the stack up. The first user to register becomes the
+                admin.</p>
+            <div class="cmd">
+                <div class="lines" id="install-cmd-2">
+                    <div class="line">
+                        <span aria-hidden="true" class="dollar">$</span>
+                        <code>git clone https://github.com/arkimedehq/arkimede</code>
+                    </div>
+                    <div class="line">
+                        <span aria-hidden="true" class="dollar">$</span>
+                        <code>cd arkimede &amp;&amp; ./scripts/install.sh</code>
+                    </div>
+                </div>
+                <button class="copy" data-copy="#install-cmd-2" type="button">copy</button>
+            </div>
+            <div class="hero-cta">
+                <a class="btn btn-primary" href="https://github.com/arkimedehq/arkimede">Star on GitHub</a>
+                <a class="btn btn-ghost" href="https://github.com/arkimedehq/arkimede/blob/main/docs/GUIDE.md">Read the
+                    guide</a>
+            </div>
+        </div>
+    </section>
+</main>
+
+<footer>
+    <div class="wrap foot">
+        <p>Arkimede — free and open source under AGPL-3.0. Self-host it, including as a service.</p>
+        <nav>
+            <a href="https://github.com/arkimedehq/arkimede">GitHub</a>
+            <a href="https://github.com/arkimedehq/arkimede/blob/main/docs/PROJECT.md">Architecture</a>
+            <a href="https://github.com/arkimedehq/arkimede/blob/main/docs/SKILLS.md">Build a skill</a>
+            <a href="https://github.com/arkimedehq/arkimede/blob/main/LICENSE">License</a>
+        </nav>
+    </div>
+</footer>
+
+<script>
+    // Copy the install command.
+    document.querySelectorAll('.copy').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+            // The command is shown on two lines; copy it back as one runnable line.
+            const text = [...document.querySelectorAll(`${btn.dataset.copy} code`)]
+                .map((c) => c.textContent.trim())
+                .join(' && ');
+            try {
+                await navigator.clipboard.writeText(text);
+                const prev = btn.textContent;
+                btn.textContent = 'copied';
+                setTimeout(() => {
+                    btn.textContent = prev;
+                }, 1600);
+            } catch {
+                btn.textContent = 'press ⌘C';
+            }
+        });
+    });
+
+    // Reveal on scroll.
+    const io = new IntersectionObserver((entries) => {
+        entries.forEach((e) => {
+            if (e.isIntersecting) {
+                e.target.classList.add('in');
+                io.unobserve(e.target);
+            }
+        });
+    }, {rootMargin: '0px 0px -8% 0px'});
+    document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
+</script>
+
+</body>
+</html>

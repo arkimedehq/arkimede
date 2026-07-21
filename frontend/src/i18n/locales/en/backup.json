@@ -1,0 +1,18 @@
+{
+  "title": "Backup",
+  "description": "Create a downloadable snapshot of the platform: database, uploaded files, installed skills and (when available) the vector store. Backups are stored on the server and can be downloaded or deleted here.",
+  "note": "Redis (queue/cache) is transient and is not included. Restoring a backup is a command-line/ops task.",
+  "create": "Create backup",
+  "creating": "Creating…",
+  "createError": "Backup failed",
+  "empty": "No backups yet.",
+  "loading": "Loading…",
+  "download": "Download",
+  "delete": "Delete",
+  "deleteConfirm": "Delete this backup? This cannot be undone.",
+  "columns": {
+    "name": "Backup",
+    "size": "Size",
+    "date": "Created"
+  }
+}

@@ -1,0 +1,71 @@
+name: Release Bridge
+
+# Builds and publishes the Electron desktop "bridge" (macOS / Windows / Linux) as
+# assets of a GitHub Release. The binaries are NOT committed (bridge/dist-electron
+# is gitignored) — this workflow is the distribution channel the UI links to.
+#
+# Trigger: push a tag `bridge-v<version>` (matching bridge/package.json version), or
+# run manually from the Actions tab. Each OS job builds its installers WITHOUT
+# publishing (electron-builder --publish never), then a dedicated step uploads them
+# to a GitHub Release tagged with the SAME `bridge-v<version>` tag that triggered the
+# run — so the release tag keeps the `bridge-` prefix (unambiguous vs the app) and
+# attaches to the tagged commit. The bridge has no auto-updater, so the tag name is
+# free; the UI links to /releases/latest.
+
+on:
+  push:
+    tags:
+      - 'bridge-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write # the publish step creates/updates the GitHub Release
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: bridge
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: bridge/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      # Build the current OS's targets (mac→dmg x64+arm64, win→nsis exe, linux→AppImage)
+      # WITHOUT publishing — the release is created by the next step so it can carry the
+      # `bridge-v<version>` tag (electron-builder would otherwise force `v<version>`).
+      - name: Build (no publish)
+        env:
+          # No Apple Developer ID in CI: stop electron-builder from probing the
+          # keychain for a signing identity. macOS is ad-hoc signed via the
+          # afterPack hook (bridge/build/afterPack.cjs); ignored on win/linux.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npm run build:electron && npx electron-builder --publish never
+
+      # Upload this OS's installers to the GitHub Release tagged exactly as the pushed
+      # tag (bridge-v<version>). Creates the release on the first job, appends assets on
+      # the others. `uses:` steps ignore working-directory → paths are repo-root-relative.
+      - name: Publish to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          fail_on_unmatched_files: false
+          files: |
+            bridge/dist-electron/*.dmg
+            bridge/dist-electron/*.exe
+            bridge/dist-electron/*.AppImage
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,45 @@
+{
+  "header": {
+    "subtitle": "Raggruppa gli utenti e condividi risorse con scope «team»."
+  },
+  "actions": {
+    "newTeam": "Nuovo team",
+    "manageMembers": "gestisci",
+    "addMember": "Aggiungi",
+    "makeOwner": "Rendi owner",
+    "makeMember": "Rendi membro",
+    "removeMember": "Rimuovi dal team",
+    "deleteTeam": "Elimina team"
+  },
+  "empty": {
+    "noTeams": "Nessun team. Creane uno per iniziare a condividere risorse a livello di team.",
+    "noMembers": "Nessun membro.",
+    "noUsers": "Nessun utente disponibile."
+  },
+  "member_one": "{{count}} membro",
+  "member_other": "{{count}} membri",
+  "modal": {
+    "createTitle": "Nuovo team",
+    "membersTitle": "Membri — {{name}}",
+    "form": {
+      "nameLabel": "Nome",
+      "descriptionLabel": "Descrizione",
+      "colorLabel": "Colore"
+    },
+    "sections": {
+      "currentMembers": "Membri ({{count}})",
+      "addMembers": "Aggiungi membri"
+    },
+    "search": {
+      "placeholder": "Cerca utente per nome o email…"
+    },
+    "confirm": {
+      "deleteTeam": "Eliminare il team \"{{name}}\"?"
+    }
+  },
+  "errors": {
+    "deleteTeam": "Eliminazione non riuscita",
+    "createTeam": "Creazione non riuscita",
+    "operation": "Operazione non riuscita"
+  }
+}

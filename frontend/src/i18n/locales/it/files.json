@@ -1,0 +1,23 @@
+{
+  "panel": {
+    "title": "File in questa chat",
+    "empty": "Nessun file allegato a questa chat",
+    "emptyHint": "Usa 📎 nell'input per allegare file",
+    "indexed": "indicizzato",
+    "ingestTitle": "Indicizza nel RAG",
+    "scopeUniversal": "🌐 Universale (azienda)",
+    "scopeProject": "📁 Progetto",
+    "scopeProjectHint": " (apri da un progetto)",
+    "scopePersonal": "🔒 Personale",
+    "loadingCollections": "Caricamento collection…",
+    "defaultCollection": "— Collection default —",
+    "indexing": "Indicizzazione…",
+    "index": "Indicizza",
+    "reindex": "Reindicizza",
+    "defaultHintPre": "Lascia su",
+    "defaultHintEm": "Collection default",
+    "defaultHintPost": "per usare quella configurata dall'admin.",
+    "download": "Scarica",
+    "delete": "Elimina"
+  }
+}

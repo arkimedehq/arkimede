@@ -1,0 +1,45 @@
+{
+  "header": {
+    "subtitle": "Group users and share resources with team scope."
+  },
+  "actions": {
+    "newTeam": "New team",
+    "manageMembers": "manage",
+    "addMember": "Add",
+    "makeOwner": "Make owner",
+    "makeMember": "Make member",
+    "removeMember": "Remove from team",
+    "deleteTeam": "Delete team"
+  },
+  "empty": {
+    "noTeams": "No teams. Create one to start sharing resources at team level.",
+    "noMembers": "No members.",
+    "noUsers": "No users available."
+  },
+  "member_one": "{{count}} member",
+  "member_other": "{{count}} members",
+  "modal": {
+    "createTitle": "New team",
+    "membersTitle": "Members — {{name}}",
+    "form": {
+      "nameLabel": "Name",
+      "descriptionLabel": "Description",
+      "colorLabel": "Color"
+    },
+    "sections": {
+      "currentMembers": "Members ({{count}})",
+      "addMembers": "Add members"
+    },
+    "search": {
+      "placeholder": "Search user by name or email…"
+    },
+    "confirm": {
+      "deleteTeam": "Delete team \"{{name}}\"?"
+    }
+  },
+  "errors": {
+    "deleteTeam": "Deletion failed",
+    "createTeam": "Creation failed",
+    "operation": "Operation failed"
+  }
+}

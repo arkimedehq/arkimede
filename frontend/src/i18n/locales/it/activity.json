@@ -1,0 +1,44 @@
+{
+  "title": "Attività in corso",
+  "subtitle": "Tutto ciò che è in esecuzione o schedulato per te. Aggiornamento automatico ogni 10s.",
+  "loadError": "Impossibile caricare le attività.",
+
+  "counts": {
+    "daemons": "Daemon attivi",
+    "automationsActive": "Automazioni attive",
+    "automationsPending_one": "{{count}} in attesa",
+    "automationsPending_other": "{{count}} in attesa",
+    "scheduledFlows": "Flow schedulati",
+    "recentRuns": "Run recenti"
+  },
+
+  "daemon": {
+    "blockTitle": "Daemon skill",
+    "empty": "Nessun daemon in esecuzione.",
+    "startedPrefix": "avvio",
+    "lastEventPrefix": "ultimo evt"
+  },
+
+  "automation": {
+    "blockTitle": "Automazioni",
+    "empty": "Nessuna automazione programmata.",
+    "untitled": "(senza titolo)",
+    "badgePending": "in attesa",
+    "badgePaused": "in pausa",
+    "oncePrefix": "una volta",
+    "lastRunPrefix": "ultimo",
+    "tokSuffix": "tok"
+  },
+
+  "scheduledFlow": {
+    "blockTitle": "Flow schedulati",
+    "empty": "Nessun flow con trigger cron/scheduled attivo.",
+    "oncePrefix": "una volta"
+  },
+
+  "recentRun": {
+    "blockTitle": "Run recenti",
+    "empty": "Nessun run registrato.",
+    "deletedFlow": "(flow eliminato)"
+  }
+}

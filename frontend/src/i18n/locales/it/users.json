@@ -1,0 +1,68 @@
+{
+  "header": {
+    "title": "Utenti",
+    "subtitle": "Gestisci gli account dell'organizzazione: ruoli, stato e accessi.",
+    "newUser": "Nuovo utente"
+  },
+  "filter": {
+    "searchPlaceholder": "Cerca per nome o email…",
+    "allRoles": "Tutti i ruoli",
+    "allStatuses": "Tutti gli stati",
+    "roleUser": "Utente",
+    "roleAdmin": "Admin",
+    "statusActive": "Attivi",
+    "statusDisabled": "Disabilitati"
+  },
+  "table": {
+    "colName": "Nome",
+    "colEmail": "Email",
+    "colRole": "Ruolo",
+    "colStatus": "Stato",
+    "colActions": "Azioni",
+    "self": "(tu)",
+    "empty": "Nessun utente trovato."
+  },
+  "actions": {
+    "edit": "Modifica",
+    "makeAdmin": "Rendi admin",
+    "makeUser": "Rendi utente",
+    "disable": "Disabilita",
+    "enable": "Attiva",
+    "resetPassword": "Reset password",
+    "delete": "Elimina"
+  },
+  "confirm": {
+    "deleteUser": "Eliminare definitivamente \"{{name}}\"?"
+  },
+  "pagination": {
+    "total_one": "{{count}} utente",
+    "total_other": "{{count}} utenti"
+  },
+  "errors": {
+    "operationFailed": "Operazione non riuscita",
+    "createFailed": "Creazione non riuscita",
+    "updateFailed": "Aggiornamento non riuscito",
+    "resetFailed": "Reset non riuscito"
+  },
+  "modal": {
+    "createTitle": "Nuovo utente",
+    "editTitle": "Modifica {{name}}",
+    "resetTitle": "Reset password — {{name}}",
+    "fieldName": "Nome",
+    "fieldEmail": "Email",
+    "fieldPassword": "Password (min 6)",
+    "fieldNewPassword": "Nuova password (min 6)",
+    "fieldRole": "Ruolo",
+    "passwordUpdated": "Password aggiornata. Comunicala all'utente in modo sicuro.",
+    "close": "Chiudi",
+    "resetConfirmLabel": "Reimposta"
+  },
+  "role": {
+    "user": "utente",
+    "admin": "admin"
+  },
+  "status": {
+    "active": "attivo",
+    "disabled": "disabilitato"
+  }
+}

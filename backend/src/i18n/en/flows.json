@@ -1,0 +1,11 @@
+{
+  "notFound": "Flow not found.",
+  "webhookNotFound": "Webhook not found.",
+  "disabled": "Flow is disabled.",
+  "nodeNotFound": "Node not found in this flow.",
+  "orgAdminOnly": "Only admins can manage org flows.",
+  "teamIdMissing": "teamId is required for team scope.",
+  "teamAdminOnly": "Only admins or team owners can manage team flows.",
+  "ownerOnly": "This operation is reserved for the flow owner.",
+  "accessDenied": "You do not have access to this flow."
+}

@@ -1,0 +1,129 @@
+{
+  "section": {
+    "title": "Sorgenti Dati",
+    "description": "Collega sorgenti dati all'agente AI: database SQL, MongoDB, Redis e cartelle condivise (SMB/SFTP/WebDAV). Le connection string vengono cifrate e non sono mai esposte in chiaro. Ogni sorgente è interrogabile tramite il tool dedicato.",
+    "newButton": "Nuova sorgente"
+  },
+  "stats": {
+    "total_one": "{{count}} sorgente totale",
+    "total_other": "{{count}} sorgenti totali",
+    "personal_one": "{{count}} personale",
+    "personal_other": "{{count}} personali",
+    "shared": "team/org"
+  },
+  "list": {
+    "loading": "Caricamento…",
+    "empty": {
+      "title": "Nessuna sorgente dati",
+      "hint": "Collega un database SQL per permettere all'agente di interrogarlo",
+      "add": "Aggiungi sorgente"
+    },
+    "connectionEncrypted": "Connection string cifrata"
+  },
+  "security": {
+    "title": "Sicurezza & privacy",
+    "encryption": "Le connection string sono cifrate con AES-256 e non vengono mai restituite in chiaro.",
+    "queryOnDemand": "Il DB viene interrogato solo su richiesta esplicita dell'agente — mai in background.",
+    "sharedAccess": "Le sorgenti condivise sono accessibili a tutti gli utenti ma modificabili solo dal proprietario."
+  },
+  "card": {
+    "titleEdit": "Modifica",
+    "titleView": "Visualizza",
+    "titleDelete": "Elimina",
+    "confirmDelete": "Elimina",
+    "cancelDelete": "No"
+  },
+  "modal": {
+    "titleNew": "Nuova Sorgente Dati",
+    "titleEdit": "Modifica: {{name}}",
+    "sectionConnection": "Connessione",
+    "sectionSchema": "Schema",
+    "closeSaved": "Chiudi",
+    "unsavedSchemaConfirm": "Hai modifiche allo schema non salvate (tabelle/colonne nascoste, commenti, relazioni). Chiudendo andranno perse. Vuoi chiudere lo stesso?",
+    "saving": "Salvataggio…",
+    "saveChanges": "Salva modifiche",
+    "createSource": "Crea sorgente",
+    "saved": "Salvato"
+  },
+  "form": {
+    "nameLabel": "Nome",
+    "nameHint": "— nome visualizzato, es. \"Gestionale Aziendale\"",
+    "namePlaceholder": "es. Gestionale Aziendale",
+    "descriptionLabel": "Descrizione",
+    "descriptionHint": "— cosa contiene questo database",
+    "descriptionPlaceholder": "Es: \"Database gestionale aziendale. Contiene clienti, ordini, articoli, fornitori e movimenti di magazzino.\"",
+    "engineLabel": "Tipo di sorgente",
+    "connectionStringLabel": "Connection String",
+    "connectionStringHint": "— cifrata, non recuperabile dopo il salvataggio",
+    "connectionStringSavedPlaceholder": "••••••••• (lascia vuoto per non modificare)",
+    "connectionStringNewPlaceholder": "Connection string nel formato dell'engine scelto",
+    "connectionStringSavedNote": "La connection string è già salvata. Inserisci un nuovo valore solo per aggiornarla.",
+    "formatLabel": "Formato:",
+    "testConnection": "Test connessione",
+    "testOk": "Connessione riuscita ({{ms}} ms)",
+    "testFailed": "Connessione fallita",
+    "schemaHintsLabel": "Note / istruzioni sul database",
+    "schemaHintsHint": "— testo libero iniettato prima di costruire la query",
+    "schemaHintsPlaceholder": "Regole di business, convenzioni o istruzioni libere. Es:\n- FLAGSTORICO = 1 → record storicizzato (escludi con WHERE FLAGSTORICO = 0)\n- filtra sempre i clienti con ATTIVO = 1\n- gli importi sono in centesimi",
+    "schemaHintsNote": "Solo note/istruzioni in testo libero. Lo schema (tabelle, colonne, relazioni) si gestisce qui sotto con Introspetti.",
+    "prefetchRelationsLabel": "Rileva relazioni FK automaticamente",
+    "prefetchRelationsHint": "Legge le FOREIGN KEY da INFORMATION_SCHEMA e le passa al LLM. Richiede che le FK siano dichiarate nel DB.",
+    "enrichedSchemaLabel": "Schema arricchito",
+    "enrichedSchemaHint": "— tabelle, commenti, relazioni e tabelle negate",
+    "enrichedSchemaSaveFirst": "Salva la sorgente dati per introspezionare lo schema e generarlo con l'AI.",
+    "visibilityLabel": "Visibilità",
+    "securityNote": "La connection string viene cifrata con AES-256 prima del salvataggio e non è recuperabile in chiaro tramite l'interfaccia."
+  },
+  "errors": {
+    "createFailed": "Errore durante la creazione",
+    "updateFailed": "Errore durante l'aggiornamento",
+    "operationFailed": "Operazione fallita",
+    "deleteFailed": "Errore durante l'eliminazione"
+  },
+  "manifest": {
+    "noSchema": "Nessuno schema generato.",
+    "introspectPrompt": "Introspetti",
+    "generateAIPrompt": "Genera con AI",
+    "noSchemaHint": "per leggere le tabelle dal database, poi",
+    "noSchemaHint2": "per commenti e relazioni. Tutto resta editabile qui sotto.",
+    "stats": "{{tables}} tabelle · {{relations}} relazioni · {{dialect}} · generato {{date}}",
+    "statsDoc": "{{collections}} collezioni · MongoDB · generato {{date}}",
+    "statsKeyspace": "{{patterns}} pattern · Redis · generato {{date}}",
+    "collectionsLabel": "Collezioni",
+    "collectionCommentPlaceholder": "commento collezione…",
+    "fieldCommentPlaceholder": "commento campo…",
+    "patternsLabel": "Pattern di chiavi",
+    "patternCommentPlaceholder": "commento pattern…",
+    "relationsLabel": "Relazioni implicite",
+    "addRelation": "aggiungi",
+    "noRelations": "Nessuna relazione.",
+    "tablesLabel": "Tabelle",
+    "denyAllow": "Negata — clic per consentire",
+    "denyBlock": "Nega: nascondi all'agente e blocca le query",
+    "denyColumnBlock": "Nega il campo: nascondilo all'agente e bloccalo nelle query",
+    "clearButton": "Cancella introspezione",
+    "clearTooltip": "Svuota lo schema curato: i tool SQL torneranno a leggere lo schema live dal DB",
+    "clearConfirm": "Cancellare tutta l'introspezione di questa sorgente? Lo schema curato (commenti, relazioni, campi nascosti) verrà eliminato e i tool SQL torneranno al live.",
+    "tableCommentPlaceholder": "commento tabella…",
+    "columnCommentPlaceholder": "commento colonna…",
+    "introspectButton": "Introspetti",
+    "generateAIButton": "Genera con AI",
+    "modelDefault": "Modello: summarizer/default",
+    "modelTooltip": "Modello usato per la generazione di commenti e relazioni",
+    "saveSchema": "Salva schema",
+    "schemaSaved": "Salvato",
+    "modelSuffix_summarizer": " (summarizer)",
+    "modelSuffix_default": " (default)"
+  },
+  "browse": {
+    "button": "Sfoglia",
+    "title": "Scegli una cartella",
+    "up": "Su",
+    "loading": "Caricamento…",
+    "empty": "Cartella vuota",
+    "current": "Cartella selezionata:",
+    "cancel": "Annulla",
+    "use": "Usa questa cartella",
+    "useNeedsConn": "Inserisci la connection string per usare questa cartella"
+  }
+}

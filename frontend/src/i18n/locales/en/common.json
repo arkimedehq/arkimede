@@ -1,0 +1,79 @@
+{
+  "actions": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "create": "Create",
+    "close": "Close",
+    "confirm": "Confirm",
+    "add": "Add",
+    "remove": "Remove",
+    "search": "Search",
+    "back": "Back",
+    "next": "Next",
+    "retry": "Retry",
+    "loading": "Loading…",
+    "no": "No",
+    "deleteConfirm": "Delete?"
+  },
+  "scope": {
+    "personal": "personal",
+    "team": "team",
+    "org": "org",
+    "visibility": "Visibility",
+    "personalLabel": "Personal",
+    "teamLabel": "Team",
+    "orgLabel": "Org",
+    "descPersonal": "Visible and usable only by you.",
+    "descTeam": "Visible to members of the selected team.",
+    "descOrg": "Visible to the whole organization (managed by admins only).",
+    "chooseTeam": "Choose a team…",
+    "noTeams": "You don't belong to any team. Ask an admin to add you or create one."
+  },
+  "dashboard": {
+    "greeting": "Hi, {{name}} 👋",
+    "intro": "I'm your AI assistant. I can query databases, search documents and help you with your work.",
+    "card1Title": "Data analysis",
+    "card1Desc": "Query your data in natural language",
+    "card2Title": "Documents",
+    "card2Desc": "Search across uploaded documents",
+    "card3Title": "Projects",
+    "card3Desc": "Organize work and generate output",
+    "startChat": "Start a new chat"
+  },
+  "language": {
+    "label": "Language",
+    "en": "English",
+    "it": "Italiano",
+    "hint": "Language of the interface and assistant replies."
+  },
+  "state": {
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "empty": "Nothing here yet"
+  },
+  "nav": {
+    "newChat": "New chat",
+    "projects": "Projects",
+    "recentChats": "Recent chats",
+    "settings": "Settings",
+    "logout": "Log out",
+    "noChats": "No chats",
+    "unread": "Unread",
+    "chatOf": "{{name}}'s chat"
+  },
+  "theme": {
+    "light": "Light",
+    "auto": "Auto",
+    "dark": "Dark"
+  },
+  "header": {
+    "rename": "Rename chat",
+    "dblToRename": "Double-click to rename",
+    "stop": "Stop generation",
+    "stopShort": "Stop",
+    "filePanel": "File panel",
+    "filesLabel": "Files"
+  }
+}

@@ -1,0 +1,109 @@
+{
+  "title": "Audit",
+  "refresh": "Refresh",
+  "description": "Security events across the app (auth, users & teams, data sources, tools, skills, MCP, flows, files…). The tamper-evident copy is on CloudWatch/S3; this is the recent DB view.",
+  "filters": {
+    "all": "All"
+  },
+  "empty": "No events.",
+  "table": {
+    "when": "When",
+    "action": "Action",
+    "outcome": "Outcome",
+    "resource": "Resource",
+    "actor": "Actor",
+    "context": "Context"
+  },
+  "systemActor": "system",
+  "outcomes": {
+    "ok": "OK",
+    "denied": "Denied",
+    "error": "Error"
+  },
+  "actions": {
+    "auth": {
+      "login": "Login",
+      "logout": "Logout",
+      "register": "Sign-up",
+      "password_change": "Password change"
+    },
+    "user": {
+      "create": "User created",
+      "update": "User updated",
+      "role_change": "User role changed",
+      "status_change": "User status changed",
+      "password_reset": "User password reset",
+      "delete": "User deleted"
+    },
+    "team": {
+      "create": "Team created",
+      "update": "Team updated",
+      "delete": "Team deleted",
+      "member_add": "Team member added",
+      "member_remove": "Team member removed",
+      "member_role_change": "Team member role changed"
+    },
+    "datasource": {
+      "create": "Data source created",
+      "update": "Data source updated",
+      "delete": "Data source deleted",
+      "test": "Data source connection test"
+    },
+    "customtool": {
+      "create": "Custom tool created",
+      "update": "Custom tool updated",
+      "delete": "Custom tool deleted"
+    },
+    "llmconfig": {
+      "create": "LLM config created",
+      "update": "LLM config updated",
+      "delete": "LLM config deleted"
+    },
+    "appconfig": {
+      "update": "Global config updated"
+    },
+    "skill": {
+      "create": "Skill created",
+      "delete": "Skill deleted",
+      "enable_toggle": "Skill enabled/disabled",
+      "publish": "Skill published",
+      "review": "Skill reviewed",
+      "registry_install": "Skill installed from registry",
+      "execute": "Skill executed"
+    },
+    "mcp": {
+      "create": "MCP server created",
+      "update": "MCP server updated",
+      "delete": "MCP server deleted"
+    },
+    "flow": {
+      "create": "Flow created",
+      "delete": "Flow deleted",
+      "run": "Flow run"
+    },
+    "project": {
+      "create": "Project created",
+      "delete": "Project deleted",
+      "share": "Project shared with team"
+    },
+    "file": {
+      "upload": "File uploaded",
+      "delete": "File deleted",
+      "scope_change": "File scope changed"
+    },
+    "agent": {
+      "create": "Agent created",
+      "delete": "Agent deleted"
+    },
+    "agentteam": {
+      "create": "Agent team created",
+      "delete": "Agent team deleted"
+    },
+    "tool": {
+      "execute": "Tool executed"
+    },
+    "memory": {
+      "evolved": "Memory evolved (links/enrichments)"
+    }
+  }
+}

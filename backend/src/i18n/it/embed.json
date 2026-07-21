@@ -1,0 +1,4 @@
+{
+  "projectIdRequired": "projectId obbligatorio per scope=\"project\".",
+  "projectReadOnly": "Permesso di sola lettura su questo progetto."
+}

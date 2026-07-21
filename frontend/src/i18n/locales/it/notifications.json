@@ -1,0 +1,44 @@
+{
+  "panel": {
+    "title": "Notifiche",
+    "markAllRead": "Segna tutte come lette",
+    "clearAll": "Cancella tutte",
+    "empty": "Nessuna notifica",
+    "emptyHint": "Le notifiche dei daemon appariranno qui",
+    "footer_one": "{{count}} notifica · salvate nel DB · eliminazione automatica dopo 30 giorni",
+    "footer_other": "{{count}} notifiche · salvate nel DB · eliminazione automatica dopo 30 giorni"
+  },
+  "actions": {
+    "selectProject": "Seleziona progetto",
+    "noProject": "Senza progetto",
+    "startChat": "Avvia chat",
+    "openChat": "Apri chat",
+    "markRead": "Segna come letta",
+    "dismiss": "Rimuovi"
+  },
+  "relTime": {
+    "seconds": "{{n}}s fa",
+    "minutes": "{{n}}m fa",
+    "hours": "{{n}}h fa"
+  },
+  "event": {
+    "emails_one": "{{count}} nuova email",
+    "emails_other": "{{count}} nuove email",
+    "newEmailsTitle": "Nuove email",
+    "daemonExit": "Daemon terminato",
+    "daemonExitBody": "Exit code: {{code}}",
+    "authError": "Errore autenticazione daemon",
+    "authShort": "Errore autenticazione",
+    "authErrorFallback": "Token scaduto o revocato",
+    "taskDone": "Automazione eseguita",
+    "task": "Automazione",
+    "disabledSuffix": "disattivata",
+    "flowFallbackName": "Flow",
+    "flowOk": "▶ Flow «{{name}}» ok",
+    "flowError": "⚠️ Flow «{{name}}» errore",
+    "flowDelivered": "Esito consegnato in chat",
+    "flowFailed": "Esecuzione fallita",
+    "compileSuggested": "🛠 Skill \"{{name}}\": pronta per la compilazione in tool",
+    "compileSuggestedBody": "Eseguita con successo {{count}} volte via sandbox. Aprila nella pagina Skills e usa \"Compila in tool\"."
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "notFound": "Utente non trovato",
+  "emailInUse": "Email già in uso",
+  "emailTaken": "Email già registrata",
+  "wrongPassword": "Password attuale non corretta",
+  "lastAdminProtected": "Operazione negata: deve restare almeno un amministratore attivo.",
+  "cannotRemoveOwnAdmin": "Non puoi rimuovere il tuo stesso ruolo di amministratore.",
+  "cannotDisableOwnAccount": "Non puoi disabilitare il tuo stesso account.",
+  "cannotDeleteOwnAccount": "Non puoi eliminare il tuo stesso account."
+}

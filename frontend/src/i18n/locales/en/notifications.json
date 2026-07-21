@@ -1,0 +1,44 @@
+{
+  "panel": {
+    "title": "Notifications",
+    "markAllRead": "Mark all as read",
+    "clearAll": "Clear all",
+    "empty": "No notifications",
+    "emptyHint": "Daemon notifications will appear here",
+    "footer_one": "{{count}} notification · saved in DB · auto-deleted after 30 days",
+    "footer_other": "{{count}} notifications · saved in DB · auto-deleted after 30 days"
+  },
+  "actions": {
+    "selectProject": "Select project",
+    "noProject": "No project",
+    "startChat": "Start chat",
+    "openChat": "Open chat",
+    "markRead": "Mark as read",
+    "dismiss": "Dismiss"
+  },
+  "relTime": {
+    "seconds": "{{n}}s ago",
+    "minutes": "{{n}}m ago",
+    "hours": "{{n}}h ago"
+  },
+  "event": {
+    "emails_one": "{{count}} new email",
+    "emails_other": "{{count}} new emails",
+    "newEmailsTitle": "New emails",
+    "daemonExit": "Daemon terminated",
+    "daemonExitBody": "Exit code: {{code}}",
+    "authError": "Daemon authentication error",
+    "authShort": "Authentication error",
+    "authErrorFallback": "Token expired or revoked",
+    "taskDone": "Automation executed",
+    "task": "Automation",
+    "disabledSuffix": "disabled",
+    "flowFallbackName": "Flow",
+    "flowOk": "▶ Flow «{{name}}» ok",
+    "flowError": "⚠️ Flow «{{name}}» error",
+    "flowDelivered": "Result delivered in chat",
+    "flowFailed": "Execution failed",
+    "compileSuggested": "🛠 Skill \"{{name}}\": ready to be compiled to a tool",
+    "compileSuggestedBody": "Ran successfully {{count}} times via sandbox. Open it in the Skills page and use \"Compile to tool\"."
+  }
+}

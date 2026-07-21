@@ -1,0 +1,11 @@
+{
+  "name": "job-launcher-broker",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-or-later",
+  "private": true,
+  "description": "Broker job-launcher (D2): unico detentore del socket Docker, API stretta per lanciare container-job blindati.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

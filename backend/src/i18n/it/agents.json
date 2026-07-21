@@ -1,0 +1,16 @@
+{
+  "agentNotFound": "Agente non trovato.",
+  "agentOrgAdminOnly": "Solo gli admin possono gestire agenti org.",
+  "teamIdMissing": "teamId mancante per scope team.",
+  "agentTeamAdminOnly": "Solo admin o owner del team possono gestire agenti del team.",
+  "agentOwnerOnly": "Operazione riservata al proprietario dell'agente.",
+  "agentAccessDenied": "Non hai accesso a questo agente.",
+  "teamNotFound": "Team di agenti non trovato.",
+  "teamOrgAdminOnly": "Solo gli admin possono gestire team org.",
+  "agentTeamTeamAdminOnly": "Solo admin o owner del team possono gestire questo team di agenti.",
+  "teamOwnerOnly": "Operazione riservata al proprietario del team.",
+  "teamAccessDenied": "Non hai accesso a questo team.",
+  "topologyUnknown": "Topologia \"{topology}\" non riconosciuta.",
+  "noLlmConfigAgent": "Nessun LLM config disponibile per l'agente.",
+  "noLlmConfig": "Nessun LLM config disponibile."
+}

@@ -1,0 +1,105 @@
+{
+  "disclaimer": "L'AI può commettere errori. Verifica sempre le informazioni importanti.",
+  "colleagueFallback": "Collega",
+  "userLabel": "Tu",
+  "toolCall": {
+    "runningPre": "Eseguendo",
+    "donePost": "completato",
+    "failedPost": "fallito",
+    "called_one": "{{count}} tool chiamato",
+    "called_other": "{{count}} tool chiamati"
+  },
+  "memory": {
+    "askRemember": "Vuoi che ricordi questo?",
+    "remember": "Ricorda",
+    "ignore": "Ignora",
+    "updateTitle": "Estrai e aggiorna la memoria utente da questa conversazione",
+    "update": "Aggiorna memoria"
+  },
+  "truncate": {
+    "title": "Elimina questo messaggio e tutti i successivi",
+    "confirm": "Eliminare questo messaggio e tutti quelli successivi? L'operazione non è reversibile."
+  },
+  "readOnly": "Chat di {{author}} — sola lettura",
+  "readOnlyAuthorFallback": "un altro membro",
+  "team": {
+    "title": "Esegui questa chat con un team di agenti",
+    "single": "Agente singolo",
+    "option": "Team: {{name}}"
+  },
+  "voice": {
+    "start": "Detta un messaggio",
+    "stop": "Ferma la registrazione",
+    "recording": "Registrazione in corso… premi stop quando hai finito",
+    "transcribing": "Trascrizione in corso…",
+    "error": "Trascrizione fallita. Riprova.",
+    "micDenied": "Impossibile accedere al microfono. Controlla i permessi del browser."
+  },
+  "attach": {
+    "embedRag": "Incorpora nel RAG",
+    "embedRagDesc": "Indicizza per la ricerca semantica",
+    "extractedText": "Testo estratto",
+    "extractedTextDesc": "Estrae e inietta il testo nell'AI",
+    "native": "Allegato nativo",
+    "toMessage": "Allega al messaggio",
+    "nativeDesc": "Passa il file direttamente a Claude",
+    "skillDesc": "Rende il file disponibile per le skill",
+    "binaryNotePre": "Formato binario — RAG e testo estratto non disponibili. Il file sarà accessibile alle skill tramite",
+    "attachFile": "Allega file",
+    "tagText": "·testo",
+    "tagNative": "·nativo",
+    "tagRag": "·rag"
+  },
+  "embedMsg": {
+    "text": "Ho indicizzato il file \"{{name}}\" (fileId: {{fileId}}) nel RAG — ambito {{scope}}{{collection}}. L'operazione è già stata eseguita lato server: non serve alcuna conferma o verifica, rispondi solo prendendone atto.",
+    "collectionSuffix": ", collection \"{{collection}}\"",
+    "scopeUniversal": "universale",
+    "scopeProject": "progetto",
+    "scopePersonal": "personale"
+  },
+  "collection": {
+    "howToIndexPre": "Come indicizzare",
+    "loading": "Caricamento collection…",
+    "default": "— Collection default —",
+    "defaultNotePre": "Lascia su",
+    "defaultNoteEm": "Collection default",
+    "defaultNotePost": "per usare quella configurata dall'admin.",
+    "index": "Indicizza"
+  },
+  "scope": {
+    "universal": "🌐 Universale (azienda)",
+    "project": "📁 Progetto",
+    "projectSuffix": " (chat senza progetto)",
+    "personal": "🔒 Personale"
+  },
+  "composer": {
+    "processing": "L'AI sta elaborando...",
+    "placeholder": "Scrivi un messaggio... (Shift+Invio per andare a capo)"
+  },
+  "uploadError": "Errore durante il caricamento del file",
+  "download": {
+    "failed": "Download fallito — riprova",
+    "click": "Clicca per scaricare",
+    "loading": "Download...",
+    "error": "⚠ Errore download"
+  },
+  "view": {
+    "failed": "Apertura fallita — riprova",
+    "click": "Clicca per aprire",
+    "loading": "Apertura...",
+    "error": "⚠ Errore apertura"
+  },
+  "image": {
+    "loading": "Caricamento immagine..."
+  },
+  "feedback": {
+    "useful": "Risposta utile",
+    "toCorrect": "Risposta da correggere",
+    "editCorrection": "modifica correzione",
+    "addCorrection": "aggiungi correzione",
+    "saved": "salvato ✓",
+    "placeholder": "Cosa andava risposto? La correzione aiuterà l'agente a non ripetere l'errore.",
+    "saving": "Salvataggio…",
+    "saveCorrection": "Salva correzione"
+  }
+}

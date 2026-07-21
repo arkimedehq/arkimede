@@ -1,0 +1,12 @@
+{
+  "notFound": "File not found",
+  "notFoundOrForbidden": "File not found or path not allowed",
+  "noAccess": "Access to the file is not allowed",
+  "readonlyProject": "Read-only access on this project",
+  "scopeOwnerOnly": "Only the owner or an admin can change the scope",
+  "uploadMissing": "No file uploaded",
+  "relRequired": "Provide ?rel=<relative-path>",
+  "relInvalid": "Invalid relative path",
+  "streamTokenInvalid": "Invalid or expired streaming token",
+  "streamParamsRequired": "Specify the file 'source' and 'path' to stream"
+}

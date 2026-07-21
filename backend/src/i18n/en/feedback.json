@@ -1,0 +1,6 @@
+{
+  "memoryNotAvailable": "Memory not available: vector DB or embedding not configured.",
+  "collectionCreateFailed": "Cannot create collection '{collection}': {error}. Check the vector DB configuration.",
+  "messageNotFound": "Message not found",
+  "notFound": "Feedback not found"
+}

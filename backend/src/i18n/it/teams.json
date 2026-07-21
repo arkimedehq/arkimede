@@ -1,0 +1,7 @@
+{
+  "notFound": "Team non trovato",
+  "nameTaken": "Esiste già un team con questo nome",
+  "memberAlreadyExists": "Utente già membro del team",
+  "memberNotFound": "Membro non trovato",
+  "lastOwner": "Il team deve avere almeno un owner."
+}

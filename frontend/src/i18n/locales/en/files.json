@@ -1,0 +1,23 @@
+{
+  "panel": {
+    "title": "Files in this chat",
+    "empty": "No files attached to this chat",
+    "emptyHint": "Use 📎 in the input to attach files",
+    "indexed": "indexed",
+    "ingestTitle": "Index into RAG",
+    "scopeUniversal": "🌐 Universal (company)",
+    "scopeProject": "📁 Project",
+    "scopeProjectHint": " (open from a project)",
+    "scopePersonal": "🔒 Personal",
+    "loadingCollections": "Loading collections…",
+    "defaultCollection": "— Default collection —",
+    "indexing": "Indexing…",
+    "index": "Index",
+    "reindex": "Reindex",
+    "defaultHintPre": "Leave on",
+    "defaultHintEm": "Default collection",
+    "defaultHintPost": "to use the one configured by the admin.",
+    "download": "Download",
+    "delete": "Delete"
+  }
+}

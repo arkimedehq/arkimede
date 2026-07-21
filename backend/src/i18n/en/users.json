@@ -1,0 +1,10 @@
+{
+  "notFound": "User not found",
+  "emailInUse": "Email address already in use",
+  "emailTaken": "Email address already registered",
+  "wrongPassword": "Current password is incorrect",
+  "lastAdminProtected": "Operation denied: at least one active administrator must remain.",
+  "cannotRemoveOwnAdmin": "You cannot remove your own administrator role.",
+  "cannotDisableOwnAccount": "You cannot disable your own account.",
+  "cannotDeleteOwnAccount": "You cannot delete your own account."
+}

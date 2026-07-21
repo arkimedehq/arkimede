@@ -1,0 +1,109 @@
+{
+  "title": "Audit",
+  "refresh": "Aggiorna",
+  "description": "Eventi di sicurezza in tutta l'app (autenticazione, utenti e team, sorgenti dati, tool, skill, MCP, flow, file…). La copia tamper-evident è su CloudWatch/S3; questa è la vista DB recente.",
+  "filters": {
+    "all": "Tutti"
+  },
+  "empty": "Nessun evento.",
+  "table": {
+    "when": "Quando",
+    "action": "Azione",
+    "outcome": "Esito",
+    "resource": "Risorsa",
+    "actor": "Attore",
+    "context": "Contesto"
+  },
+  "systemActor": "sistema",
+  "outcomes": {
+    "ok": "OK",
+    "denied": "Negato",
+    "error": "Errore"
+  },
+  "actions": {
+    "auth": {
+      "login": "Accesso",
+      "logout": "Disconnessione",
+      "register": "Registrazione",
+      "password_change": "Cambio password"
+    },
+    "user": {
+      "create": "Utente creato",
+      "update": "Utente aggiornato",
+      "role_change": "Ruolo utente cambiato",
+      "status_change": "Stato utente cambiato",
+      "password_reset": "Reset password utente",
+      "delete": "Utente eliminato"
+    },
+    "team": {
+      "create": "Team creato",
+      "update": "Team aggiornato",
+      "delete": "Team eliminato",
+      "member_add": "Membro aggiunto al team",
+      "member_remove": "Membro rimosso dal team",
+      "member_role_change": "Ruolo membro cambiato"
+    },
+    "datasource": {
+      "create": "Sorgente dati creata",
+      "update": "Sorgente dati aggiornata",
+      "delete": "Sorgente dati eliminata",
+      "test": "Test connessione sorgente dati"
+    },
+    "customtool": {
+      "create": "Tool creato",
+      "update": "Tool aggiornato",
+      "delete": "Tool eliminato"
+    },
+    "llmconfig": {
+      "create": "Config LLM creata",
+      "update": "Config LLM aggiornata",
+      "delete": "Config LLM eliminata"
+    },
+    "appconfig": {
+      "update": "Config globale aggiornata"
+    },
+    "skill": {
+      "create": "Skill creata",
+      "delete": "Skill eliminata",
+      "enable_toggle": "Skill abilitata/disabilitata",
+      "publish": "Skill pubblicata",
+      "review": "Skill revisionata",
+      "registry_install": "Skill installata dal registry",
+      "execute": "Skill eseguita"
+    },
+    "mcp": {
+      "create": "Server MCP creato",
+      "update": "Server MCP aggiornato",
+      "delete": "Server MCP eliminato"
+    },
+    "flow": {
+      "create": "Flow creato",
+      "delete": "Flow eliminato",
+      "run": "Flow eseguito"
+    },
+    "project": {
+      "create": "Progetto creato",
+      "delete": "Progetto eliminato",
+      "share": "Progetto condiviso con team"
+    },
+    "file": {
+      "upload": "File caricato",
+      "delete": "File eliminato",
+      "scope_change": "Scope file cambiato"
+    },
+    "agent": {
+      "create": "Agente creato",
+      "delete": "Agente eliminato"
+    },
+    "agentteam": {
+      "create": "Team di agenti creato",
+      "delete": "Team di agenti eliminato"
+    },
+    "tool": {
+      "execute": "Tool eseguito"
+    },
+    "memory": {
+      "evolved": "Memoria evoluta (link/arricchimenti)"
+    }
+  }
+}

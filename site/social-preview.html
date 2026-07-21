@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<!-- Self-hosted fonts (SIL OFL 1.1) — renders offline, no CDN dependency. -->
+<link href="fonts/fonts.css" rel="stylesheet" />
+<style>
+  :root {
+    --ink: #0B1020;
+    --panel: #121A2E;
+    --line: #22304F;
+    --brand: #3B82F6;
+    --signal: #F5A524;
+    --text: #E6EDF7;
+    --muted: #8FA3C0;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    width: 1280px; height: 640px;
+    background: var(--ink);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+    overflow: hidden;
+    position: relative;
+  }
+  /* the infrastructure substrate */
+  .grid {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(to right, rgba(34,48,79,0.32) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(34,48,79,0.32) 1px, transparent 1px);
+    background-size: 40px 40px;
+    mask-image: radial-gradient(ellipse 90% 80% at 30% 45%, #000 35%, transparent 100%);
+  }
+  .glow {
+    position: absolute; width: 620px; height: 620px; right: -140px; top: -220px;
+    background: radial-gradient(circle, rgba(59,130,246,0.15), transparent 62%);
+  }
+  .stage { position: relative; height: 100%; display: grid; grid-template-columns: 1fr 520px; align-items: center; padding: 0 68px; gap: 28px; }
+
+  .mark { display: flex; align-items: center; gap: 14px; margin-bottom: 28px; }
+  .mark span { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 30px; letter-spacing: -0.01em; }
+
+  h1 {
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 58px;
+    line-height: 1.08;
+    letter-spacing: -0.025em;
+  }
+  h1 .accent { color: var(--brand); }
+  p.sub { color: var(--muted); font-size: 22px; line-height: 1.45; margin-top: 20px; max-width: 22ch; }
+
+  .chips { display: flex; gap: 9px; margin-top: 30px; flex-wrap: nowrap; }
+  .chip {
+    font-family: 'IBM Plex Mono', monospace; font-size: 13px; letter-spacing: 0.04em;
+    color: var(--muted); border: 1px solid var(--line); background: var(--panel);
+    border-radius: 999px; padding: 8px 14px; white-space: nowrap;
+  }
+  .chip b { color: var(--text); font-weight: 500; }
+
+  /* the perimeter — same signature geometry as the site */
+  .p-boundary { fill: none; stroke: var(--brand); stroke-width: 2; stroke-dasharray: 8 6; }
+  .p-node { fill: var(--panel); stroke: var(--line); stroke-width: 1.2; }
+  .p-node-label { font-family: 'IBM Plex Mono', monospace; font-size: 13px; fill: var(--text); }
+  .p-cap { font-family: 'IBM Plex Mono', monospace; font-size: 12px; fill: var(--muted); letter-spacing: 0.1em; }
+  .p-gate { fill: none; stroke: var(--signal); stroke-width: 2; }
+  .p-wire { stroke: var(--line); stroke-width: 1.4; fill: none; }
+</style>
+</head>
+<body>
+  <div class="grid"></div>
+  <div class="glow"></div>
+
+  <div class="stage">
+    <div>
+      <div class="mark">
+        <svg width="40" height="40" viewBox="0 0 32 32" aria-hidden="true">
+          <rect x="1" y="1" width="30" height="30" rx="7" fill="#0B1020" stroke="#22304F"/>
+          <rect x="6.5" y="6.5" width="19" height="19" rx="4" fill="none" stroke="#3B82F6" stroke-width="2" stroke-dasharray="3 2"/>
+          <circle cx="16" cy="16" r="3.4" fill="#F5A524"/>
+        </svg>
+        <span>Arkimede</span>
+      </div>
+
+      <h1>Your AI runs inside<br /><span class="accent">your perimeter</span>.</h1>
+      <p class="sub">Agents, workflows and sandboxed code — self-hosted, multi-tenant.</p>
+
+      <div class="chips">
+        <div class="chip"><b>AGPL-3.0</b></div>
+        <div class="chip">bring your own <b>LLM</b></div>
+        <div class="chip">native <b>MCP</b></div>
+      </div>
+    </div>
+
+    <!-- identical geometry to the landing hero, scaled up -->
+    <svg width="520" height="336" viewBox="0 0 480 310" aria-hidden="true">
+      <text class="p-cap" x="338" y="30">OUTSIDE</text>
+      <rect class="p-node" x="338" y="42" width="134" height="32" rx="6"/>
+      <text class="p-node-label" x="351" y="63">LLM API</text>
+
+      <rect class="p-boundary" x="8" y="84" width="292" height="200" rx="12"/>
+      <text class="p-cap" x="20" y="302">YOUR INFRASTRUCTURE</text>
+
+      <path class="p-wire" d="M89 100 L89 58 L338 58" opacity="0.55"/>
+      <circle class="p-gate" cx="89" cy="84" r="10"/>
+      <path class="p-gate" d="M84 84 h10 M89 79 v10"/>
+      <text class="p-cap" fill="#F5A524" x="106" y="76">EGRESS GATE</text>
+      <circle cx="228" cy="58" r="4.5" fill="#F5A524"/>
+
+      <rect class="p-node" x="30" y="100" width="118" height="32" rx="6"/>
+      <text class="p-node-label" x="43" y="121">Agent</text>
+
+      <rect class="p-node" x="162" y="100" width="118" height="32" rx="6"/>
+      <text class="p-node-label" x="175" y="121">Flows</text>
+
+      <rect class="p-node" x="30" y="146" width="118" height="32" rx="6"/>
+      <text class="p-node-label" x="43" y="167">Skills</text>
+
+      <rect class="p-node" x="162" y="146" width="118" height="32" rx="6"/>
+      <text class="p-node-label" x="175" y="167">RAG</text>
+
+      <rect class="p-node" x="30" y="192" width="250" height="32" rx="6"/>
+      <text class="p-node-label" x="43" y="213">Your SQL · files · shares</text>
+
+      <rect class="p-node" x="30" y="238" width="250" height="32" rx="6"/>
+      <text class="p-node-label" x="43" y="259">Org · Teams · Users</text>
+
+      <path class="p-wire" d="M148 116 h14"/>
+      <path class="p-wire" d="M89 132 v14"/>
+      <path class="p-wire" d="M221 132 v14"/>
+      <path class="p-wire" d="M89 178 v14"/>
+      <path class="p-wire" d="M221 178 v14"/>
+      <path class="p-wire" d="M155 224 v14"/>
+    </svg>
+  </div>
+</body>
+</html>

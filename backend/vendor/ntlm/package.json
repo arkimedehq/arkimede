@@ -1,0 +1,10 @@
+{
+  "name": "ntlm",
+  "version": "0.1.3",
+  "description": "NTLM authentication and Samba LM/NT hash library (clean-room, pure-JS MD4/DES, no OpenSSL provider dependency)",
+  "license": "AGPL-3.0-or-later",
+  "main": "lib/ntlm.js",
+  "engines": [
+    "node"
+  ]
+}

@@ -1,0 +1,4 @@
+{
+  "notFound": "LlmConfig \"{id}\" not found",
+  "cannotDeleteLast": "Cannot delete the only LLM configuration"
+}

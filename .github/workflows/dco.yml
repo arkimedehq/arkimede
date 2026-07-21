@@ -1,0 +1,39 @@
+name: DCO
+
+# Verifies that every commit in a pull request carries a Developer Certificate of
+# Origin sign-off (`Signed-off-by:`). Self-contained — no third-party action.
+# See CONTRIBUTING.md and the DCO file at the repo root.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  dco-check:
+    name: Signed-off-by on every commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check sign-off
+        run: |
+          base='${{ github.event.pull_request.base.sha }}'
+          head='${{ github.event.pull_request.head.sha }}'
+          fail=0
+          # Non-merge commits introduced by this PR.
+          for sha in $(git rev-list --no-merges "$base..$head"); do
+            if ! git log -1 --format=%B "$sha" | grep -qiE '^Signed-off-by: .+ <.+@.+>'; then
+              echo "::error::Commit $sha is missing a 'Signed-off-by' line (DCO)."
+              git log -1 --format='  %h %s' "$sha"
+              fail=1
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo ""
+            echo "Fix: sign your commits with 'git commit -s', or sign an existing branch with"
+            echo "'git rebase --signoff ${{ github.event.pull_request.base.ref }}'. See CONTRIBUTING.md."
+            exit 1
+          fi
+          echo "All commits are signed off. ✓"

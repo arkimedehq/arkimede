@@ -1,0 +1,8 @@
+{
+  "collectionNotFound": "Collection not found",
+  "collectionAlreadyExists": "Collection \"{name}\" already exists",
+  "cannotDeleteLastDefault": "Cannot delete the only default collection. Create another collection first.",
+  "embeddingFailed": "Embedding failed: {message}",
+  "itemsRequired": "items cannot be empty",
+  "embeddingNotConfigured": "Embedding service not configured (vectorSize=0)"
+}

@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  backend:
+    name: Backend — typecheck + test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      # The monorepo has known peer-dependency conflicts in the langchain ecosystem.
+      - name: Install
+        run: npm ci --legacy-peer-deps
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Security gate: the invariants (SSRF, crypto, SQL policy, checksum) must
+      # stay green — a regression that reopens them makes CI fail.
+      - name: Security tests
+        run: npm run test:security
+
+      - name: Test (unit)
+        run: npm test
+
+  frontend:
+    name: Frontend — typecheck + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci --legacy-peer-deps
+
+      # `build` runs `tsc && vite build`: catches type errors and build failures.
+      - name: Build
+        run: npm run build
+
+  integration:
+    name: Backend — integration (testcontainers)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install
+        run: npm ci --legacy-peer-deps
+
+      # testcontainers uses the Docker daemon preinstalled on the ubuntu runners
+      # to start an ephemeral PostgreSQL. Verifies scoping on a real DB + HTTP e2e.
+      - name: Integration tests
+        run: npm run test:int
+
+  all:
+    name: Backend — all tests (unit + integration + smoke)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install
+        run: npm ci --legacy-peer-deps
+
+      # Comprehensive gate: test (unit) + test:int (testcontainers).
+      # Subsumes the jobs above; those remain for granular parallel feedback.
+      - name: All tests
+        run: npm run test:all

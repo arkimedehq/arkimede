@@ -1,0 +1,18 @@
+{
+  "title": "Backup",
+  "description": "Crea uno snapshot scaricabile della piattaforma: database, file caricati, skill installate e (se disponibile) l'archivio vettoriale. I backup sono salvati sul server e possono essere scaricati o eliminati da qui.",
+  "note": "Redis (coda/cache) è transiente e non viene incluso. Il ripristino di un backup è un'operazione da riga di comando/ops.",
+  "create": "Crea backup",
+  "creating": "Creazione…",
+  "createError": "Backup fallito",
+  "empty": "Nessun backup presente.",
+  "loading": "Caricamento…",
+  "download": "Scarica",
+  "delete": "Elimina",
+  "deleteConfirm": "Eliminare questo backup? L'operazione è irreversibile.",
+  "columns": {
+    "name": "Backup",
+    "size": "Dimensione",
+    "date": "Creato"
+  }
+}

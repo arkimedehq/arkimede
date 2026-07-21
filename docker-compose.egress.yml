@@ -1,0 +1,88 @@
+# Overlay C1 — egress allowlist (OPT-IN, not auto-merge).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.egress.yml up -d
+#
+# Puts skill-executor on an internal network WITHOUT a gateway (`sandboxnet`,
+# internal: true): the subprocesses have no route to the internet except
+# through the egress-proxy, which applies the domain allowlist (squid.conf).
+# The backend is also attached to sandboxnet to keep talking to the executor;
+# the egress-proxy is attached to sandboxnet (receives the traffic) and to the
+# network with internet (forwards it to the allowed domains).
+#
+# ⚠️ Verify the network topology with:
+#   docker compose -f docker-compose.yml -f docker-compose.egress.yml config | less
+# Make sure `skill-executor` shows up ONLY on `sandboxnet`.
+
+services:
+  egress-proxy:
+    # Custom image = stock Squid + watcher entrypoint (hot reload of the
+    # allowlist via SIGHUP, without the Docker socket).
+    build:
+      context: ./egress-proxy
+      dockerfile: Dockerfile
+    image: pa-egress-proxy
+    restart: unless-stopped
+    volumes:
+      - ./egress-proxy/squid.conf:/etc/squid/squid.conf:ro
+      # Skill domains include file: written by the backend, read/reloaded here.
+      - egress_dynamic:/etc/squid/dynamic
+    networks:
+      - sandboxnet
+      - appnet
+    healthcheck:
+      test: ["CMD-SHELL", "squid -k parse || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  skill-executor:
+    environment:
+      HTTP_PROXY:  http://egress-proxy:3128
+      HTTPS_PROXY: http://egress-proxy:3128
+      NO_PROXY:    localhost,127.0.0.1,backend,skill-executor,broker
+    networks:
+      - sandboxnet
+
+  # The egress overlay moves skill-executor OFF the default network onto sandboxnet
+  # (internal, no internet). The broker (docker-compose.broker.yml) would otherwise stay
+  # only on the default network → the executor could not reach it ("[broker unreachable]").
+  # Attach the broker to sandboxnet too so the executor↔broker control channel works; the
+  # broker needs no internet itself (it launches jobs via the Docker socket, not the network).
+  # egress.yml is only ever combined with broker.yml (install.sh L3 ⟹ L2 broker), so this
+  # fragment never stands alone. At L2 (no egress) both share the default network instead.
+  broker:
+    networks:
+      - sandboxnet
+
+  backend:
+    environment:
+      # Dir (same volume as egress-proxy) where skill-domains.conf is written.
+      # Set ONLY with this overlay → activates the egress synchronization.
+      EGRESS_DYNAMIC_DIR: /etc/egress
+    volumes:
+      - egress_dynamic:/etc/egress
+    networks:
+      - appnet
+      - sandboxnet
+
+  # The infrastructure services stay on the network with internet (appnet).
+  postgres:   { networks: [appnet] }
+  qdrant:     { networks: [appnet] }
+  redis:      { networks: [appnet] }
+  embedding:  { networks: [appnet] }
+  frontend:   { networks: [appnet] }
+
+networks:
+  appnet:
+    driver: bridge
+  sandboxnet:
+    # Fixed `name:` so JOB_EGRESS_NETWORK / BROKER_ALLOWED_NETWORKS reference the real
+    # network by a stable name, not the compose-project-prefixed one.
+    # → set JOB_EGRESS_NETWORK=sandboxnet and add it to BROKER_ALLOWED_NETWORKS.
+    name: sandboxnet
+    driver: bridge
+    internal: true   # no gateway → no route to the internet
+
+volumes:
+  # Skill domains include file, shared backend (writes) ↔ egress-proxy (reads).
+  egress_dynamic:

@@ -1,0 +1,645 @@
+import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { format } from 'date-fns';
+import { it } from 'date-fns/locale';
+import { Paperclip, Download, Loader2, Wrench, ChevronRight, Check, X, ThumbsUp, ThumbsDown, ExternalLink, Terminal, Trash2 } from 'lucide-react';
+import type { Message, ToolCallRecord } from '../../store/useStore';
+import { useStore } from '../../store/useStore';
+import { downloadWithAuth } from '../../utils/downloadWithAuth';
+import { openInlineWithAuth } from '../../utils/openInlineWithAuth';
+import api from '../../api/client';
+import { feedbackApi } from '../../api/feedback';
+import type { Feedback, FeedbackRating } from '../../api/feedback';
+
+interface Props {
+  message: Message;
+  isStreaming?: boolean;
+  /** Shows the feedback buttons (global feedback-memory toggle active). */
+  feedbackEnabled?: boolean;
+  /** Feedback already given by the user for this message (state restore). */
+  feedback?: Feedback;
+  /** Invoked after a feedback is submitted (to reload the state). */
+  onFeedbackChange?: () => void;
+  /** Author name to display (only for user messages written by a colleague in a shared chat). */
+  authorLabel?: string | null;
+  /** "Rewind" callback: deletes this message and all following ones. Absent = button hidden (e.g. read-only). */
+  onTruncate?: (messageId: string) => void;
+}
+
+// ── Authenticated link for downloading skill-generated files ─────────────────
+//
+// The /api/files/raw?rel=... links require a JWT in the HTTP header.
+// The browser does not include it during direct navigation, so we intercept
+// the click, make the request with axios (which already has the token) and download
+// via Blob URL — without opening new tabs and without a 401.
+
+function AuthDownloadLink({ href, children }: { href: string; children: React.ReactNode }) {
+  const { t } = useTranslation('chat');
+  const [state, setState] = useState<'idle' | 'loading' | 'error'>('idle');
+
+  const handleClick = async (e: React.MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault();
+    if (state === 'loading') return;
+
+    setState('loading');
+    try {
+      // Derive the filename from the rel/path parameter in the URL as a hint
+      let filename: string | undefined;
+      try {
+        const u   = new URL(href, window.location.origin);
+        const raw = u.searchParams.get('rel') ?? u.searchParams.get('path') ?? '';
+        filename  = raw.split('/').pop() || undefined;
+      } catch { /* ignore */ }
+
+      await downloadWithAuth(href, filename);
+      setState('idle');
+    } catch (err) {
+      console.error('[AuthDownloadLink] download failed:', err);
+      setState('error');
+      setTimeout(() => setState('idle'), 3000);
+    }
+  };
+
+  return (
+    <a
+      href={href}
+      onClick={handleClick}
+      className={`inline-flex items-center gap-1 underline cursor-pointer transition-colors
+        ${state === 'error'
+          ? 'text-red-400 hover:text-red-300'
+          : 'text-blue-400 hover:text-blue-300'}`}
+      title={state === 'error' ? t('download.failed') : t('download.click')}
+    >
+      {state === 'loading'
+        ? <><Loader2 size={12} className="animate-spin inline" /> {t('download.loading')}</>
+        : state === 'error'
+          ? t('download.error')
+          : <><Download size={12} className="inline" /> {children}</>}
+    </a>
+  );
+}
+
+// ── Authenticated link for inline VIEWING (PDF/images/audio/video) ───────────
+//
+// Like AuthDownloadLink but opens the file inline in a new tab instead of
+// downloading it (see openInlineWithAuth). Triggered on links with `&inline=1`.
+
+function AuthInlineLink({ href, children }: { href: string; children: React.ReactNode }) {
+  const { t } = useTranslation('chat');
+  const [state, setState] = useState<'idle' | 'loading' | 'error'>('idle');
+
+  const handleClick = async (e: React.MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault();
+    if (state === 'loading') return;
+
+    setState('loading');
+    try {
+      await openInlineWithAuth(href);
+      setState('idle');
+    } catch (err) {
+      console.error('[AuthInlineLink] open failed:', err);
+      setState('error');
+      setTimeout(() => setState('idle'), 3000);
+    }
+  };
+
+  return (
+    <a
+      href={href}
+      onClick={handleClick}
+      className={`inline-flex items-center gap-1 underline cursor-pointer transition-colors
+        ${state === 'error'
+          ? 'text-red-400 hover:text-red-300'
+          : 'text-blue-400 hover:text-blue-300'}`}
+      title={state === 'error' ? t('view.failed') : t('view.click')}
+    >
+      {state === 'loading'
+        ? <><Loader2 size={12} className="animate-spin inline" /> {t('view.loading')}</>
+        : state === 'error'
+          ? t('view.error')
+          : <><ExternalLink size={12} className="inline" /> {children}</>}
+    </a>
+  );
+}
+
+// ── Authenticated INLINE image (file generated by a tool/skill) ──────────────
+//
+// The model delivers a generated image as a markdown image — `![alt](/api/files/raw?rel=…)`.
+// A plain <img src> would fetch WITHOUT the JWT (the browser does not add the header)
+// → 401 and a broken image. So we fetch the bytes with axios (token included) and
+// render them through a Blob URL. If the fetch fails the image degrades to the
+// authenticated download link, which always works.
+
+function AuthImage({ src, alt }: { src: string; alt?: string }) {
+  const { t } = useTranslation('chat');
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    // The axios baseURL already carries the /api prefix.
+    const path = src.startsWith('/api/') ? src.slice('/api'.length) : src;
+
+    api.get(path, { responseType: 'blob' })
+      .then((res) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(res.data as Blob);
+        setUrl(objectUrl);
+      })
+      .catch(() => { if (!cancelled) setFailed(true); });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [src]);
+
+  if (failed) return <AuthDownloadLink href={src}>{alt || src}</AuthDownloadLink>;
+
+  if (!url) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-gray-400">
+        <Loader2 size={12} className="animate-spin" /> {t('image.loading')}
+      </span>
+    );
+  }
+
+  return (
+    <img
+      src={url}
+      alt={alt ?? ''}
+      className="max-w-full h-auto rounded-lg border border-gray-700 my-2"
+    />
+  );
+}
+
+/**
+ * Turns a BARE backend file URL (`/api/files/raw?rel=…` or `/api/files/stream…`) written as
+ * plain text by the model into a markdown link, so the custom <a> renderer below picks it up
+ * as an authenticated download/inline link. remark-gfm only autolinks http(s)/www, not these
+ * relative API paths, so without this the link is not clickable. URLs already inside a markdown
+ * link (preceded by `(`/`]`/quote) are left untouched. The label is the `rel` filename.
+ */
+export function linkifyFileUrls(md: string): string {
+  const re = /(^|[^([<"'`=/])((?:\/api\/files\/(?:raw|stream))\?[^\s)\]<>"'`]+)/g;
+  return md.replace(re, (_m, pre: string, url: string) => {
+    let label = url;
+    const rel = /[?&]rel=([^&]+)/.exec(url);
+    if (rel) { try { label = decodeURIComponent(rel[1]); } catch { label = rel[1]; } }
+    return `${pre}[${label}](${url})`;
+  });
+}
+
+// ── ReactMarkdown components ──────────────────────────────────────────────────
+
+const markdownComponents: React.ComponentProps<typeof ReactMarkdown>['components'] = {
+  // Image: a backend file needs the JWT → fetch it and render it via Blob URL.
+  img({ src, alt }) {
+    if (typeof src !== 'string' || !src) return null;
+
+    const isBackendFile = src.startsWith('/api/files/');
+    // Bare relative path (no scheme, not absolute) = output of a tool/skill,
+    // same convention as the <a> renderer below.
+    const isRelative = !/^(https?:|data:|blob:|\/|#)/.test(src);
+
+    if (isBackendFile || isRelative) {
+      const href = isBackendFile ? src : `/api/files/raw?rel=${encodeURIComponent(src)}`;
+      return <AuthImage src={href} alt={alt} />;
+    }
+
+    return <img src={src} alt={alt ?? ''} className="max-w-full h-auto rounded-lg" />;
+  },
+
+  // Link: distinguish authenticated downloads from normal links
+  a({ href, children }) {
+    if (!href) return <span>{children}</span>;
+
+    // Inline streaming/viewing (PDF/images/audio/video, even huge files).
+    if (href.startsWith('/api/files/stream')) {
+      return <AuthInlineLink href={href}>{children}</AuthInlineLink>;
+    }
+    // Authenticated download of a generated file (attachment).
+    if (href.startsWith('/api/files/raw')) {
+      return <AuthDownloadLink href={href}>{children}</AuthDownloadLink>;
+    }
+
+    // Relative path (no protocol, does not start with / or #) →
+    // it is a path relative to the uploads/ dir returned by a skill →
+    // convert into an authenticated download via the backend
+    const isRelative = !href.startsWith('http://') &&
+                       !href.startsWith('https://') &&
+                       !href.startsWith('/') &&
+                       !href.startsWith('#') &&
+                       !href.startsWith('mailto:') &&
+                       !href.startsWith('tel:');
+    if (isRelative) {
+      const apiHref = `/api/files/raw?rel=${encodeURIComponent(href)}`;
+      return <AuthDownloadLink href={apiHref}>{children}</AuthDownloadLink>;
+    }
+
+    // External links → new tab
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-blue-400 underline hover:text-blue-300 transition-colors"
+      >
+        {children}
+      </a>
+    );
+  },
+};
+
+// ── TokenBadge ────────────────────────────────────────────────────────────────
+
+function TokenBadge({ inputTokens, outputTokens }: { inputTokens?: number | null; outputTokens?: number | null }) {
+  if (inputTokens == null && outputTokens == null) return null;
+
+  const fmt = (n: number) =>
+    n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+
+  return (
+    <div
+      className="flex items-center gap-2 px-2 py-0.5 rounded-full bg-gray-900/60 border border-gray-700/50 text-[10px] text-gray-500 font-mono select-none"
+      title={`Input: ${inputTokens ?? '?'} token — Output: ${outputTokens ?? '?'} token`}
+    >
+      {inputTokens != null && (
+        <span className="flex items-center gap-0.5">
+          <span className="text-indigo-400">↑</span>
+          {fmt(inputTokens)}
+        </span>
+      )}
+      {outputTokens != null && (
+        <span className="flex items-center gap-0.5">
+          <span className="text-emerald-400">↓</span>
+          {fmt(outputTokens)}
+        </span>
+      )}
+      <span className="text-gray-600">tok</span>
+    </div>
+  );
+}
+
+// ── ToolCallsPanel ──────────────────────────────────────────────────────────
+//
+// Collapsible debug section: lists the tool calls made to generate
+// the assistant message (name, arguments, truncated result, status, duration).
+
+function formatValue(val: any): string {
+  if (val == null) return '';
+  if (typeof val === 'string') return val;
+  try { return JSON.stringify(val, null, 2); }
+  catch { return String(val); }
+}
+
+/** "Terminal" view for sandbox executions (run_in_sandbox): code + output + files. */
+function SandboxCallBody({ input, output }: { input: any; output: any }) {
+  const activeChatId = useStore((s) => s.activeChatId);
+  const lang = typeof input?.language === 'string' ? input.language : 'shell';
+  const code = typeof input?.code === 'string' ? input.code : formatValue(input);
+  // Extracts the workspace files from the output ("file nel workspace: a, b, c/"); excludes dirs.
+  const m = typeof output === 'string' ? output.match(/file nel workspace:\s*(.+)/) : null;
+  const files = m ? m[1].split(',').map((s) => s.trim()).filter((f) => f && !f.endsWith('/')) : [];
+  return (
+    <div className="px-2.5 pb-2 space-y-1.5 text-[11px]">
+      <div>
+        <div className="text-gray-500 mb-0.5 flex items-center gap-1">
+          <Terminal size={11} /> Codice <span className="text-gray-600">({lang})</span>
+        </div>
+        <pre className="bg-black/60 rounded p-2 overflow-x-auto max-h-64 overflow-y-auto text-emerald-200 font-mono whitespace-pre-wrap break-words">
+          {code || '—'}
+        </pre>
+      </div>
+      {output !== undefined && (
+        <div>
+          <div className="text-gray-500 mb-0.5">Output</div>
+          <pre className="bg-black/40 rounded p-2 overflow-x-auto max-h-64 overflow-y-auto text-gray-300 font-mono whitespace-pre-wrap break-words">
+            {formatValue(output) || '—'}
+          </pre>
+        </div>
+      )}
+      {files.length > 0 && activeChatId && (
+        <div>
+          <div className="text-gray-500 mb-0.5">File nel workspace</div>
+          <div className="flex flex-wrap gap-x-3 gap-y-1">
+            {files.map((f) => (
+              <AuthDownloadLink key={f} href={`/api/sandbox/file?chatId=${activeChatId}&path=${encodeURIComponent(f)}`}>
+                {f}
+              </AuthDownloadLink>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** For a run_in_sandbox call, extract the descriptive skill it runs (the code references
+ * `skills/<name>/`), so the chat can show `run_in_sandbox:<skill>` instead of the bare name.
+ * Returns null for a plain sandbox run (no skill referenced). */
+export function sandboxSkillName(input: any): string | null {
+  let code: any = input;
+  if (typeof input === 'string') {
+    try { code = JSON.parse(input); } catch { /* keep the raw string */ }
+  }
+  if (code && typeof code === 'object') code = code.code;
+  if (typeof code !== 'string') return null;
+  const m = code.match(/skills\/([a-zA-Z0-9_-]{1,64})\//);
+  return m ? m[1] : null;
+}
+
+function ToolCallItem({ call }: { call: ToolCallRecord }) {
+  const [open, setOpen] = useState(false);
+  const ok = call.ok !== false;
+  const isSandbox = call.name === 'run_in_sandbox';
+  const skillName = isSandbox ? sandboxSkillName(call.input) : null;
+
+  return (
+    <div className="rounded-lg bg-gray-900/60 border border-gray-700/50 overflow-hidden">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-gray-800/50 transition-colors"
+      >
+        <ChevronRight
+          size={12}
+          className={`text-gray-500 transition-transform ${open ? 'rotate-90' : ''}`}
+        />
+        {ok
+          ? <Check size={12} className="text-emerald-400 flex-shrink-0" />
+          : <X size={12} className="text-red-400 flex-shrink-0" />}
+        {isSandbox && <Terminal size={12} className="text-purple-400 flex-shrink-0" />}
+        <span className="font-mono text-xs text-gray-200 truncate">
+          {skillName ? `run_in_sandbox:${skillName}` : call.name}
+        </span>
+        {call.durationMs != null && (
+          <span className="ml-auto text-[10px] text-gray-500 font-mono flex-shrink-0">
+            {call.durationMs}ms
+          </span>
+        )}
+      </button>
+
+      {open && (isSandbox ? (
+        <SandboxCallBody input={call.input} output={call.output} />
+      ) : (
+        <div className="px-2.5 pb-2 space-y-1.5 text-[11px]">
+          <div>
+            <div className="text-gray-500 mb-0.5">Input</div>
+            <pre className="bg-black/40 rounded p-2 overflow-x-auto text-gray-300 font-mono whitespace-pre-wrap break-words">
+              {formatValue(call.input) || '—'}
+            </pre>
+          </div>
+          {call.output !== undefined && (
+            <div>
+              <div className="text-gray-500 mb-0.5">Output</div>
+              <pre className="bg-black/40 rounded p-2 overflow-x-auto max-h-64 overflow-y-auto text-gray-300 font-mono whitespace-pre-wrap break-words">
+                {formatValue(call.output) || '—'}
+              </pre>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ToolCallsPanel({ toolCalls }: { toolCalls: ToolCallRecord[] }) {
+  const { t } = useTranslation('chat');
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="w-full mt-1">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1.5 text-[11px] text-gray-500 hover:text-gray-300 transition-colors select-none"
+      >
+        <Wrench size={11} />
+        <span>{t('toolCall.called', { count: toolCalls.length })}</span>
+        <ChevronRight
+          size={11}
+          className={`transition-transform ${open ? 'rotate-90' : ''}`}
+        />
+      </button>
+
+      {open && (
+        <div className="mt-1.5 space-y-1.5">
+          {toolCalls.map((call, i) => (
+            <ToolCallItem key={i} call={call} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── FeedbackButtons ─────────────────────────────────────────────────────────
+//
+// 👍/👎 on an assistant message. On 👎 (or by clicking "add correction")
+// a correction box opens: the text feeds the feedback-memory.
+
+function FeedbackButtons({
+  messageId, feedback, onChange,
+}: {
+  messageId: string;
+  feedback?: Feedback;
+  onChange?: () => void;
+}) {
+  const { t } = useTranslation('chat');
+  const [rating, setRating]   = useState<FeedbackRating | null>(feedback?.rating ?? null);
+  const [comment, setComment] = useState(feedback?.comment ?? '');
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving]   = useState(false);
+  const [saved, setSaved]     = useState(false);
+
+  const submit = async (newRating: FeedbackRating, withComment: string) => {
+    setSaving(true);
+    try {
+      await feedbackApi.submit({ messageId, rating: newRating, comment: withComment || undefined });
+      setRating(newRating);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+      onChange?.();
+    } catch (err) {
+      console.error('[Feedback] submit failed:', err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRate = (r: FeedbackRating) => {
+    if (r === 'down') {
+      setRating('down');
+      setEditing(true); // on 👎 we invite the user to explain what to correct
+    } else {
+      void submit('up', comment);
+    }
+  };
+
+  const btnBase = 'p-1 rounded transition-colors';
+
+  return (
+    <div className="flex flex-col gap-1 mt-0.5">
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => handleRate('up')}
+          disabled={saving}
+          className={`${btnBase} ${rating === 'up' ? 'text-emerald-400' : 'text-gray-600 hover:text-gray-300'}`}
+          title={t('feedback.useful')}
+        >
+          <ThumbsUp size={13} />
+        </button>
+        <button
+          onClick={() => handleRate('down')}
+          disabled={saving}
+          className={`${btnBase} ${rating === 'down' ? 'text-red-400' : 'text-gray-600 hover:text-gray-300'}`}
+          title={t('feedback.toCorrect')}
+        >
+          <ThumbsDown size={13} />
+        </button>
+        {rating && !editing && (
+          <button
+            onClick={() => setEditing(true)}
+            className="text-[10px] text-gray-600 hover:text-gray-400 ml-1"
+          >
+            {comment ? t('feedback.editCorrection') : t('feedback.addCorrection')}
+          </button>
+        )}
+        {saved && <span className="text-[10px] text-emerald-500 ml-1">{t('feedback.saved')}</span>}
+      </div>
+
+      {editing && (
+        <div className="flex flex-col gap-1 w-full max-w-md">
+          <textarea
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder={t('feedback.placeholder')}
+            rows={2}
+            className="text-xs bg-gray-900 border border-gray-700 rounded p-2 text-gray-200 resize-y focus:outline-none focus:border-blue-500"
+          />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => submit(rating ?? 'down', comment).then(() => setEditing(false))}
+              disabled={saving}
+              className="text-[11px] px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50"
+            >
+              {saving ? t('feedback.saving') : t('feedback.saveCorrection')}
+            </button>
+            <button
+              onClick={() => setEditing(false)}
+              className="text-[11px] px-2 py-0.5 rounded text-gray-400 hover:text-gray-200"
+            >
+              {t('common:actions.cancel')}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── MessageBubble ─────────────────────────────────────────────────────────────
+
+export default function MessageBubble({ message, isStreaming, feedbackEnabled, feedback, onFeedbackChange, authorLabel, onTruncate }: Props) {
+  const { t } = useTranslation('chat');
+  const isUser        = message.role === 'user';
+  const time          = format(new Date(message.createdAt), 'HH:mm', { locale: it });
+  const showTokenCount = useStore((s) => (s.user as any)?.showTokenCount ?? false);
+  // The "rewind" button only makes sense on already-persisted messages (no streaming/optimistic).
+  const canTruncate   = !!onTruncate && !isStreaming && message.id !== 'streaming' && !message.id.startsWith('temp-');
+
+  return (
+    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} gap-3`}>
+      {!isUser && (
+        <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center flex-shrink-0 mt-1">
+          <span className="text-white text-xs font-bold">AI</span>
+        </div>
+      )}
+
+      <div className={`max-w-[85%] ${isUser ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
+        {authorLabel && (
+          <span className="text-xs text-gray-400 px-1">{authorLabel}</span>
+        )}
+        {message.attachments && message.attachments.length > 0 && (
+          <div className="flex flex-wrap gap-1 mb-1">
+            {message.attachments.map((att) => (
+              <div
+                key={att.fileId}
+                className="flex items-center gap-1 bg-gray-700 rounded-lg px-2 py-1 text-xs text-gray-300"
+              >
+                <Paperclip size={11} />
+                {att.name}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div
+          className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+            isUser
+              ? 'bg-blue-600 text-white rounded-br-sm'
+              : 'bg-gray-800 text-gray-100 rounded-bl-sm'
+          }`}
+        >
+          {isUser ? (
+            <p className="whitespace-pre-wrap">{message.content}</p>
+          ) : (
+            <div className="prose-chat">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={markdownComponents}
+              >
+                {linkifyFileUrls(message.content)}
+              </ReactMarkdown>
+              {isStreaming && (
+                <span className="inline-block w-0.5 h-4 bg-blue-400 ml-0.5 animate-pulse" />
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Bottom row: time + token badge (assistant only, only if showTokenCount) */}
+        <div className={`flex items-center gap-2 px-1 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
+          <span className="text-xs text-gray-600">{time}</span>
+          {!isUser && !isStreaming && showTokenCount && (
+            <TokenBadge
+              inputTokens={message.inputTokens}
+              outputTokens={message.outputTokens}
+            />
+          )}
+          {canTruncate && (
+            <button
+              onClick={() => onTruncate!(message.id)}
+              className="text-gray-700 hover:text-red-400 opacity-60 hover:opacity-100 transition-colors"
+              title={t('truncate.title')}
+            >
+              <Trash2 size={12} />
+            </button>
+          )}
+        </div>
+
+        {/* Debug: tool calls made (assistant only, after streaming finished) */}
+        {!isUser && !isStreaming && message.toolCalls && message.toolCalls.length > 0 && (
+          <ToolCallsPanel toolCalls={message.toolCalls} />
+        )}
+
+        {/* Feedback 👍/👎 (assistant only, if the feedback-memory is active) */}
+        {!isUser && !isStreaming && feedbackEnabled && message.id !== 'streaming' && (
+          <FeedbackButtons
+            messageId={message.id}
+            feedback={feedback}
+            onChange={onFeedbackChange}
+          />
+        )}
+      </div>
+
+      {isUser && (
+        <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center flex-shrink-0 mt-1">
+          <span className="text-gray-300 text-xs font-medium">{t('userLabel')}</span>
+        </div>
+      )}
+    </div>
+  );
+}

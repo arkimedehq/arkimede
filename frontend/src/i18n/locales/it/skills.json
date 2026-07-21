@@ -1,0 +1,223 @@
+{
+  "title": "Skills",
+  "subtitle": "Pacchetti che estendono l'agente con istruzioni specializzate e script eseguibili. Carica un file .zip contenente SKILL.md (con frontmatter) e una cartella scripts/.",
+  "tabs": {
+    "mine": "Le mie skill",
+    "shared": "Condivise",
+    "public": "Marketplace",
+    "daemons": "Background",
+    "review": "Review"
+  },
+  "internet": {
+    "title": "Accesso di rete",
+    "none": "Nessun accesso esterno — solo il backend interno.",
+    "hint": "Domini esterni a cui la skill può connettersi (aggiunti alla allowlist «internet» quando abilitata):"
+  },
+  "networks": {
+    "title": "Reti riservate",
+    "hint": "Concedi a questa skill l'accesso a reti aziendali predisposte dall'operatore (LAN/VPN/sottoreti). Il backend resta sempre raggiungibile.",
+    "lanBadge": "LAN"
+  },
+  "scope": {
+    "visibility": "Visibilità",
+    "notReadyTitle": "La skill deve essere pronta (ready) per essere pubblicata",
+    "sendReview": "Invia in review",
+    "publishTeam": "Pubblica al team",
+    "makePersonal": "Rendi personale"
+  },
+  "detail": {
+    "skillId": "Skill ID",
+    "copyId": "Copia Skill ID negli appunti",
+    "author": "Autore",
+    "license": "Licenza",
+    "deps": "Dipendenze"
+  },
+  "toggle": {
+    "enabled": "Skill abilitata",
+    "disabled": "Skill disabilitata",
+    "enabledHintActive": "— attiva nell'agente",
+    "enabledHintExcluded": "— esclusa dall'agente",
+    "inChat": "Caricata in chat",
+    "viaAgentOnly": "Solo via agente",
+    "inChatHint": "— i tool entrano nel contesto della chat",
+    "viaAgentHint": "— usabile solo da un agente che la include (loadOnFirst off)",
+    "loadOnFirstTitle": "Se off, gli script-tool della skill non entrano nella chat: restano usabili solo via agente (delega gerarchica)."
+  },
+  "compile": {
+    "button": "Compila a tool",
+    "buttonTitle": "L'AI propone uno schema tipizzato per gli script di questa skill descrittiva, così diventano tool veloci e deterministici (invece di sola esecuzione via sandbox).",
+    "reviewTitle": "Compila a tool tipizzato",
+    "reviewSubtitle": "L'AI ha proposto uno schema per ogni script. Rivedi descrizioni e input_schema, poi conferma: la skill diventerà tipizzata e gli script saranno esposti come tool.",
+    "llmCallable": "Esponi all'AI",
+    "descLabel": "Descrizione (per l'AI)",
+    "schemaLabel": "input_schema (JSON Schema)",
+    "codeLabel": "Codice generato (entrypoint)",
+    "confirm": "Conferma e compila",
+    "cancel": "Annulla",
+    "invalidJson": "input_schema non è JSON valido per \"{{file}}\".",
+    "suggestBadge": "Candidata al tool ({{count}} usi)",
+    "suggestHint": "Questa skill descrittiva è stata eseguita con successo almeno 5 volte via sandbox: compilarla in tool tipizzato la renderà più veloce e deterministica."
+  },
+  "actions": {
+    "updateZipTitle": "Carica un nuovo ZIP per aggiornare i file della skill (i valori di configurazione vengono preservati)",
+    "updateZip": "Aggiorna da ZIP",
+    "syncTitle": "Scarica la versione più recente dal marketplace (i valori di configurazione vengono preservati)",
+    "sync": "Sincronizza",
+    "confirmDelete": "Confermi eliminazione?",
+    "delete": "Elimina",
+    "reinstallTitle": "Aggiorna metadati dal frontmatter di SKILL.md e reinstalla le dipendenze (i valori di configurazione vengono preservati)",
+    "reinstalled": "Aggiornata",
+    "reinstall": "Reinstalla"
+  },
+  "upload": {
+    "error": "Errore upload",
+    "onlyZip": "Solo file .zip sono accettati",
+    "button": "Carica skill (.zip)",
+    "uploading": "Caricamento...",
+    "uploaded": "Skill caricata — installazione in corso"
+  },
+  "empty": "Nessuna skill — carica un pacchetto .zip per iniziare",
+  "script": {
+    "execError": "Errore durante l'esecuzione",
+    "llmVisible": "Visibile all'agente LLM — clicca per nasconderlo",
+    "llmHidden": "Nascosto all'agente LLM — clicca per renderlo visibile",
+    "runManual": "Esegui script manualmente",
+    "run": "Esegui",
+    "llmContext": "Contesto LLM",
+    "editNote": "Modifica",
+    "addNote": "+ Aggiungi nota",
+    "notePlaceholder": "Es: Modelli disponibili: prodotti_per_progetto (raccomanda componenti fisici), categorie_per_cliente (categorie funzionali). Usare prodotti_per_progetto per raccomandazioni dettagliate.",
+    "removeNote": "Rimuovi nota",
+    "noManualNote": "Nessuna nota manuale — il LLM usa l'output dell'info script:",
+    "noNote": "Nessuna nota — il LLM vedrà solo la descrizione statica. Esegui l'info script per aggiornare automaticamente.",
+    "manualExec": "Esecuzione manuale",
+    "chooseFile": "Scegli file…",
+    "running": "Esecuzione…",
+    "clear": "Pulisci",
+    "completed": "Completato",
+    "errorExit": "Errore (exit {{code}})"
+  },
+  "config": {
+    "saved": "Salvato",
+    "error": "Errore",
+    "resetDone": "Reset al default",
+    "loading": "Caricamento config...",
+    "title": "Configurazione",
+    "systemVars": "Variabili sistema ▾",
+    "systemVarsHintPre": "Disponibili nei default (es.",
+    "systemVarsHintPost": "):",
+    "empty": "(vuoto)",
+    "showLess": "▲ Mostra meno",
+    "showMore": "▼ Mostra tutto",
+    "resetTitle": "Ripristina default",
+    "selectDatasource": "— Seleziona connessione —",
+    "selectCollection": "— Nessuna (L2 disabilitato) —",
+    "valuePlaceholder": "Valore...",
+    "defaultPlaceholder": "default: {{default}}"
+  },
+  "info": {
+    "status": "Stato",
+    "refreshTitle": "Aggiorna stato",
+    "refresh": "Aggiorna",
+    "reading": "Lettura stato...",
+    "availableWhenReady": "Disponibile quando la skill è pronta.",
+    "unknownError": "Errore sconosciuto"
+  },
+  "docs": {
+    "title": "Documentazione",
+    "loading": "Caricamento documentazione...",
+    "error": "Documentazione non disponibile"
+  },
+  "project": {
+    "title": "Progetti",
+    "assigned": "{{count}} assegnati",
+    "searchPlaceholder": "Cerca progetto...",
+    "noneFound": "Nessun progetto trovato",
+    "noneAvailable": "Nessun progetto disponibile",
+    "remove": "Rimuovi",
+    "add": "Aggiungi",
+    "note": "Il SKILL.md viene iniettato nel prompt dei progetti assegnati."
+  },
+  "toggleTitle": {
+    "disable": "Disabilita skill",
+    "enable": "Abilita skill"
+  },
+  "marketplace": {
+    "installed": "Installata",
+    "by": "di {{author}}",
+    "scripts": "{{count}} script",
+    "deps": "{{count}} deps",
+    "installing": "Installando...",
+    "install": "Installa",
+    "searchPlaceholder": "Cerca per nome, descrizione, tag...",
+    "refreshTitle": "Rileggi registry da GitHub",
+    "countAll": "{{count}} skill nel registry",
+    "countFiltered": "{{shown}} di {{total}} skill",
+    "updatedAt": "· aggiornato {{date}}",
+    "connecting": "Connessione al registry...",
+    "unreachable": "Registry non raggiungibile",
+    "unreachableHintPre": "Verifica la variabile",
+    "unreachableHintPost": "e la connessione del server.",
+    "emptyTitle": "Nessuna skill nel registry",
+    "emptyHint": "Contribuisci pubblicando le tue skill su GitHub.",
+    "noMatch": "Nessuna skill corrisponde a \"{{q}}\"",
+    "installFailed": "Installazione fallita"
+  },
+  "review": {
+    "noReview": "Nessuna skill in attesa di review",
+    "pending": "In attesa",
+    "rejectPlaceholder": "Motivo del rifiuto...",
+    "reject": "Rifiuta",
+    "approve": "Approva",
+    "details": "Dettagli"
+  },
+  "daemon": {
+    "statusStarting": "Avvio…",
+    "statusRunning": "Attivo",
+    "statusStopped": "Fermato",
+    "statusError": "Errore",
+    "stopTitle": "Ferma daemon",
+    "restartTitle": "Riavvia daemon",
+    "removeTitle": "Elimina record",
+    "delete": "Elimina",
+    "no": "No",
+    "lastEvent": "ultimo evento",
+    "startTitle": "Avvia processo background",
+    "loadingSkills": "Caricamento skill…",
+    "noDaemonSkills": "Nessuna skill con script daemon disponibile.",
+    "noDaemonSkillsPre": "Aggiungi",
+    "noDaemonSkillsMid": "a uno script in",
+    "selectSkill": "— Seleziona skill —",
+    "daemonScript": "Script daemon",
+    "select": "Seleziona",
+    "selectScript": "— Seleziona script —",
+    "startError": "Errore avvio daemon",
+    "start": "Avvia",
+    "newDaemon": "Nuovo daemon",
+    "refreshListTitle": "Aggiorna lista",
+    "intro": "Processi background avviati dalle skill. Girano in modo autonomo e inviano notifiche real-time quando rilevano eventi (nuove email, aggiornamenti, ecc.).",
+    "loadError": "Errore caricamento daemon",
+    "empty": "Nessun daemon configurato.",
+    "emptyHint": "Avvia un processo background con \"Nuovo daemon\" per ricevere notifiche in tempo reale.",
+    "active": "Attivi ({{count}})",
+    "history": "Storici ({{count}})"
+  },
+  "shared": {
+    "info": "Queste skill sono installate da altri utenti e rese disponibili a tutti. Sono già attive nell'agente — non serve installarle. L'owner controlla configurazione, assegnazioni e aggiornamenti.",
+    "emptyTitle": "Nessuna skill condivisa disponibile",
+    "emptyHint": "Quando un utente condivide una skill e viene approvata, apparirà qui.",
+    "badge": "Condivisa",
+    "pyDeps": "{{count}} py deps",
+    "jsDeps": "{{count}} js deps"
+  },
+  "cardDisabled": "Disabilitata",
+  "status": {
+    "pending": "In attesa",
+    "installing": "Installando",
+    "ready": "Pronta",
+    "error": "Errore"
+  },
+  "scopeBadge": {
+    "personal": "Personale"
+  }
+}

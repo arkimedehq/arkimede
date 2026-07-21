@@ -1,0 +1,44 @@
+server {
+  listen 80;
+  root /usr/share/nginx/html;
+  index index.html;
+
+  # Max upload size (multipart to /api/files/upload, skill ZIPs, audio).
+  # ${MAX_UPLOAD_MB} is substituted at container start by the nginx image's
+  # envsubst entrypoint (this file lives in /etc/nginx/templates/); nginx
+  # runtime vars like $host are NOT in the environment, so they survive as-is.
+  # Keep in sync with the backend Multer limit, driven by the same env var.
+  client_max_body_size ${MAX_UPLOAD_MB}m;
+
+  # Proxy API to backend
+  location /api {
+    proxy_pass http://backend:3000;
+    proxy_http_version 1.1;
+    proxy_set_header Connection '';
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_buffering off;
+    proxy_cache off;
+    chunked_transfer_encoding on;
+  }
+
+  # Socket.IO — real-time notifications (toast + bell).
+  # MUST be forwarded as WebSocket: without the Upgrade/Connection headers the
+  # /notifications socket does not attach and notifications only arrive on reload.
+  # (prod equivalent of the `'/socket.io': { ws: true }` proxy in vite.config.ts)
+  location /socket.io {
+    proxy_pass http://backend:3000;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_read_timeout 3600s;   # do not close idle sockets (reduces reconnects)
+    proxy_buffering off;
+  }
+
+  # SPA fallback
+  location / {
+    try_files $uri $uri/ /index.html;
+  }
+}

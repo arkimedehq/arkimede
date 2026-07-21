@@ -1,0 +1,28 @@
+<!-- connected.svg -->
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+        <filter id="glow">
+            <feGaussianBlur stdDeviation="8" result="blur"/>
+            <feMerge>
+                <feMergeNode in="blur"/>
+                <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+        </filter>
+    </defs>
+
+    <!-- Glow -->
+    <circle cx="128" cy="128" r="70" fill="#22C55E" opacity="0.18" filter="url(#glow)"/>
+
+    <!-- Left node -->
+    <circle cx="72" cy="128" r="20" fill="#22C55E"/>
+
+    <!-- Right node -->
+    <circle cx="184" cy="128" r="20" fill="#22C55E"/>
+
+    <!-- Bridge -->
+    <rect x="92" y="112" width="72" height="32" rx="16" fill="#22C55E"/>
+
+    <!-- Pulse arcs -->
+    <path d="M48 88C28 108 28 148 48 168" stroke="#22C55E" stroke-width="12" stroke-linecap="round"/>
+    <path d="M208 88C228 108 228 148 208 168" stroke="#22C55E" stroke-width="12" stroke-linecap="round"/>
+</svg>

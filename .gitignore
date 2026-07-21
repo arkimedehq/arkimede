@@ -1,0 +1,44 @@
+/tmp
+/out-tsc
+
+/node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+/.pnp
+.pnp.js
+
+.vscode/*
+/.idea/
+/.claude/
+/bridge/node_modules/
+/bridge/dist-electron/
+
+# env reali (segreti) — i .example restano tracciati (nomi diversi → non match)
+/.env
+/.env.executor
+frontend/.env
+
+# Dati condivisi dell'overlay broker (bind-mount HOST_DATA_DIR di default)
+/data/
+
+# macOS
+.DS_Store
+
+# Generati da scripts/install.sh (profilo compose locale, per-macchina)
+/scripts/.compose-profile
+/scripts/compose.sh
+
+# specs/ = documentazione solo-interna (design/spec, piani test/sicurezza, matrici
+# comparative, roadmap interna). Tracciata in QUESTO repo (privato); va esclusa solo
+# quando si pubblica sull'altro repo pubblico ("push di tutto tranne specs/").
+/egress-proxy/C1-VERIFICATION.md
+
+# Local data backups (backup.sh)
+/backups/
+
+# Internal publish tooling (private → public mirror). Kept in the repo root so it
+# is not lost, but never committed/published.
+/publish-arkimede.sh
+.env.bak*
+.env.pre-*

@@ -1,0 +1,11 @@
+{
+  "notFound": "Daemon {id} not found",
+  "skillNotFound": "Skill {skillId} not found",
+  "skillNotReady": "Skill \"{name}\" is not ready (status: {status})",
+  "scriptNotFound": "Script \"{filename}\" not found in skill",
+  "scriptNotDaemon": "Script \"{filename}\" is not a daemon (mode={mode}). Declare mode: daemon in the runtime block of SKILL.md to start it as a background process.",
+  "jsNotSupported": "Daemons do not support the \"javascript\" language (isolated-vm). Use \"python\" or \"node\".",
+  "alreadyRunning": "A daemon for \"{filename}\" is already running (id: {id})",
+  "alreadyStopped": "Daemon is already in state \"{status}\"",
+  "stopBeforeDelete": "Stop the daemon before deleting it"
+}

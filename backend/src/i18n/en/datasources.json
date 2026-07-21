@@ -1,0 +1,17 @@
+{
+  "notFound": "Data source \"{id}\" not found",
+  "teamIdRequired": "teamId is required when scope is \"team\".",
+  "orgNameTaken": "An org data source named \"{name}\" already exists.",
+  "teamNameTaken": "A team data source named \"{name}\" already exists.",
+  "orgForbidden": "Only admins can manage org data sources.",
+  "teamIdMissing": "teamId missing for team scope.",
+  "teamForbidden": "Only admins or team owners can manage team data sources.",
+  "ownerOnly": "This operation is reserved for the owner.",
+  "engineUnsupported": "Engine \"{engine}\" is not supported.",
+  "browseOnlyFileshare": "Folder browsing is only available for file-share sources (SMB/SFTP/WebDAV).",
+  "notFileShare": "The source is not a shared folder (SMB/SFTP/WebDAV).",
+  "localRequiresIdentity": "Access to local files requires an identity.",
+  "fileTooLargeIngest": "File too large for indexing ({size} bytes > {max}).",
+  "filePathNotAllowed": "File path not allowed.",
+  "fileNotFound": "File not found."
+}

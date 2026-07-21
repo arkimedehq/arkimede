@@ -1,0 +1,15 @@
+{
+  "notFound": "Tool \"{id}\" non trovato",
+  "teamIdRequired": "Per scope=\"team\" è obbligatorio specificare teamId.",
+  "invalidName": "Nome tool non valido: \"{name}\". Usa snake_case, inizia con lettera minuscola, solo lettere/numeri/underscore, max 64 caratteri.",
+  "reservedName": "Il nome \"{name}\" è riservato ai tool di sistema. Scegli un nome diverso.",
+  "nameTaken": "Hai già un tool con il nome \"{name}\".",
+  "orgNameTaken": "Esiste già un tool org con il nome \"{name}\". I nomi org devono essere globalmente unici.",
+  "teamNameTaken": "Esiste già un tool del team con il nome \"{name}\".",
+  "orgNameTakenUpdate": "Esiste già un tool org con il nome \"{name}\".",
+  "teamNameTakenUpdate": "Esiste già un tool del team con il nome \"{name}\".",
+  "orgForbidden": "Solo gli admin possono gestire tool org.",
+  "teamIdMissing": "teamId mancante per scope team.",
+  "teamForbidden": "Solo admin o owner del team possono gestire tool del team.",
+  "ownerOnly": "Operazione riservata al proprietario del tool."
+}

@@ -1,0 +1,17 @@
+{
+  "notFound": "DataSource \"{id}\" non trovata",
+  "teamIdRequired": "Per scope=\"team\" è obbligatorio specificare teamId.",
+  "orgNameTaken": "Esiste già una data source org con il nome \"{name}\".",
+  "teamNameTaken": "Esiste già una data source del team con il nome \"{name}\".",
+  "orgForbidden": "Solo gli admin possono gestire data source org.",
+  "teamIdMissing": "teamId mancante per scope team.",
+  "teamForbidden": "Solo admin o owner del team possono gestire data source del team.",
+  "ownerOnly": "Operazione riservata al proprietario.",
+  "engineUnsupported": "Engine \"{engine}\" non supportato.",
+  "browseOnlyFileshare": "La navigazione cartelle è disponibile solo per le sorgenti file-share (SMB/SFTP/WebDAV).",
+  "notFileShare": "La sorgente non è una cartella condivisa (SMB/SFTP/WebDAV).",
+  "localRequiresIdentity": "L'accesso ai file locali richiede un'identità.",
+  "fileTooLargeIngest": "File troppo grande per l'indicizzazione ({size} byte > {max}).",
+  "filePathNotAllowed": "Percorso file non consentito.",
+  "fileNotFound": "File non trovato."
+}

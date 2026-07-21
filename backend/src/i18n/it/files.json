@@ -1,0 +1,12 @@
+{
+  "notFound": "File non trovato",
+  "notFoundOrForbidden": "File non trovato o percorso non consentito",
+  "noAccess": "Accesso al file non consentito",
+  "readonlyProject": "Permesso di sola lettura su questo progetto",
+  "scopeOwnerOnly": "Solo il proprietario o un admin può cambiare lo scope",
+  "uploadMissing": "Nessun file caricato",
+  "relRequired": "Fornire ?rel=<path-relativo>",
+  "relInvalid": "Path relativo non valido",
+  "streamTokenInvalid": "Token di streaming non valido o scaduto",
+  "streamParamsRequired": "Specifica 'source' e 'path' del file da trasmettere"
+}

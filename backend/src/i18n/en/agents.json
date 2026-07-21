@@ -1,0 +1,16 @@
+{
+  "agentNotFound": "Agent not found.",
+  "agentOrgAdminOnly": "Only admins can manage org agents.",
+  "teamIdMissing": "teamId is required for team scope.",
+  "agentTeamAdminOnly": "Only admins or team owners can manage team agents.",
+  "agentOwnerOnly": "This operation is reserved for the agent owner.",
+  "agentAccessDenied": "You do not have access to this agent.",
+  "teamNotFound": "Agent team not found.",
+  "teamOrgAdminOnly": "Only admins can manage org agent teams.",
+  "agentTeamTeamAdminOnly": "Only admins or team owners can manage this agent team.",
+  "teamOwnerOnly": "This operation is reserved for the agent team owner.",
+  "teamAccessDenied": "You do not have access to this agent team.",
+  "topologyUnknown": "Topology \"{topology}\" is not recognised.",
+  "noLlmConfigAgent": "No LLM config available for this agent.",
+  "noLlmConfig": "No LLM config available."
+}

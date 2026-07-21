@@ -1,0 +1,223 @@
+{
+  "title": "Skills",
+  "subtitle": "Packages that extend the agent with specialized instructions and executable scripts. Upload a .zip file containing SKILL.md (with frontmatter) and a scripts/ folder.",
+  "tabs": {
+    "mine": "My skills",
+    "shared": "Shared",
+    "public": "Marketplace",
+    "daemons": "Background",
+    "review": "Review"
+  },
+  "internet": {
+    "title": "Network access",
+    "none": "No external access — internal backend only.",
+    "hint": "External domains the skill may connect to (added to the \"internet\" allowlist when enabled):"
+  },
+  "networks": {
+    "title": "Reserved networks",
+    "hint": "Grant this skill access to operator-provisioned corporate networks (LAN/VPN/subnets). The backend stays reachable regardless.",
+    "lanBadge": "LAN"
+  },
+  "scope": {
+    "visibility": "Visibility",
+    "notReadyTitle": "The skill must be ready to be published",
+    "sendReview": "Send for review",
+    "publishTeam": "Publish to team",
+    "makePersonal": "Make personal"
+  },
+  "detail": {
+    "skillId": "Skill ID",
+    "copyId": "Copy Skill ID to clipboard",
+    "author": "Author",
+    "license": "License",
+    "deps": "Dependencies"
+  },
+  "toggle": {
+    "enabled": "Skill enabled",
+    "disabled": "Skill disabled",
+    "enabledHintActive": "— active in the agent",
+    "enabledHintExcluded": "— excluded from the agent",
+    "inChat": "Loaded in chat",
+    "viaAgentOnly": "Only via agent",
+    "inChatHint": "— the tools enter the chat context",
+    "viaAgentHint": "— usable only by an agent that includes it (loadOnFirst off)",
+    "loadOnFirstTitle": "If off, the skill's script-tools don't enter the chat: they stay usable only via an agent (hierarchical delegation)."
+  },
+  "compile": {
+    "button": "Compile to tool",
+    "buttonTitle": "The AI proposes a typed schema for this descriptive skill's scripts, turning them into fast, deterministic tools (instead of sandbox-only execution).",
+    "reviewTitle": "Compile to typed tool",
+    "reviewSubtitle": "The AI proposed a schema for each script. Review the descriptions and input_schema, then confirm: the skill becomes typed and its scripts are exposed as tools.",
+    "llmCallable": "Expose to AI",
+    "descLabel": "Description (for the AI)",
+    "schemaLabel": "input_schema (JSON Schema)",
+    "codeLabel": "Generated code (entrypoint)",
+    "confirm": "Confirm & compile",
+    "cancel": "Cancel",
+    "invalidJson": "input_schema is not valid JSON for \"{{file}}\".",
+    "suggestBadge": "Tool candidate ({{count}} uses)",
+    "suggestHint": "This descriptive skill ran successfully at least 5 times via sandbox: compiling it to a typed tool will make it faster and deterministic."
+  },
+  "actions": {
+    "updateZipTitle": "Upload a new ZIP to update the skill files (config values are preserved)",
+    "updateZip": "Update from ZIP",
+    "syncTitle": "Download the latest version from the marketplace (config values are preserved)",
+    "sync": "Sync",
+    "confirmDelete": "Confirm deletion?",
+    "delete": "Delete",
+    "reinstallTitle": "Update metadata from SKILL.md frontmatter and reinstall dependencies (config values are preserved)",
+    "reinstalled": "Updated",
+    "reinstall": "Reinstall"
+  },
+  "upload": {
+    "error": "Upload error",
+    "onlyZip": "Only .zip files are accepted",
+    "button": "Upload skill (.zip)",
+    "uploading": "Uploading…",
+    "uploaded": "Skill uploaded — installing"
+  },
+  "empty": "No skills — upload a .zip package to start",
+  "script": {
+    "execError": "Execution error",
+    "llmVisible": "Visible to the LLM agent — click to hide it",
+    "llmHidden": "Hidden from the LLM agent — click to make it visible",
+    "runManual": "Run script manually",
+    "run": "Run",
+    "llmContext": "LLM context",
+    "editNote": "Edit",
+    "addNote": "+ Add note",
+    "notePlaceholder": "E.g.: Available models: products_per_project (recommends physical components), categories_per_customer (functional categories). Use products_per_project for detailed recommendations.",
+    "removeNote": "Remove note",
+    "noManualNote": "No manual note — the LLM uses the info script output:",
+    "noNote": "No note — the LLM will only see the static description. Run the info script to update it automatically.",
+    "manualExec": "Manual execution",
+    "chooseFile": "Choose file…",
+    "running": "Running…",
+    "clear": "Clear",
+    "completed": "Completed",
+    "errorExit": "Error (exit {{code}})"
+  },
+  "config": {
+    "saved": "Saved",
+    "error": "Error",
+    "resetDone": "Reset to default",
+    "loading": "Loading config…",
+    "title": "Configuration",
+    "systemVars": "System variables ▾",
+    "systemVarsHintPre": "Available in defaults (e.g.",
+    "systemVarsHintPost": "):",
+    "empty": "(empty)",
+    "showLess": "▲ Show less",
+    "showMore": "▼ Show all",
+    "resetTitle": "Restore default",
+    "selectDatasource": "— Select a connection —",
+    "selectCollection": "— None (L2 disabled) —",
+    "valuePlaceholder": "Value...",
+    "defaultPlaceholder": "default: {{default}}"
+  },
+  "info": {
+    "status": "Status",
+    "refreshTitle": "Refresh status",
+    "refresh": "Refresh",
+    "reading": "Reading status…",
+    "availableWhenReady": "Available when the skill is ready.",
+    "unknownError": "Unknown error"
+  },
+  "docs": {
+    "title": "Documentation",
+    "loading": "Loading documentation…",
+    "error": "Documentation not available"
+  },
+  "project": {
+    "title": "Projects",
+    "assigned": "{{count}} assigned",
+    "searchPlaceholder": "Search project...",
+    "noneFound": "No project found",
+    "noneAvailable": "No project available",
+    "remove": "Remove",
+    "add": "Add",
+    "note": "The SKILL.md is injected into the prompt of assigned projects."
+  },
+  "toggleTitle": {
+    "disable": "Disable skill",
+    "enable": "Enable skill"
+  },
+  "marketplace": {
+    "installed": "Installed",
+    "by": "by {{author}}",
+    "scripts": "{{count}} script",
+    "deps": "{{count}} deps",
+    "installing": "Installing…",
+    "install": "Install",
+    "searchPlaceholder": "Search by name, description, tag...",
+    "refreshTitle": "Re-read registry from GitHub",
+    "countAll": "{{count}} skills in the registry",
+    "countFiltered": "{{shown}} of {{total}} skills",
+    "updatedAt": "· updated {{date}}",
+    "connecting": "Connecting to the registry…",
+    "unreachable": "Registry unreachable",
+    "unreachableHintPre": "Check the",
+    "unreachableHintPost": "variable and the server connection.",
+    "emptyTitle": "No skills in the registry",
+    "emptyHint": "Contribute by publishing your skills on GitHub.",
+    "noMatch": "No skill matches \"{{q}}\"",
+    "installFailed": "Installation failed"
+  },
+  "review": {
+    "noReview": "No skill pending review",
+    "pending": "Pending",
+    "rejectPlaceholder": "Rejection reason...",
+    "reject": "Reject",
+    "approve": "Approve",
+    "details": "Details"
+  },
+  "daemon": {
+    "statusStarting": "Starting…",
+    "statusRunning": "Active",
+    "statusStopped": "Stopped",
+    "statusError": "Error",
+    "stopTitle": "Stop daemon",
+    "restartTitle": "Restart daemon",
+    "removeTitle": "Delete record",
+    "delete": "Delete",
+    "no": "No",
+    "lastEvent": "last event",
+    "startTitle": "Start background process",
+    "loadingSkills": "Loading skills…",
+    "noDaemonSkills": "No skill with a daemon script available.",
+    "noDaemonSkillsPre": "Add",
+    "noDaemonSkillsMid": "to a script in",
+    "selectSkill": "— Select a skill —",
+    "daemonScript": "Daemon script",
+    "select": "Select",
+    "selectScript": "— Select a script —",
+    "startError": "Daemon start error",
+    "start": "Start",
+    "newDaemon": "New daemon",
+    "refreshListTitle": "Refresh list",
+    "intro": "Background processes started by skills. They run autonomously and send real-time notifications when they detect events (new emails, updates, etc.).",
+    "loadError": "Daemon loading error",
+    "empty": "No daemon configured.",
+    "emptyHint": "Start a background process with \"New daemon\" to receive real-time notifications.",
+    "active": "Active ({{count}})",
+    "history": "History ({{count}})"
+  },
+  "shared": {
+    "info": "These skills are installed by other users and made available to everyone. They're already active in the agent — no need to install them. The owner controls configuration, assignments and updates.",
+    "emptyTitle": "No shared skill available",
+    "emptyHint": "When a user shares a skill and it's approved, it will appear here.",
+    "badge": "Shared",
+    "pyDeps": "{{count}} py deps",
+    "jsDeps": "{{count}} js deps"
+  },
+  "cardDisabled": "Disabled",
+  "status": {
+    "pending": "Pending",
+    "installing": "Installing",
+    "ready": "Ready",
+    "error": "Error"
+  },
+  "scopeBadge": {
+    "personal": "Personal"
+  }
+}

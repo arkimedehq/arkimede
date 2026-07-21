@@ -1,0 +1,9 @@
+{
+  "emailTaken": "Email already registered",
+  "invalidCredentials": "Invalid credentials",
+  "accountDisabled": "Account disabled. Contact an administrator.",
+  "registrationClosed": "Public registration is disabled. Ask an administrator to create your account.",
+  "notFound": "Resource not found",
+  "forbidden": "You don't have access to this resource",
+  "unauthorized": "Not authenticated"
+}

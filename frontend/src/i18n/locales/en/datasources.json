@@ -1,0 +1,129 @@
+{
+  "section": {
+    "title": "Data Sources",
+    "description": "Connect data sources to the AI agent: SQL databases, MongoDB, Redis and network shares (SMB/SFTP/WebDAV). Connection strings are encrypted and never exposed in plain text. Each source can be queried via its dedicated tool.",
+    "newButton": "New source"
+  },
+  "stats": {
+    "total_one": "{{count}} source total",
+    "total_other": "{{count}} sources total",
+    "personal_one": "{{count}} personal",
+    "personal_other": "{{count}} personal",
+    "shared": "team/org"
+  },
+  "list": {
+    "loading": "Loading…",
+    "empty": {
+      "title": "No data sources",
+      "hint": "Connect a SQL database to let the agent query it",
+      "add": "Add source"
+    },
+    "connectionEncrypted": "Encrypted connection string"
+  },
+  "security": {
+    "title": "Security & privacy",
+    "encryption": "Connection strings are encrypted with AES-256 and are never returned in plain text.",
+    "queryOnDemand": "The DB is queried only on explicit request by the agent — never in the background.",
+    "sharedAccess": "Shared sources are accessible to all users but can only be modified by the owner."
+  },
+  "card": {
+    "titleEdit": "Edit",
+    "titleView": "View",
+    "titleDelete": "Delete",
+    "confirmDelete": "Delete",
+    "cancelDelete": "No"
+  },
+  "modal": {
+    "titleNew": "New Data Source",
+    "titleEdit": "Edit: {{name}}",
+    "sectionConnection": "Connection",
+    "sectionSchema": "Schema",
+    "closeSaved": "Close",
+    "unsavedSchemaConfirm": "You have unsaved schema changes (hidden tables/columns, comments, relations). Closing will discard them. Close anyway?",
+    "saving": "Saving…",
+    "saveChanges": "Save changes",
+    "createSource": "Create source",
+    "saved": "Saved"
+  },
+  "form": {
+    "nameLabel": "Name",
+    "nameHint": "— display name, e.g. \"Company ERP\"",
+    "namePlaceholder": "e.g. Company ERP",
+    "descriptionLabel": "Description",
+    "descriptionHint": "— what this database contains",
+    "descriptionPlaceholder": "E.g.: \"Company management database. Contains customers, orders, items, suppliers and stock movements.\"",
+    "engineLabel": "Source type",
+    "connectionStringLabel": "Connection String",
+    "connectionStringHint": "— encrypted, not recoverable after saving",
+    "connectionStringSavedPlaceholder": "••••••••• (leave blank to keep unchanged)",
+    "connectionStringNewPlaceholder": "Connection string in the selected engine's format",
+    "connectionStringSavedNote": "The connection string is already saved. Enter a new value only to update it.",
+    "formatLabel": "Format:",
+    "testConnection": "Test connection",
+    "testOk": "Connection successful ({{ms}} ms)",
+    "testFailed": "Connection failed",
+    "schemaHintsLabel": "Notes / instructions about the database",
+    "schemaHintsHint": "— free text injected before building the query",
+    "schemaHintsPlaceholder": "Business rules, conventions or free instructions. E.g.:\n- FLAGSTORICO = 1 → historicized record (exclude with WHERE FLAGSTORICO = 0)\n- always filter customers with ATTIVO = 1\n- amounts are in cents",
+    "schemaHintsNote": "Free-text notes/instructions only. The schema (tables, columns, relations) is managed below with Introspect.",
+    "prefetchRelationsLabel": "Auto-detect FK relations",
+    "prefetchRelationsHint": "Reads FOREIGN KEY constraints from INFORMATION_SCHEMA and passes them to the LLM. Requires FK declarations in the DB.",
+    "enrichedSchemaLabel": "Enriched schema",
+    "enrichedSchemaHint": "— tables, comments, relations and denied tables",
+    "enrichedSchemaSaveFirst": "Save the data source first to introspect the schema and generate it with AI.",
+    "visibilityLabel": "Visibility",
+    "securityNote": "The connection string is encrypted with AES-256 before saving and cannot be retrieved in plain text via the interface."
+  },
+  "errors": {
+    "createFailed": "Error during creation",
+    "updateFailed": "Error during update",
+    "operationFailed": "Operation failed",
+    "deleteFailed": "Error during deletion"
+  },
+  "manifest": {
+    "noSchema": "No schema generated.",
+    "introspectPrompt": "Introspect",
+    "generateAIPrompt": "Generate with AI",
+    "noSchemaHint": "to read tables from the database, then",
+    "noSchemaHint2": "for comments and relations. Everything remains editable below.",
+    "stats": "{{tables}} tables · {{relations}} relations · {{dialect}} · generated {{date}}",
+    "statsDoc": "{{collections}} collections · MongoDB · generated {{date}}",
+    "statsKeyspace": "{{patterns}} patterns · Redis · generated {{date}}",
+    "collectionsLabel": "Collections",
+    "collectionCommentPlaceholder": "collection comment…",
+    "fieldCommentPlaceholder": "field comment…",
+    "patternsLabel": "Key patterns",
+    "patternCommentPlaceholder": "pattern comment…",
+    "relationsLabel": "Implicit relations",
+    "addRelation": "add",
+    "noRelations": "No relations.",
+    "tablesLabel": "Tables",
+    "denyAllow": "Denied — click to allow",
+    "denyBlock": "Deny: hide from agent and block queries",
+    "denyColumnBlock": "Deny field: hide from agent and block it in queries",
+    "clearButton": "Clear introspection",
+    "clearTooltip": "Empty the curated schema: SQL tools will read the live schema from the DB again",
+    "clearConfirm": "Clear all introspection for this data source? The curated schema (comments, relations, hidden fields) will be removed and SQL tools will fall back to live.",
+    "tableCommentPlaceholder": "table comment…",
+    "columnCommentPlaceholder": "column comment…",
+    "introspectButton": "Introspect",
+    "generateAIButton": "Generate with AI",
+    "modelDefault": "Model: summarizer/default",
+    "modelTooltip": "Model used for comment and relation generation",
+    "saveSchema": "Save schema",
+    "schemaSaved": "Saved",
+    "modelSuffix_summarizer": " (summarizer)",
+    "modelSuffix_default": " (default)"
+  },
+  "browse": {
+    "button": "Browse",
+    "title": "Choose a folder",
+    "up": "Up",
+    "loading": "Loading…",
+    "empty": "Empty folder",
+    "current": "Selected folder:",
+    "cancel": "Cancel",
+    "use": "Use this folder",
+    "useNeedsConn": "Enter the connection string to use this folder"
+  }
+}

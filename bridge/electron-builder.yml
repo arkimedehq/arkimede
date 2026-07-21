@@ -1,0 +1,50 @@
+appId: com.arkimede.bridge
+productName: Arkimede Bridge
+directories:
+  output: dist-electron
+  buildResources: resources
+# Ad-hoc sign the macOS .app (no Apple account). Makes it launchable on Apple
+# Silicon; users still clear Gatekeeper once (see build/afterPack.cjs).
+afterPack: build/afterPack.cjs
+files:
+  - out/**/*
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!electron.vite.config.*'
+  - '!{.eslintignore,.eslintrc.cjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
+  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: resources/icon.ico
+mac:
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  icon: resources/icon.icns
+  category: public.app-category.utilities
+  # No Developer ID certificate in CI → disable electron-builder's own signing.
+  # The ad-hoc signature is applied by the afterPack hook instead.
+  identity: null
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+  icon: resources/icon.png
+  category: Utility
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+# No `publish` provider here on purpose: the release is created by the workflow's
+# softprops/action-gh-release step (so it can carry the `bridge-v<version>` tag,
+# which electron-builder cannot emit). electron-builder only BUILDS the installers
+# (--publish never); the bridge has no auto-updater, so no update-info is needed.
+# A `publish` block here would make electron-builder try to build update-info under
+# --publish never and crash ("Cannot read properties of null (reading 'provider')").
