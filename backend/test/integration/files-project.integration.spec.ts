@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * T1 — Integration with real DB: project shared files (collaborator/viewer
  * roles). Migrates smoke-phase2: upload (canWrite), listing by project (member

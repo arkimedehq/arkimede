@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * L6 regression — public self-service registration is closed by default. The first
  * user still bootstraps (as admin); afterwards /api/auth/register is rejected unless

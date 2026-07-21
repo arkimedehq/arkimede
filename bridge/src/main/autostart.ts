@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 import AutoLaunch from 'auto-launch'
 import { app } from 'electron'
 import { BRIDGE_NAME } from './app.config'

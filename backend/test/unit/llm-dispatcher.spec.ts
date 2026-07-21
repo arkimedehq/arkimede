@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * In-memory LLM request scheduler (P1): prototype-level gate (survives the
  * bindTools clone), per-config concurrency cap, FIFO within the same class,

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright © 2026 Andrea Genovese
+
 # Overlay C1 — egress allowlist (OPT-IN, not auto-merge).
 #
 #   docker compose -f docker-compose.yml -f docker-compose.egress.yml up -d

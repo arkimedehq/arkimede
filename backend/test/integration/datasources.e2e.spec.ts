@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * T3 — HTTP e2e for data sources: real authorization on the endpoints +
  * the security invariant that the connection string NEVER leaks in the API

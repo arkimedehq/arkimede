@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * T3/B1 — e2e of the download `GET /api/files/raw?rel=`:
  *   - relative paths only (no absolute), containment via realpath (anti ../ and symlink);

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 import { spawn } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -103,13 +106,12 @@ export async function runNode(req: ExecuteRequest): Promise<ExecuteResult> {
     // ── Per-user deliverables dir (physical tenant isolation; same subdir the
     // backend `?rel=` download confines to). Accessible via process.env.SKILLS_OUTPUT_DIR
     SKILLS_OUTPUT_DIR: userOutDir,
-
-    // ── Remote browser (optional) — injected if configured in the container
-    ...(process.env.CHROMIUM_WS_URL ? { CHROMIUM_WS_URL: process.env.CHROMIUM_WS_URL } : {}),
-
     // ── Egress proxy (C1) — no-op passthrough if not configured
     ...proxyEnv(),
   };
+
+  // Remote browser endpoint: forwarded to the skill only when the container sets it.
+  if (process.env.CHROMIUM_WS_URL) env.CHROMIUM_WS_URL = process.env.CHROMIUM_WS_URL;
 
   const start = Date.now();
   let stdout  = '';

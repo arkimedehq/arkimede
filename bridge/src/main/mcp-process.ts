@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 import { spawn, execSync, ChildProcess } from 'child_process'
 import { EventEmitter } from 'events'
 import { APP_NAME } from './app.config'

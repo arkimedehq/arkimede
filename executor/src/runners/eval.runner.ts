@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 import ivm from 'isolated-vm';
 
 const MEMORY_LIMIT = parseInt(process.env.JS_MEMORY_LIMIT_MB ?? '128', 10); // MB per isolate

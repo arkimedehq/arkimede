@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright © 2026 Andrea Genovese
+
 # install.sh — guided installer for the containerized startup of Arkimede.
 #
 # Walks step-by-step through: Docker preflight → secrets → SECURITY LEVEL →

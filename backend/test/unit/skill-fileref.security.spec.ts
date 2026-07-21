@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * C2 copy-in — `buildSkillTool` recognizes `format: file-ref` params, resolves them
  * via resolver (access-aware) and populates `ExecuteRequest.files`; if the resolver

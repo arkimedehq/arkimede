@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright © 2026 Andrea Genovese
+
 #
 # smoke-scoping.sh — API smoke test for the personal|team|org scoping.
 #

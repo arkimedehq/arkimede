@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * T1 — Integration with a real DB: chat threads shared in multi-team projects
  * (project→chat→messages cascade). Migrates smoke-project-teams (chat part) +

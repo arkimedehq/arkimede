@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * proxy-env.ts — passthrough of the egress-proxy variables (C1) to the skill subprocesses.
  *

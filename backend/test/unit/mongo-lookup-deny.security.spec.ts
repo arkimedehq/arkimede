@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * L2 regression — the manifest collection-deny only inspected spec.collection, so an
  * aggregate could read a denied collection via $lookup/$graphLookup/$unionWith. The

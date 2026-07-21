@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 import {
   Body, Controller, ForbiddenException, HttpCode, HttpStatus, Post, Req, UseGuards,
 } from '@nestjs/common';

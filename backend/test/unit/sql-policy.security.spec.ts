@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * SQL operations capability (E1) — `evaluateSqlPolicy` in
  * `custom-tools/custom-tool.factory.ts` (pure function).

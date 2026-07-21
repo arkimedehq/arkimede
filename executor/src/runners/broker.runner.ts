@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 import * as path from 'path';
 import * as fs from 'fs';
 import { ExecuteRequest, ExecuteResult } from '../types';

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 import { Logger } from '@nestjs/common';
 import { Pool } from 'pg';
 import type { VectorStoreAdapter, VectorPoint, SearchHit } from '../vector-store.types';

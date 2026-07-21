@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 import {
   BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus,
   Inject, Optional, Param, Patch, Post, Query, UseGuards,

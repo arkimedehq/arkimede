@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * M5 regression — POST /api/user-memory/extract (extractForChat) must verify the
  * caller can access the chat before distilling facts from it. Before the fix it

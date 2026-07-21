@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ * Copyright © 2026 Andrea Genovese
+ */
+
 /* Self-hosted webfonts — no third-party CDN, so no visitor data leaves this origin.
  *
  * Space Grotesk and IBM Plex Sans are variable fonts: one file per subset covers the

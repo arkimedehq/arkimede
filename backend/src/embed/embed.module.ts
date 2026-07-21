@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 import { Module, forwardRef } from '@nestjs/common';
 import { EmbedService } from './embed.service';
 import { EmbedIngestQueueService } from './embed-ingest.queue';

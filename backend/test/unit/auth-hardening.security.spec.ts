@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * M7 + M8 verification — boots ONLY the AuthController with the real ThrottlerModule
  * and helmet (AuthService mocked, no DB), then exercises the HTTP surface:

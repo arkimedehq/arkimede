@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 import { Entity, PrimaryColumn, Column, UpdateDateColumn } from 'typeorm';
 import type { VectorDbProvider } from './vector-store.types';
 

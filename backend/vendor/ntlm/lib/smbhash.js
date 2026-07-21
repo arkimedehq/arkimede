@@ -2,7 +2,7 @@
  * Samba LM / NT hash generation — clean-room reimplementation using
  * pure-JS MD4 and DES (no node:crypto / OpenSSL legacy provider).
  *
- * Copyright (C) 2026  Arkimede contributors
+ * Copyright © 2026 Andrea Genovese
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 

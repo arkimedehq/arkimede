@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * L9 regression — for a `mongodb+srv://h/...` connection string the driver connects
  * to the SRV targets of `_mongodb._tcp.h`, not to `h`. The host guard now resolves

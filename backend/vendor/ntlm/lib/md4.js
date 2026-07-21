@@ -4,7 +4,7 @@
  * Self-contained: does NOT depend on node:crypto or any OpenSSL legacy
  * provider (MD4 was moved to the legacy provider in OpenSSL 3).
  *
- * Copyright (C) 2026  Arkimede contributors
+ * Copyright © 2026 Andrea Genovese
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 

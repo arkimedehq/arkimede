@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 import {Body, Controller, Delete, Get, Inject, Logger, Param, Post, Req, Res, UseGuards,} from '@nestjs/common';
 import {Request, Response} from 'express';
 import {join, resolve, relative, sep, basename} from 'path';

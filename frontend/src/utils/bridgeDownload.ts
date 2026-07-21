@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 // bridgeDownload.ts — resolves where the user downloads the Electron desktop
 // "bridge" from. The binaries (dmg/exe/AppImage) are NOT in the repo: they are
 // published as assets of a GitHub Release by the `release-bridge.yml` workflow.

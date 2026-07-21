@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * Application branding configuration.
  * Set VITE_APP_NAME in the .env file to customize the name.

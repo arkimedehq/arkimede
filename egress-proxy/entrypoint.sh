@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright © 2026 Andrea Genovese
+
 #
 # entrypoint.sh — starts Squid and acts as a watcher for the hot reload of the
 # skill allowlist, WITHOUT any access to the Docker socket.

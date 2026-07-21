@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright © 2026 Andrea Genovese
+
 # update.sh — upgrade an existing Arkimede deployment to the latest source.
 #
 # install.sh brings the stack up from whatever is already in the working tree;

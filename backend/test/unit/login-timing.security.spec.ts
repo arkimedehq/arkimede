@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * L5 regression — login must spend the same CPU on an unknown email as on a wrong
  * password (a dummy bcrypt compare), so response timing can't be used to enumerate

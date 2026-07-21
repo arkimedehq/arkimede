@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright © 2026 Andrea Genovese
+
 # bootstrap-broker.sh — prepares HOST_DATA_DIR for the broker mode (container-per-job).
 #
 # The sandbox/skill jobs run as "sibling" containers with a non-root uid (999) and

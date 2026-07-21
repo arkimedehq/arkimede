@@ -4,7 +4,7 @@
  * ntlm@0.1.3, but using pure-JS MD4/DES primitives (no OpenSSL provider
  * dependency).
  *
- * Copyright (C) 2026  Arkimede contributors
+ * Copyright © 2026 Andrea Genovese
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 

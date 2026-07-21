@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * M4 regression — POST /api/feedback must verify the caller can access the chat
  * the rated message belongs to. Before the fix, createOrUpdate looked the message

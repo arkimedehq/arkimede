@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * Application branding configuration.
  * Change APP_NAME in the .env to rebrand everything without touching the code.

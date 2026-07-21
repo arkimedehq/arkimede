@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * Runtime test of the agentskills.io format (S1): skills no longer have skill.yaml,
  * the manifest lives in the frontmatter of SKILL.md under `runtime`.

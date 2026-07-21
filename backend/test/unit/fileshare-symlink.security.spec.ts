@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * L7 regression — the virtual `local` file-share adapter guarded the path only
  * lexically, so a symlink planted inside the base pointing outside (e.g. -> /etc)

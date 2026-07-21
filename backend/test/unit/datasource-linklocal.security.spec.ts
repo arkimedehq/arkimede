@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * H2 regression — `datasource-host-guard.isLinkLocalIp` classifies the cloud
  * metadata / link-local ranges (ALWAYS blocked, independent of admin config) using

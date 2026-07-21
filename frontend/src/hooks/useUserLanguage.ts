@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * Syncs the interface language with the preference saved on the user profile
  * (User.language) and persists it when the user changes it.

@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 'use strict';
 /**
  * One-off migration: moves the skills from the old format (skill.yaml + SKILL.md)

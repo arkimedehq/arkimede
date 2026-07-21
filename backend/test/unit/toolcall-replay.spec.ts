@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * Cross-provider tool-call replay — reconstructing the history
  *   AIMessage(tool_calls) → ToolMessage(result) × N → AIMessage(text)

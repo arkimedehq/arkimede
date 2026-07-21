@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright © 2026 Andrea Genovese
+
 # runner/Dockerfile — image of the container-jobs (D2).
 #
 # Run by the broker, which launches it with `--entrypoint python3|node` + the

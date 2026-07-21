@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 import axios from 'axios';
 import { useStore } from '../store/useStore';
 import i18n from '../i18n';

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * T1 — Integration with real DB: scoping + skill REVIEW workflow.
  * Beyond personal|team|org, an `org` skill is visible to others ONLY after

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * Skill integrity from registry (E3) — `assertSkillIntegrity` in
  * `skills/registry.service.ts`.

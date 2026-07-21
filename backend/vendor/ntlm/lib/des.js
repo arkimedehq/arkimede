@@ -5,7 +5,7 @@
  * Only the primitive needed for NTLM LM/NT responses is exposed:
  * encrypt a single 8-byte block with an 8-byte (already parity-expanded) key.
  *
- * Copyright (C) 2026  Arkimede contributors
+ * Copyright © 2026 Andrea Genovese
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 

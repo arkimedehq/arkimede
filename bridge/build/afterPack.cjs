@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 // electron-builder `afterPack` hook — ad-hoc code-signs the macOS .app.
 //
 // Why: the bridge is built in CI without an Apple Developer ID, so it is neither

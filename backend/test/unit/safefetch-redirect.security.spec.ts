@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * H3 regression — safeFetch (common/ssrf-guard.ts) must re-apply the anti-SSRF
  * guard to EVERY redirect hop, not just the initial URL. The default fetch follows

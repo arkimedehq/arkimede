@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * T3 — e2e HTTP for projects: access (canAccess) and sharing management
  * (owner/admin only) actually enforced on the endpoints.

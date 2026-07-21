@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright © 2026 Andrea Genovese
+
 # Egress-proxy: Squid + watcher for the hot reload of the skill allowlist.
 #
 # Functionally identical to the stock `ubuntu/squid` image as a proxy, but with an

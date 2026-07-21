@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * M1 regression — a Mongo aggregate pipeline that ends in $out/$merge WRITES a
  * collection, but `aggregate` is classified as a read op, so a read-only Mongo tool

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * T3 — HTTP e2e: the full round trip guard → controller → service → real DB.
  * Catches the bugs unit tests miss: authorization actually enforced on the

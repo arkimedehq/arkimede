@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * Integration helper: starts an ephemeral PostgreSQL (testcontainers) and
  * builds its real schema via TypeORM `synchronize`.

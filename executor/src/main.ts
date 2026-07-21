@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 import './env';   // loads .env.executor (root) — MUST come before everything else
 import Fastify from 'fastify';
 import { execFile } from 'child_process';

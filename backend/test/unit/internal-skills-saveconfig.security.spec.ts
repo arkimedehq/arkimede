@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * M2 regression — POST /internal/skills/:id/save-config must be bound to the
  * run-token identity and the caller's access to the target skill. Before the fix

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright © 2026 Andrea Genovese
+
 # docker-compose.override.yml — DEVELOPMENT layer (auto-merge with `docker compose up`).
 #
 # Re-adds the host ports of the internal services so they can be reached from the

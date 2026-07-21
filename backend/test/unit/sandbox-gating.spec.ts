@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * Sandbox gating (scope b): global master switch in app_config + authorization
  * for admin | project in allowlist | user's team in allowlist. Fail-closed.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * C2 copy-out — `FilesService.trackOutput` records a skill/tool output as a
  * File entity (owner, personal scope, run's project) so the `?rel=` download

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * A-MEM F1: tolerant parsing and bounding of the summarizer-generated note
  * metadata. The note must be valid whatever the LLM returns.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 // APP_NAME is injected by the main process via window.bridge or read from env
 const APP_NAME = (window as any).__APP_NAME__ ?? 'Arkimede'

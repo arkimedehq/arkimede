@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * Inter-skill invoke now propagates the caller's identity to the executor as a
  * signed run-token (mirrors the primary skill-tool path), so an invoked skill can

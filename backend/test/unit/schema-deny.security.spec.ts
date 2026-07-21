@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * Enforcement of `deny` tables in the SQL guard — `referencedTables` +
  * `evaluateSqlPolicy(..., deniedTables)` in `custom-tools/custom-tool.factory.ts`.

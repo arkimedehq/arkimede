@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * M3 regression — POST /internal/daemons/events must take the user and daemon
  * identity from the signed daemon token (sub/did), NOT from the request body.

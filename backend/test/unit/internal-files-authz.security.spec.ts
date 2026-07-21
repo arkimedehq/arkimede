@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * H4 regression — GET /internal/files/search must scope the search to the identity
  * in the signed run-token (`internalAuth.sub`), NOT a caller-supplied `?userId=`.

@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright © 2026 Andrea Genovese
+
 # ─── docker-entrypoint.sh ─────────────────────────────────────────────────────
 #
 # Initializes Nix on the /nix volume at the container's first startup, then

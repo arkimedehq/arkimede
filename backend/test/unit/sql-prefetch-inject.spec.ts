@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Andrea Genovese
+
 /**
  * Schema injection into the LLM before using the SQL tool — real path
  * `buildDynamicTool → executeSql → fetchSchema` in free-mode (queryParam) without a query.
