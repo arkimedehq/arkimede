@@ -74,6 +74,8 @@ Le due cose di cui un'organizzazione ha davvero bisogno — **governance multi-t
 ## Avvio rapido
 
 > Richiede Docker + Docker Compose. Avvia l'intero stack (Postgres, Qdrant, Redis, servizi embedding e whisper, skill executor, backend, frontend).
+>
+> **Footprint:** a riposo l'intero stack occupa **~2 GB di RAM** — i due servizi ML fanno la parte del leone (embedding `mxbai-embed-large` ~1 GB, Whisper `small`/`int8` ~0,4 GB); tutto il resto insieme sta sotto i 550 MB. **4 GB di RAM sono un minimo comodo**; 8 GB consigliati per un uso reale (utenti concorrenti, RAG attivo). Solo CPU di default — nessuna GPU necessaria. Prevedi ~10 GB di disco per immagini, modelli e lo store Nix persistente. Puoi togliere il servizio embedding (−1 GB) se non ti serve il RAG, o Whisper (−0,4 GB) se non ti serve l'input vocale.
 
 ```bash
 git clone https://github.com/arkimedehq/arkimede.git

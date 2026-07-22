@@ -1,0 +1,123 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright © 2026 Andrea Genovese
+
+name: Release Images
+
+# Builds and pushes the Arkimede service images to the GitHub Container Registry
+# (ghcr.io/<owner>/arkimede-<service>), so a deployment can PULL them instead of
+# building from source. This is the engine behind the slim `arkimede-deploy` bundle
+# and its `install-hub.sh`.
+#
+# Trigger: push a tag `v<version>` (an app release), or run manually from the Actions
+# tab (workflow_dispatch) providing a version. Each service is one matrix entry;
+# `embedding` has two entries (cpu default + a `-cuda` variant) because the device is
+# baked at build time (CPU-only torch vs the CUDA stack).
+#
+# Notes:
+#  - The embedding/whisper models are PRE-DOWNLOADED into the image at build time
+#    (see their Dockerfiles), so a published image carries the DEFAULT model. Overriding
+#    EMBEDDING_MODEL/WHISPER_MODEL at runtime still works — it just re-downloads on first
+#    start instead of using the baked copy.
+#  - The two ML images build linux/amd64 only: cross-building torch + a model download
+#    under QEMU is slow/fragile. On arm64 hosts they run under emulation. The lightweight
+#    images are multi-arch (amd64 + arm64).
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Image version tag (without the leading v, e.g. 1.2.0)'
+        required: true
+        default: 'edge'
+
+permissions:
+  contents: read
+  packages: write # push to ghcr.io/<owner>/*
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: backend
+            context: ./backend
+            platforms: linux/amd64,linux/arm64
+          - service: frontend
+            context: ./frontend
+            platforms: linux/amd64,linux/arm64
+            build-args: |
+              VITE_API_URL=/api
+              VITE_APP_NAME=Arkimede
+          - service: executor
+            context: ./executor
+            platforms: linux/amd64,linux/arm64
+          - service: broker
+            context: ./broker
+            platforms: linux/amd64,linux/arm64
+          - service: runner
+            context: ./runner
+            platforms: linux/amd64,linux/arm64
+          - service: egress-proxy
+            context: ./egress-proxy
+            platforms: linux/amd64,linux/arm64
+          - service: whisper
+            context: ./whisper-service
+            platforms: linux/amd64
+          # embedding — cpu is the default tag (no suffix); cuda is a separate tag.
+          - service: embedding
+            context: ./embedding-service
+            platforms: linux/amd64
+            tag-suffix: ''
+            build-args: |
+              EMBEDDING_DEVICE=cpu
+          - service: embedding
+            context: ./embedding-service
+            platforms: linux/amd64
+            tag-suffix: '-cuda'
+            build-args: |
+              EMBEDDING_DEVICE=cuda
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute version and image ref
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          IMAGE="ghcr.io/${OWNER}/arkimede-${{ matrix.service }}"
+          SUFFIX="${{ matrix.tag-suffix }}"
+          {
+            echo "tags<<EOF"
+            echo "${IMAGE}:${VERSION}${SUFFIX}"
+            echo "${IMAGE}:latest${SUFFIX}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          platforms: ${{ matrix.platforms }}
+          push: true
+          build-args: ${{ matrix.build-args }}
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha,scope=${{ matrix.service }}${{ matrix.tag-suffix }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}${{ matrix.tag-suffix }}

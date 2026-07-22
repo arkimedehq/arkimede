@@ -13,4 +13,10 @@ FROM ubuntu/squid:latest
 COPY entrypoint.sh /usr/local/bin/egress-entrypoint.sh
 RUN chmod +x /usr/local/bin/egress-entrypoint.sh
 
+# Bake the project's Squid config into the image so a PULLED image is self-contained
+# (the pull-based `arkimede-deploy` bundle has no source tree to bind-mount). The
+# source-based compose still bind-mounts ./egress-proxy/squid.conf over this path with
+# identical content, so this is additive and changes nothing for the build flow.
+COPY squid.conf /etc/squid/squid.conf
+
 ENTRYPOINT ["/usr/local/bin/egress-entrypoint.sh"]

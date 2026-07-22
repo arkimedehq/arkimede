@@ -39,6 +39,7 @@
 - **LLM/embedding API keys:** entered from the **admin UI** after startup (Settings → AI System), not via env. Keep the API key of the provider you'll use handy (Anthropic, OpenAI, Gemini, etc.).
 - **Optional:**
   - Electron + npm — only for MCP transport `remote`
+- **Hardware:** the full stack idles at **~2 GB RAM**. The two ML services dominate — embedding (`mxbai-embed-large`, ~1 GB) and Whisper (`small`/`int8`, ~0.4 GB); everything else combined is under 550 MB. Budget **4 GB RAM as a comfortable minimum**, 8 GB for real use (concurrent users, active RAG). CPU-only by default (no GPU needed; `EMBEDDING_DEVICE=cuda` is opt-in). Plan ~10 GB disk for images, downloaded models and the persistent Nix store. You can drop the embedding service (−1 GB, no RAG) or Whisper (−0.4 GB, no voice input) to lower the footprint.
 
 ---
 
