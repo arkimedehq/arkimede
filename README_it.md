@@ -137,6 +137,27 @@ Il **primo utente registrato diventa admin**. Provider LLM, embedding e vector D
 
 Per lo sviluppo non-Docker, l'accesso da LAN e gli overlay di hardening opzionali, vedi **[GUIDE.md](docs/GUIDE.md)**.
 
+## Deploy senza build
+
+Non vuoi compilare dal sorgente? Usa il **bundle pull-based** — pochi KB di file compose che
+scaricano immagini già pronte dal GitHub Container Registry (`ghcr.io/arkimedehq/arkimede-*`)
+invece di compilare qualcosa in locale:
+
+```bash
+git clone https://github.com/arkimedehq/arkimede-deploy.git
+cd arkimede-deploy
+./install-hub.sh
+```
+
+`install-hub.sh` è lo stesso flusso guidato di `install.sh` (segreti, livello di isolamento,
+device embedding) ma **scarica** le immagini invece di buildarle. Fissa `ARKIMEDE_VERSION` nel
+`.env` a un tag di release per deploy riproducibili. Dettagli completi nel repo
+[arkimede-deploy](https://github.com/arkimedehq/arkimede-deploy).
+
+> Build da sorgente (questo repo, `./scripts/install.sh`) e pull-and-run
+> ([arkimede-deploy](https://github.com/arkimedehq/arkimede-deploy)) avviano lo **stesso** stack —
+> scegli quello che preferisci.
+
 ## I quattro pilastri
 
 Oltre alla chat, quattro sistemi integrati — e interconnessi (i flow sono tool dell'agente e possono invocare agenti/team; le automazioni girano headless e possono usare un team):

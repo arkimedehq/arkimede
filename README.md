@@ -137,6 +137,27 @@ The **first user to register becomes the admin**. LLM providers, embeddings, and
 
 For non-Docker development, LAN access, and the optional hardening overlays, see **[GUIDE.md](docs/GUIDE.md)**.
 
+## Deploy without building
+
+Don't want to build from source? Use the **pull-based bundle** — a few KB of compose files
+that pull pre-built images from the GitHub Container Registry (`ghcr.io/arkimedehq/arkimede-*`)
+instead of compiling anything locally:
+
+```bash
+git clone https://github.com/arkimedehq/arkimede-deploy.git
+cd arkimede-deploy
+./install-hub.sh
+```
+
+`install-hub.sh` is the same guided flow as `install.sh` (secrets, isolation level, embedding
+device) but it **pulls** the images rather than building them. Pin `ARKIMEDE_VERSION` in the
+`.env` to a release tag for reproducible deployments. Full details in the
+[arkimede-deploy](https://github.com/arkimedehq/arkimede-deploy) repo.
+
+> Build-from-source (this repo, `./scripts/install.sh`) vs pull-and-run
+> ([arkimede-deploy](https://github.com/arkimedehq/arkimede-deploy)) start the **same** stack —
+> pick whichever fits your workflow.
+
 ## The four pillars
 
 Beyond chat, four integrated systems — and they interconnect (flows are agent tools and can invoke agents/teams; automations run headless and may use a team):
