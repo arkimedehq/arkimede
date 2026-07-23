@@ -193,6 +193,96 @@ export class AppConfigController {
 
   // ── Sandbox Config ──────────────────────────────────────────────────────────
 
+  /**
+   * GET /api/admin/config/isolation — detected network-isolation level of the
+   * deployment (admin). The level is a property of the compose topology, so it
+   * is PROBED at runtime rather than configured:
+   *   1 · standard  — no job broker: skills run in-process in the executor
+   *   2 · isolated  — broker reachable: container-per-job on the internal network
+   *   3 · maximum   — broker + egress proxy reachable: `internet` tier goes
+   *                   through the allowlisting proxy
+   * Probes are cached briefly to keep the settings page cheap.
+   */
+  @Get('isolation')
+  @ApiOperation({ summary: 'Detected network-isolation level (admin)' })
+  async getIsolationInfo() {
+    const now = Date.now();
+    if (this.isolationCache && now - this.isolationCache.at < 60_000) {
+      return this.isolationCache.value;
+    }
+    // Any HTTP response counts as reachable (the egress proxy answers requests
+    // with a proxy error page; the broker exposes /health).
+    const probe = async (url: string): Promise<boolean> => {
+      try {
+        await fetch(url, { signal: AbortSignal.timeout(1_500) });
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    // Broker health also declares its network allowlist (double gate): a job
+    // network outside that list is refused at launch even if it exists.
+    const brokerHealth = async (): Promise<{
+      ok: boolean;
+      allowedNetworks: string[] | null;
+      allowPrivilegedSandbox: boolean | null;
+    }> => {
+      try {
+        const res = await fetch(
+          `${(process.env.BROKER_URL || 'http://broker:4100').replace(/\/$/, '')}/health`,
+          { signal: AbortSignal.timeout(1_500) },
+        );
+        if (!res.ok) return { ok: false, allowedNetworks: null, allowPrivilegedSandbox: null };
+        const body = (await res.json()) as { allowedNetworks?: string[]; allowPrivilegedSandbox?: boolean };
+        return {
+          ok: true,
+          allowedNetworks: Array.isArray(body.allowedNetworks) ? body.allowedNetworks : null,
+          allowPrivilegedSandbox:
+            typeof body.allowPrivilegedSandbox === 'boolean' ? body.allowPrivilegedSandbox : null,
+        };
+      } catch {
+        return { ok: false, allowedNetworks: null, allowPrivilegedSandbox: null };
+      }
+    };
+    const [broker, egressReachable, executorSandboxMode] = await Promise.all([
+      brokerHealth(),
+      probe(process.env.EGRESS_PROXY_PROBE_URL || 'http://egress-proxy:3128'),
+      this.executorClient.sandboxRuntimeMode(),
+    ]);
+    // The executor declaring broker mode counts even if the backend cannot
+    // reach the broker directly (network topologies may differ per overlay).
+    const brokerActive = broker.ok || executorSandboxMode === 'broker';
+    const level = brokerActive ? (egressReachable ? 3 : 2) : 1;
+    const jobEgressNetwork = process.env.JOB_EGRESS_NETWORK || null;
+    // The `internet` tier is usable only when the egress proxy is deployed AND
+    // its network is declared and passes the broker allowlist. A null list
+    // (older broker) means "unknown" — don't report a false negative.
+    const egressNetworkAllowed =
+      jobEgressNetwork === null
+        ? false
+        : broker.allowedNetworks === null
+          ? true
+          : broker.allowedNetworks.includes(jobEgressNetwork);
+    const value = {
+      level,
+      name: (['standard', 'isolated', 'maximum'] as const)[level - 1],
+      brokerReachable: broker.ok,
+      egressReachable,
+      executorSandboxMode,
+      jobEgressNetwork,
+      brokerAllowedNetworks: broker.allowedNetworks,
+      internetTierAvailable: egressReachable && egressNetworkAllowed,
+      // 'trusted' exec profile needs the broker opt-in; null/old broker =
+      // unknown → available (no false negatives), false = would silently
+      // fall back to hardened.
+      trustedExecModeAvailable: broker.allowPrivilegedSandbox !== false,
+    };
+    this.isolationCache = { at: now, value };
+    return value;
+  }
+
+  private isolationCache: { at: number; value: unknown } | null = null;
+
   /** GET /api/admin/config/sandbox — sandbox tool gating (admin) */
   @Get('sandbox')
   @ApiOperation({ summary: 'Sandbox gating configuration (admin)' })

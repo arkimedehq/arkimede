@@ -122,6 +122,12 @@ export const appConfigApi = {
   updateToolLoadingConfig: (payload: ToolLoadingConfig): Promise<ToolLoadingConfig> =>
     api.patch('/admin/config/tool-loading', payload).then((r) => r.data),
 
+  // ── Network isolation level (detected, read-only) ───────────────────────────
+
+  /** GET /api/admin/config/isolation — probed compose-topology isolation level */
+  getIsolationInfo: (): Promise<IsolationInfo> =>
+    api.get('/admin/config/isolation').then((r) => r.data),
+
   // ── Sandbox Config ──────────────────────────────────────────────────────────
 
   /** GET /api/admin/config/sandbox — sandbox tool gating */
@@ -159,6 +165,22 @@ export type SandboxRuntimeMode = 'broker' | 'in-process' | 'unavailable';
 
 /** Execution profile: hardened (isolated, default) | trusted (writable rootfs + root). */
 export type SandboxExecMode = 'hardened' | 'trusted';
+
+/** Network-isolation level of the deployment, probed server-side at runtime. */
+export interface IsolationInfo {
+  level: 1 | 2 | 3;
+  name: 'standard' | 'isolated' | 'maximum';
+  brokerReachable: boolean;
+  egressReachable: boolean;
+  executorSandboxMode: 'broker' | 'in-process' | 'unavailable' | null;
+  jobEgressNetwork: string | null;
+  /** Broker's network allowlist (double gate); null if the broker doesn't declare it. */
+  brokerAllowedNetworks: string[] | null;
+  /** True when the `internet` tier can actually work: egress proxy deployed AND its network declared + allowed by the broker. */
+  internetTierAvailable: boolean;
+  /** False when the broker refuses the 'trusted' exec profile (BROKER_ALLOW_PRIVILEGED_SANDBOX unset → silent fallback to hardened). */
+  trustedExecModeAvailable: boolean;
+}
 
 export interface SandboxConfig {
   /** Global master switch. */

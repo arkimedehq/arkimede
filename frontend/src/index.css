@@ -97,12 +97,14 @@ html:not(.dark) .bg-gray-600 { background-color: #e2e8f0; }
 
 /* — Backgrounds with opacity (used in overlay panels and animated cards) — */
 html:not(.dark) .bg-gray-950\/80 { background-color: rgb(241 245 249 / 0.8); }
+html:not(.dark) .bg-gray-950\/60 { background-color: rgb(226 232 240 / 0.6); } /* slate-200 */
 html:not(.dark) .bg-gray-900\/80 { background-color: rgb(255 255 255 / 0.8); }
 html:not(.dark) .bg-gray-900\/60 { background-color: #f8fafc; }               /* slate-50  */
 html:not(.dark) .bg-gray-900\/50 { background-color: rgb(255 255 255 / 0.5); }
 html:not(.dark) .bg-gray-800\/60 { background-color: rgb(248 250 252 / 0.6); }
 html:not(.dark) .bg-gray-800\/50 { background-color: rgb(248 250 252 / 0.5); }
 html:not(.dark) .bg-gray-800\/40 { background-color: rgb(248 250 252 / 0.4); }
+html:not(.dark) .bg-gray-800\/30 { background-color: rgb(248 250 252 / 0.3); }
 html:not(.dark) .bg-gray-800\/20 { background-color: rgb(248 250 252 / 0.2); }
 html:not(.dark) .bg-gray-700\/80 { background-color: rgb(226 232 240 / 0.8); }
 html:not(.dark) .bg-gray-700\/60 { background-color: rgb(226 232 240 / 0.6); }

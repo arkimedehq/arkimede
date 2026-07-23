@@ -428,7 +428,17 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify(obj));
     };
 
-    if (req.method === 'GET' && req.url === '/health') return send(200, {ok: true});
+    if (req.method === 'GET' && req.url === '/health') {
+      // Declares the broker's operator gates so the backend/UI can reflect
+      // them instead of letting requests silently degrade at launch:
+      // allowedNetworks (network double gate) and allowPrivilegedSandbox
+      // (the 'trusted' exec profile falls back to hardened without it).
+      return send(200, {
+        ok: true,
+        allowedNetworks: [...ALLOWED_NETS].filter((n) => n !== 'none'),
+        allowPrivilegedSandbox: ALLOW_PRIVILEGED_SANDBOX,
+      });
+    }
 
     if (req.method !== 'POST' || req.url !== '/run-job') return send(404, {error: 'not found'});
 

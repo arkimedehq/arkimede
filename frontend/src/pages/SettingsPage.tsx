@@ -1239,6 +1239,7 @@ function AiSection() {
 
       {isAdmin && <LlmConfigsSection />}
       {isAdmin && <ToolLoadingAdminCard />}
+      {isAdmin && <IsolationLevelCard />}
       {isAdmin && <SandboxAdminCard />}
       {isAdmin && <DataSourceSecurityAdminCard />}
       {isAdmin && <SystemPromptCard />}
@@ -1391,6 +1392,104 @@ function MultiSelectSearch({ options, selected, onChange, searchPlaceholder, emp
   );
 }
 
+/**
+ * Read-only card showing the deployment's network-isolation level (probed
+ * server-side: broker + egress proxy reachability). The level is a property
+ * of the compose topology, so changing it requires restarting the stack with
+ * different overlays — the card explains each level and how to switch.
+ */
+function IsolationLevelCard() {
+  const { t } = useTranslation('settings');
+  const { data, isLoading } = useQuery({
+    queryKey: ['isolation-info'],
+    queryFn: appConfigApi.getIsolationInfo,
+    staleTime: 60_000,
+  });
+
+  const LEVEL_STYLES: Record<number, { badge: string; ring: string }> = {
+    1: { badge: 'bg-amber-500/15 text-amber-300 border-amber-500/30',     ring: 'border-amber-500/40 bg-amber-500/10' },
+    2: { badge: 'bg-blue-500/15 text-blue-300 border-blue-500/30',        ring: 'border-blue-500/40 bg-blue-500/10' },
+    3: { badge: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30', ring: 'border-emerald-500/40 bg-emerald-500/10' },
+  };
+  const levels = [1, 2, 3] as const;
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-100 flex items-center gap-2">
+            <Network size={14} className="text-blue-400" />
+            {t('isolation.title')}
+          </h3>
+          <p className="text-xs text-gray-500 mt-1">{t('isolation.subtitle')}</p>
+        </div>
+        {data && (
+          <span className={`shrink-0 text-xs font-semibold px-2.5 py-1 rounded-full border ${LEVEL_STYLES[data.level].badge}`}>
+            {t('isolation.levelBadge', { n: data.level })} · {t(`isolation.level${data.level}Name`)}
+          </span>
+        )}
+      </div>
+
+      {isLoading || !data ? (
+        <div className="flex items-center gap-2 text-gray-500 text-xs">
+          <Loader2 size={13} className="animate-spin" /> {t('isolation.loading')}
+        </div>
+      ) : (
+        <>
+          <div className="space-y-2">
+            {levels.map((n) => (
+              <div
+                key={n}
+                className={`flex items-start gap-3 rounded-lg border px-3 py-2 ${
+                  n === data.level ? LEVEL_STYLES[n].ring : 'border-gray-800 bg-gray-800/30'
+                }`}
+              >
+                <span className={`text-xs font-bold mt-0.5 ${n === data.level ? 'text-gray-100' : 'text-gray-500'}`}>{n}</span>
+                <div className="min-w-0">
+                  <p className={`text-xs font-semibold ${n === data.level ? 'text-gray-100' : 'text-gray-400'}`}>
+                    {t(`isolation.level${n}Name`)}
+                    {n === data.level && <span className="ml-2 text-[10px] uppercase tracking-wide text-gray-400">{t('isolation.current')}</span>}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-0.5">{t(`isolation.level${n}Desc`)}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Probe signals: what the backend actually detected. */}
+          <div className="flex flex-wrap gap-4 text-xs text-gray-400">
+            <span className="flex items-center gap-1.5">
+              {data.brokerReachable || data.executorSandboxMode === 'broker'
+                ? <CheckCircle size={13} className="text-emerald-400" />
+                : <XCircle size={13} className="text-gray-500" />}
+              {t('isolation.signalBroker')}
+            </span>
+            <span className="flex items-center gap-1.5">
+              {data.egressReachable
+                ? <CheckCircle size={13} className="text-emerald-400" />
+                : <XCircle size={13} className="text-gray-500" />}
+              {t('isolation.signalEgress')}
+            </span>
+          </div>
+
+          <div className="rounded-lg border border-gray-800 bg-gray-800/40 px-3 py-2.5 space-y-1.5">
+            <p className="text-xs font-semibold text-gray-300">{t('isolation.changeTitle')}</p>
+            <p className="text-xs text-gray-500">{t('isolation.changeIntro')}</p>
+            <pre className="text-[11px] text-gray-300 bg-gray-950/60 rounded-md px-2.5 py-2 overflow-x-auto">
+{`docker compose -f docker-compose.yml \\
+  -f docker-compose.broker.yml \\        # + level 2 · ${t('isolation.level2Name')}
+  -f docker-compose.egress.yml \\        # + level 3 · ${t('isolation.level3Name')}
+  up -d`}
+            </pre>
+            <p className="text-xs text-gray-500">{t('isolation.changeHub')}</p>
+            <p className="text-xs text-gray-600">{t('isolation.runtimeNote')}</p>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function SandboxAdminCard() {
   const { t } = useTranslation('settings');
   const qc = useQueryClient();
@@ -1399,6 +1498,13 @@ function SandboxAdminCard() {
   const { data, isLoading } = useQuery({
     queryKey: ['sandbox-config'],
     queryFn: appConfigApi.getSandboxConfig,
+  });
+  // Deployment probe: used to grey out network tiers whose backing network is
+  // not deployed at the current isolation level.
+  const { data: isolation } = useQuery({
+    queryKey: ['isolation-info'],
+    queryFn: appConfigApi.getIsolationInfo,
+    staleTime: 60_000,
   });
 
   // Team/project lists for the selectors (by name, not UUID).
@@ -1493,24 +1599,45 @@ function SandboxAdminCard() {
           <div className="space-y-2">
             <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide">{t('sandbox.networkLabel')}</label>
             <div className="grid grid-cols-1 gap-2">
-              {netOptions.map((o) => (
-                <button
-                  key={o.value}
-                  type="button"
-                  onClick={() => setNetwork(o.value)}
-                  className={`flex flex-col items-start p-3 rounded-lg border text-left transition-colors
-                    ${network === o.value
-                      ? 'border-blue-500 bg-blue-500/10 text-white'
-                      : 'border-gray-700 bg-gray-800/50 text-gray-400 hover:border-gray-600'}`}
-                >
-                  <span className="text-sm font-medium">{t(o.labelKey)}</span>
-                  <span className="text-xs text-gray-500">{t(o.descKey)}</span>
-                </button>
-              ))}
+              {netOptions.map((o) => {
+                // A tier whose backing network is not deployed, not declared
+                // (JOB_EGRESS_NETWORK) or not in the broker allowlist
+                // (BROKER_ALLOWED_NETWORKS) would fail at job launch
+                // (fail-closed): disable it and say why.
+                const unavailable = o.value === 'internet' && isolation != null && !isolation.internetTierAvailable;
+                const unavailableKey =
+                  isolation != null && !isolation.egressReachable
+                    ? 'sandbox.netInternetUnavailable'
+                    : 'sandbox.netInternetNotAllowed';
+                return (
+                  <button
+                    key={o.value}
+                    type="button"
+                    disabled={unavailable}
+                    onClick={() => setNetwork(o.value)}
+                    className={`flex flex-col items-start p-3 rounded-lg border text-left transition-colors
+                      ${unavailable
+                        ? 'border-red-500/30 bg-gray-800/30 text-red-300 cursor-not-allowed'
+                        : network === o.value
+                          ? 'border-blue-500 bg-blue-500/10 text-white'
+                          : 'border-gray-700 bg-gray-800/50 text-gray-400 hover:border-gray-600'}`}
+                  >
+                    <span className="text-sm font-medium">{t(o.labelKey)}</span>
+                    <span className={`text-xs ${unavailable ? 'text-red-400' : 'text-gray-500'}`}>
+                      {unavailable ? t(unavailableKey) : t(o.descKey)}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
             {network === 'open' && (
               <p className="text-xs text-amber-400 flex items-start gap-1.5">
                 <ShieldAlert size={13} className="mt-0.5 shrink-0" /> {t('sandbox.openWarning')}
+              </p>
+            )}
+            {network === 'internet' && isolation != null && !isolation.internetTierAvailable && (
+              <p className="text-xs text-amber-400 flex items-start gap-1.5">
+                <ShieldAlert size={13} className="mt-0.5 shrink-0" /> {t('sandbox.netInternetSavedUnavailable')}
               </p>
             )}
           </div>
@@ -1522,22 +1649,38 @@ function SandboxAdminCard() {
               {([
                 { value: 'hardened', labelKey: 'sandbox.execHardenedLabel', descKey: 'sandbox.execHardenedDesc' },
                 { value: 'trusted',  labelKey: 'sandbox.execTrustedLabel',  descKey: 'sandbox.execTrustedDesc' },
-              ] as Array<{ value: SandboxExecMode; labelKey: string; descKey: string }>).map((o) => (
-                <button
-                  key={o.value}
-                  type="button"
-                  onClick={() => setExecMode(o.value)}
-                  className={`flex flex-col items-start p-3 rounded-lg border text-left transition-colors
-                    ${execMode === o.value
-                      ? 'border-blue-500 bg-blue-500/10 text-white'
-                      : 'border-gray-700 bg-gray-800/50 text-gray-400 hover:border-gray-600'}`}
-                >
-                  <span className="text-sm font-medium">{t(o.labelKey)}</span>
-                  <span className="text-xs text-gray-500">{t(o.descKey)}</span>
-                </button>
-              ))}
+              ] as Array<{ value: SandboxExecMode; labelKey: string; descKey: string }>).map((o) => {
+                // Without the broker opt-in (BROKER_ALLOW_PRIVILEGED_SANDBOX)
+                // a 'trusted' request silently falls back to hardened: disable
+                // the option and say why instead.
+                const unavailable = o.value === 'trusted' && isolation != null && !isolation.trustedExecModeAvailable;
+                return (
+                  <button
+                    key={o.value}
+                    type="button"
+                    disabled={unavailable}
+                    onClick={() => setExecMode(o.value)}
+                    className={`flex flex-col items-start p-3 rounded-lg border text-left transition-colors
+                      ${unavailable
+                        ? 'border-red-500/30 bg-gray-800/30 text-red-300 cursor-not-allowed'
+                        : execMode === o.value
+                          ? 'border-blue-500 bg-blue-500/10 text-white'
+                          : 'border-gray-700 bg-gray-800/50 text-gray-400 hover:border-gray-600'}`}
+                  >
+                    <span className="text-sm font-medium">{t(o.labelKey)}</span>
+                    <span className={`text-xs ${unavailable ? 'text-red-400' : 'text-gray-500'}`}>
+                      {unavailable ? t('sandbox.execTrustedUnavailable') : t(o.descKey)}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
-            {execMode === 'trusted' && (
+            {execMode === 'trusted' && isolation != null && !isolation.trustedExecModeAvailable && (
+              <p className="text-xs text-amber-400 flex items-start gap-1.5">
+                <ShieldAlert size={13} className="mt-0.5 shrink-0" /> {t('sandbox.execTrustedSavedUnavailable')}
+              </p>
+            )}
+            {execMode === 'trusted' && (isolation == null || isolation.trustedExecModeAvailable) && (
               <p className="text-xs text-amber-400 flex items-start gap-1.5">
                 <ShieldAlert size={13} className="mt-0.5 shrink-0" /> {t('sandbox.execTrustedWarning')}
               </p>
