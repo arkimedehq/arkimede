@@ -8,7 +8,18 @@ impostazioni per l'amministrazione quotidiana. Linux e macOS, Node ≥ 18.17.
 
 Vive nella workspace `cli/` del monorepo.
 
-## Installazione e build
+## Installazione
+
+Da npm (consigliato — funziona con qualsiasi metodo di installazione,
+incluso il pull-based [arkimede-deploy](https://github.com/arkimedehq/arkimede-deploy)):
+
+```bash
+npm install -g arkimede-cli
+# oppure senza installare:
+npx arkimede-cli login --url http://localhost:3000
+```
+
+Da sorgente:
 
 ```bash
 cd cli

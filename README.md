@@ -184,7 +184,7 @@ servers, token usage) that talks to the same API with the same permissions
 as the web UI. Linux/macOS, Node ≥ 18.
 
 ```bash
-cd cli && npm install && npm run build && npm link
+npm install -g arkimede-cli        # or build from source in cli/
 arkimede login --url http://localhost:3000
 arkimede            # opens the TUI
 ```

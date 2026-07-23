@@ -1,8 +1,29 @@
 {
   "name": "arkimede-cli",
   "version": "0.1.0",
-  "description": "Arkimede terminal client — login and chat from your shell",
+  "description": "Arkimede terminal client — login and chat with your self-hosted AI agents from the shell (TUI + scriptable REPL)",
   "license": "AGPL-3.0-or-later",
+  "author": "Andrea Genovese",
+  "homepage": "https://github.com/arkimedehq/arkimede/blob/main/docs/CLI.md",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arkimedehq/arkimede.git",
+    "directory": "cli"
+  },
+  "bugs": {
+    "url": "https://github.com/arkimedehq/arkimede/issues"
+  },
+  "keywords": [
+    "arkimede",
+    "ai",
+    "agents",
+    "cli",
+    "tui",
+    "terminal",
+    "chat",
+    "self-hosted",
+    "llm"
+  ],
   "type": "module",
   "bin": {
     "arkimede": "dist/index.js"
@@ -17,7 +38,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "tsc -p tsconfig.json --watch",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "chalk": "^5.3.0",

@@ -2,7 +2,17 @@
 
 Terminal client for [Arkimede](../README.md): log in and chat with your agents straight from the shell, against any running Arkimede backend. Linux and macOS, Node ≥ 18.17.
 
-## Install & build
+## Install
+
+From npm (recommended):
+
+```bash
+npm install -g arkimede-cli
+# or run without installing:
+npx arkimede-cli login --url http://localhost:3000
+```
+
+From source:
 
 ```bash
 cd cli

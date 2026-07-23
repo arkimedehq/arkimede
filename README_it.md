@@ -184,7 +184,7 @@ skill, data source, server MCP, consumo token) che parla con la stessa API e
 gli stessi permessi della web UI. Linux/macOS, Node ≥ 18.
 
 ```bash
-cd cli && npm install && npm run build && npm link
+npm install -g arkimede-cli        # oppure build da sorgente in cli/
 arkimede login --url http://localhost:3000
 arkimede            # apre la TUI
 ```

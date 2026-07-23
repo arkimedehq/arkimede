@@ -8,7 +8,18 @@ administration. Linux and macOS, Node ≥ 18.17.
 
 It ships in the `cli/` workspace of the monorepo.
 
-## Install & build
+## Install
+
+From npm (recommended — works with any install method, including the
+pull-based [arkimede-deploy](https://github.com/arkimedehq/arkimede-deploy)):
+
+```bash
+npm install -g arkimede-cli
+# or run without installing:
+npx arkimede-cli login --url http://localhost:3000
+```
+
+From source:
 
 ```bash
 cd cli
