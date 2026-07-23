@@ -173,6 +173,24 @@ Altre funzionalità: **tool custom** no-code (HTTP/SQL/RAG/prompt), **RAG con sc
 
 👉 Riferimento completo delle funzionalità e architettura: **[PROJECT.md](docs/PROJECT.md)**. Creare Skill: **[SKILLS.md](docs/SKILLS.md)**.
 
+## Client da terminale (CLI)
+
+Preferisci la shell? La CLI `arkimede` (in `cli/`) replica login e chat da
+qualsiasi terminale — TUI full-screen (sidebar delle chat, streaming SSE
+live, righe di stato dei tool, Esc per fermare la generazione) con un
+fallback a righe `--plain` che la rende scriptabile via pipe. Include un
+pannello impostazioni a schede (profilo, config LLM con CRUD completo, tool,
+skill, data source, server MCP, consumo token) che parla con la stessa API e
+gli stessi permessi della web UI. Linux/macOS, Node ≥ 18.
+
+```bash
+cd cli && npm install && npm run build && npm link
+arkimede login --url http://localhost:3000
+arkimede            # apre la TUI
+```
+
+👉 Riferimento completo: **[CLI_it.md](docs/CLI_it.md)**.
+
 ## Stack tecnologico
 
 | Layer | Tecnologia |
@@ -229,6 +247,7 @@ Arkimede usa un **modello a capability**: ogni potere (rete, filesystem, operazi
 |---|---|
 | [PROJECT.md](docs/PROJECT.md) | Approfondimento completo prodotto & architettura |
 | [GUIDE.md](docs/GUIDE.md) | Guida uso & sviluppo (setup, overlay, LAN, note dev) |
+| [CLI_it.md](docs/CLI_it.md) | Client da terminale (TUI, REPL, pannello impostazioni) |
 | [SKILLS.md](docs/SKILLS.md) | Come creare Skill (schema, template, convenzioni) |
 | [MEMORY.md](docs/MEMORY.md) | Design della memoria agentica (A-MEM) |
 | [LICENSING_it.md](docs/LICENSING_it.md) | Licenza (AGPL-3.0) e termini di contribuzione |

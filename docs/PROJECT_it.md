@@ -314,6 +314,13 @@ arkimede/
 │   ├── resources/                          # Icone app
 │   ├── electron-builder.yml
 │   └── package.json
+├── cli/                            # Client terminale `arkimede` (TUI Ink + REPL a righe)
+│   └── src/
+│       ├── index.ts                # commander: login/logout/whoami/chats/chat (default: TUI)
+│       ├── config.ts               # sessione ~/.config/arkimede/config.json (JWT, 0600)
+│       ├── repl.ts                 # REPL a righe (--plain, stdin in pipe)
+│       ├── api/                    # client fetch: auth, chats, messages (parser SSE), llmConfigs, resources
+│       └── tui/                    # app Ink: App (chat), SettingsPanel + schede, EntityForm, form Llm/Mcp/Tool
 ├── frontend/
 │   └── src/
 │       ├── api/           # axios client + api per ogni modulo
@@ -1771,6 +1778,38 @@ nulla (o, peggio, "fa finta"). Serve un ponte NL → automazione programmata.
   in coda) significa una query in più nel `Promise.all` e un blocco in UI.
 
 ---
+
+## Client Terminale (CLI)
+
+La workspace `cli/` contiene `arkimede`, il client terminale ufficiale
+(Linux/macOS, Node ≥ 18, TypeScript ESM). È un puro consumer dell'API:
+login e chat riusano esattamente i contratti del frontend — `POST
+/api/auth/login`, CRUD chat e lo stream SSE `POST
+/api/chats/:id/messages/stream` parsato dal body della risposta con `fetch`
+(stessi eventi `data: {json}`: `chunk`, `tool_call`, `tool_result`, `file`,
+`agent_step`, `memory_proposal`, `error`, `done`; chiudere la connessione
+annulla l'esecuzione lato server). Non esistono endpoint backend dedicati
+alla CLI.
+
+Due frontend sopra un layer API/core condiviso:
+
+- **TUI** (Ink 5 + React 18, default su terminale reale): sidebar delle
+  chat, pannello messaggi scrollabile ancorato in basso, barra input,
+  status line; `Esc` interrompe lo stream. Un **pannello impostazioni** (7
+  schede: Profile, LLM, Tools, Skills, Data, MCP, Usage) offre CRUD
+  completo per config LLM, custom tool (tipi autocontenuti `http`/`prompt`;
+  executor config fusa in modifica) e server MCP, più i toggle
+  enable/disable — sugli stessi endpoint e regole di permesso della web UI
+  (i 403 resi come "not allowed", le schede solo-admin mostrano una nota).
+- **REPL a righe** (`--plain`, selezionato automaticamente quando
+  stdin/stdout non sono un TTY): line-based e scriptabile via pipe.
+
+Note architetturali: `EntityForm` generico (campi text/enum, visibilità
+condizionale) + hook `useCrudList` (selezione, azioni a/e/d, conferma y/N,
+key-lock modale) condivisi da tutte le schede CRUD; JWT + profilo utente
+persistiti in `~/.config/arkimede/config.json` (0600) — nessun refresh
+token, re-login alla scadenza; il modello si risolve sempre lato server
+dalla config LLM default. Riferimento: [CLI_it.md](CLI_it.md).
 
 ## 16. Funzionalità Future
 

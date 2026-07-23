@@ -29,6 +29,7 @@
 20. [Schema DB e migrazioni](#20-schema-db-e-migrazioni)
 21. [API di riferimento](#21-api-di-riferimento)
 22. [Troubleshooting](#22-troubleshooting)
+23. [Client da terminale (CLI)](#23-client-da-terminale-cli)
 
 ---
 
@@ -1586,4 +1587,37 @@ Il LLM non ricorda i messaggi precedenti — budget token storia esaurito.
 
 ---
 
-*Ultimo aggiornamento: maggio 2026 — Tool loading optimization, prompt caching, DeepSeek, sistema prompt 4 livelli, SKILL.md selettivo*
+## 23. Client da terminale (CLI)
+
+La CLI `arkimede` (workspace `cli/`) porta login e chat nella shell, verso
+qualsiasi backend in esecuzione — stessa API REST + SSE, stesso JWT, nessuna
+modifica lato server. Linux/macOS, Node ≥ 18.
+
+```bash
+cd cli
+npm install && npm run build
+npm link                                     # opzionale, `arkimede` globale
+arkimede login --url http://localhost:3000   # chiede email + password
+arkimede                                     # TUI full-screen sull'ultima chat
+```
+
+In sintesi:
+
+- **TUI** (default): sidebar delle chat (`Tab` per il focus, `n` nuova
+  chat), risposte in streaming con righe di stato compatte dei tool, `Esc`
+  interrompe la generazione, `s` apre il **pannello impostazioni** — 7
+  schede (Profile, LLM, Tools, Skills, Data, MCP, Usage) con CRUD completo
+  per config LLM, tool e server MCP e toggle enable/disable, tutto sugli
+  stessi endpoint e permessi della web UI.
+- **REPL a righe** (`--plain`, automatico in pipe): scriptabile —
+  `printf 'domanda\n/quit\n' | arkimede chat --last`.
+- **Sessione**: JWT salvato in `~/.config/arkimede/config.json` (permessi
+  0600); alla scadenza basta rifare login. Il modello si risolve sempre
+  lato server (config LLM default).
+
+Riferimento completo (tasti, schede impostazioni, note per form, dettagli
+implementativi): **[CLI_it.md](CLI_it.md)**.
+
+---
+
+*Ultimo aggiornamento: luglio 2026 — Client da terminale (CLI); in precedenza: tool loading optimization, prompt caching, DeepSeek, sistema prompt 4 livelli, SKILL.md selettivo*

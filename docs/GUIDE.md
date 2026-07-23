@@ -29,6 +29,7 @@
 20. [DB schema and migrations](#20-db-schema-and-migrations)
 21. [API reference](#21-api-reference)
 22. [Troubleshooting](#22-troubleshooting)
+23. [Terminal client (CLI)](#23-terminal-client-cli)
 
 ---
 
@@ -1586,4 +1587,37 @@ The LLM doesn't remember previous messages — the history token budget is exhau
 
 ---
 
-*Last updated: May 2026 — Tool loading optimization, prompt caching, DeepSeek, 4-level system prompt, selective SKILL.md*
+## 23. Terminal client (CLI)
+
+The `arkimede` CLI (workspace `cli/`) brings login and chat to the shell,
+against any running backend — same REST + SSE API, same JWT, no server-side
+changes. Linux/macOS, Node ≥ 18.
+
+```bash
+cd cli
+npm install && npm run build
+npm link                                     # optional, global `arkimede`
+arkimede login --url http://localhost:3000   # prompts email + password
+arkimede                                     # full-screen TUI on the latest chat
+```
+
+Highlights:
+
+- **TUI** (default): chat sidebar (`Tab` to focus, `n` new chat), streaming
+  replies with compact tool status lines, `Esc` aborts generation, `s` opens
+  the **settings panel** — 7 tabs (Profile, LLM, Tools, Skills, Data, MCP,
+  Usage) with full CRUD for LLM configs, tools and MCP servers, and
+  enable/disable toggles, all through the same endpoints and permissions as
+  the web UI.
+- **Plain REPL** (`--plain`, automatic when piped): scriptable —
+  `printf 'question\n/quit\n' | arkimede chat --last`.
+- **Session**: JWT stored in `~/.config/arkimede/config.json` (mode 0600);
+  on expiry just log in again. The model is always resolved server-side
+  (default LLM config).
+
+Full reference (key bindings, settings tabs, per-form notes, implementation
+details): **[CLI.md](CLI.md)**.
+
+---
+
+*Last updated: July 2026 — Terminal client (CLI); previously: tool loading optimization, prompt caching, DeepSeek, 4-level system prompt, selective SKILL.md*

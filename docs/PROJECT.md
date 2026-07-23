@@ -314,6 +314,13 @@ arkimede/
 │   ├── resources/                          # App icons
 │   ├── electron-builder.yml
 │   └── package.json
+├── cli/                            # Terminal client `arkimede` (Ink TUI + plain REPL)
+│   └── src/
+│       ├── index.ts                # commander: login/logout/whoami/chats/chat (default: TUI)
+│       ├── config.ts               # session store ~/.config/arkimede/config.json (JWT, 0600)
+│       ├── repl.ts                 # line-based REPL (--plain, piped stdin)
+│       ├── api/                    # fetch clients: auth, chats, messages (SSE parser), llmConfigs, resources
+│       └── tui/                    # Ink app: App (chat), SettingsPanel + tabs, EntityForm, Llm/Mcp/Tool forms
 ├── frontend/
 │   └── src/
 │       ├── api/           # axios client + api for each module
@@ -1770,6 +1777,37 @@ nothing (or, worse, "pretends"). A bridge NL → scheduled automation is needed.
   means one more query in the `Promise.all` and one block in the UI.
 
 ---
+
+## Terminal Client (CLI)
+
+The `cli/` workspace ships `arkimede`, the official terminal client (Linux/
+macOS, Node ≥ 18, TypeScript ESM). It is a pure API consumer: login and chat
+reuse the exact frontend contracts — `POST /api/auth/login`, chat CRUD, and
+the SSE stream `POST /api/chats/:id/messages/stream` parsed from the
+response body with `fetch` (same `data: {json}` events: `chunk`,
+`tool_call`, `tool_result`, `file`, `agent_step`, `memory_proposal`,
+`error`, `done`; aborting the connection cancels the run server-side). No
+dedicated backend endpoints exist for the CLI.
+
+Two frontends over a shared API/core layer:
+
+- **TUI** (Ink 5 + React 18, default on a real terminal): chat sidebar,
+  bottom-anchored scrollable message pane, input bar, status line; `Esc`
+  aborts the stream. A **settings panel** (7 tabs: Profile, LLM, Tools,
+  Skills, Data, MCP, Usage) provides full CRUD for LLM configs, custom
+  tools (self-contained `http`/`prompt` types; executor config merged on
+  edit) and MCP servers, plus enable/disable toggles — via the same
+  endpoints and permission rules as the web UI (403s rendered as
+  "not allowed", admin-only tabs show a note).
+- **Plain REPL** (`--plain`, auto-selected when stdin/stdout are not a TTY):
+  line-based and scriptable via pipes.
+
+Architectural notes: generic `EntityForm` (text/enum fields, conditional
+visibility) + `useCrudList` hook (selection, a/e/d actions, y/N confirm,
+modal key-lock) shared by all CRUD tabs; the JWT + user profile persist in
+`~/.config/arkimede/config.json` (0600) — no refresh token, re-login on
+expiry; the model is always resolved server-side from the default LLM
+config. Reference: [CLI.md](CLI.md).
 
 ## 16. Future Features
 

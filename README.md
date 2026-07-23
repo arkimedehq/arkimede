@@ -173,6 +173,24 @@ More capabilities: no-code **custom tools** (HTTP/SQL/RAG/prompt), **scope-aware
 
 👉 Full feature reference and architecture: **[PROJECT.md](docs/PROJECT.md)**. Building Skills: **[SKILLS.md](docs/SKILLS.md)**.
 
+## Terminal client (CLI)
+
+Prefer the shell? The `arkimede` CLI (in `cli/`) replicates login and chat
+from any terminal — full-screen TUI (chat sidebar, live SSE streaming, tool
+status lines, Esc to stop generation) with a line-based `--plain` fallback
+that makes it scriptable via pipes. It includes a tabbed settings panel
+(profile, LLM configs with full CRUD, tools, skills, data sources, MCP
+servers, token usage) that talks to the same API with the same permissions
+as the web UI. Linux/macOS, Node ≥ 18.
+
+```bash
+cd cli && npm install && npm run build && npm link
+arkimede login --url http://localhost:3000
+arkimede            # opens the TUI
+```
+
+👉 Full reference: **[CLI.md](docs/CLI.md)**.
+
 ## Tech stack
 
 | Layer | Technology |
@@ -229,6 +247,7 @@ Arkimede uses a **capability model**: every power (network, filesystem, SQL oper
 |---|---|
 | [PROJECT.md](docs/PROJECT.md) | Full product & architecture deep-dive |
 | [GUIDE.md](docs/GUIDE.md) | Usage & development guide (setup, overlays, LAN, dev notes) |
+| [CLI.md](docs/CLI.md) | Terminal client (TUI, plain REPL, settings panel) |
 | [SKILLS.md](docs/SKILLS.md) | How to build Skills (schema, templates, conventions) |
 | [MEMORY.md](docs/MEMORY.md) | Agentic memory (A-MEM) design |
 | [LICENSING.md](docs/LICENSING.md) | License (AGPL-3.0) & contribution terms |
