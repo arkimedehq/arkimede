@@ -27,7 +27,8 @@ The defensible combination, in one product:
 
 - 🧠 **Stateful agents** (LangGraph ReAct) *and* 🔀 **deterministic workflows** (DAG canvas) — improvisation *and* repeatability.
 - 🧩 **Executable Skills** — run untrusted Python/Node/JS in a hardened, per-job sandbox.
-- 🔌 **Native MCP** (Model Context Protocol) — `http` · `sse` · `local` · `remote` transports.
+- 🔌 **Native MCP** (Model Context Protocol) — Streamable HTTP · legacy SSE · `local` · `remote` transports, with a one-click connection test and `personal | team | org` sharing.
+- 🗣️ **OpenAI-compatible endpoint** — plug any OpenAI-speaking client (e.g. a Home Assistant voice pipeline) into your agents; expose each agent as a selectable "model".
 - 🏢 **Multi-tenant by design** — org · team · user, with `personal | team | org` resource scoping and multi-team shared projects.
 - 🗄️ **Heterogeneous data sources** — SQL (Postgres/MySQL/MSSQL/Oracle/SQLite), MongoDB, Redis, and file shares (SMB/SFTP/WebDAV).
 - 🔒 **Capability-based security** — every power (network, filesystem, SQL ops, local MCP) is declared and approved, with safe defaults.
@@ -169,7 +170,7 @@ Beyond chat, four integrated systems — and they interconnect (flows are agent 
 | 👥 **Multi-Agent** | Reusable agents composed into teams with `supervisor` / `sequential` / `parallel` topologies. Agent-as-tool for hierarchical delegation. |
 | ⏰ **Auto-Scheduling** | Schedule automations *from chat* ("every morning at 8, check email and summarize"). Confirmed-by-default, headless runner, delivery via notification or a dedicated chat thread, with per-run token/cost guardrails. |
 
-More capabilities: no-code **custom tools** (HTTP/SQL/RAG/prompt), **scope-aware RAG** (universal/project/personal), **DataSources**, **executable Skills**, an arbitrary-code **Sandbox** (`run_in_sandbox`), **SSE streaming** with automatic file detection, voice input (Whisper), i18n (EN/IT), and an Electron **bridge** for local MCP processes.
+More capabilities: no-code **custom tools** (HTTP/SQL/RAG/prompt), **scope-aware RAG** (universal/project/personal), **DataSources**, **executable Skills** with a per-skill network tier, an arbitrary-code **Sandbox** (`run_in_sandbox`), **SSE streaming** with automatic file detection, an **OpenAI-compatible API** to drive agents from external clients, long-lived **API keys** for service integrations, voice input (Whisper), i18n (EN/IT), and an Electron **bridge** for local MCP processes.
 
 👉 Full feature reference and architecture: **[PROJECT.md](docs/PROJECT.md)**. Building Skills: **[SKILLS.md](docs/SKILLS.md)**.
 
@@ -237,7 +238,8 @@ Arkimede uses a **capability model**: every power (network, filesystem, SQL oper
 
 - **AES-256-GCM** authenticated encryption for secrets; `TOOL_SECRETS_KEY` mandatory (fail-fast).
 - **Secure Docker prod**: internal services have no host ports; passwords required.
-- **`local` MCP** restricted to admins; **SSRF guard** on `http`/`sse` (blocks cloud metadata, RFC1918, localhost).
+- **`local` MCP** restricted to admins; **SSRF guard** on `http`/`sse` and DataSources: cloud metadata / link-local are *always* blocked, while private/LAN hosts are allowed by default (self-hosted servers) and can be hardened to public-only + a host/CIDR allowlist per deployment.
+- **API keys**: opaque, hashed at rest, revocable, with optional expiry — usable as Bearer credentials (incl. the OpenAI-compatible endpoint) with the owner's identity.
 - **Skills** (untrusted third-party code): egress allowlist, per-tenant access-aware filesystem, hardened per-job containers via the broker, declared capabilities, package checksums.
 - **Structured audit log** on chokepoints (auth, admin, executions, files, SQL, MCP) with "runs-as" identity.
 

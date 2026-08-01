@@ -565,10 +565,59 @@ MCP servers configured by the user, converted into LangChain `DynamicStructuredT
 
 | Transport | Who spawns the process                             | When to use it                                 |
 |-----------|----------------------------------------------------|------------------------------------------------|
-| `http`    | — (remote server already listening)                | Remote MCP server reachable over HTTP          |
-| `sse`     | — (remote server already listening)                | Like http but with an SSE response             |
+| `http`    | — (remote server already listening)                | Streamable HTTP (single endpoint, session)     |
+| `sse`     | — (remote server already listening)                | Legacy HTTP+SSE (event stream + endpoint POST)  |
 | `local`   | **NestJS backend** (directly, `child_process`)     | Backend and program on the **same machine**    |
 | `remote`  | **Electron Bridge** (on the user's machine)        | Backend and program on **different machines**  |
+
+### `http` — Streamable HTTP client
+
+The modern MCP transport produced by the official SDKs. The client
+(`mcp-http-client.ts`) runs the full handshake: `initialize` captures the
+`Mcp-Session-Id` returned by the server, sends `notifications/initialized`,
+then issues `tools/list` / `tools/call` echoing that session id and the
+negotiated `MCP-Protocol-Version`. Sessions are cached per server and
+re-created transparently on `400`/`404` (expired session). SSE-framed bodies
+are parsed. Servers speaking plain JSON-RPC (no session header) keep working —
+the same flow degrades gracefully.
+
+### `sse` — legacy HTTP+SSE client
+
+The 2024-11-05 transport: the client opens a GET event stream, receives an
+`endpoint` event with the POST URL, and reads JSON-RPC responses **off the
+stream** (the POSTs themselves return `202 Accepted`). One short-lived session
+per call (`withLegacySseSession`).
+
+### Auth headers & secrets
+
+`http`/`sse` custom headers support `{{secret.KEY}}` interpolation; secret
+values are stored encrypted (AES-256-GCM) and resolved backend-side at call
+time — a consumer of a shared server never sees them.
+
+### Connection test
+
+`POST /api/mcp-servers/:id/test` runs the real handshake + `tools/list` and
+returns the discovered tools (with the session flavor: `streamable` / `plain` /
+`legacy-sse`) or the precise error — the same path the agent uses, surfaced to
+the UI ("Test connection") instead of a silent log warning.
+
+### Anti-SSRF policy
+
+Outbound `http`/`sse` MCP traffic goes through `safeFetch` (URL + every redirect
+hop re-validated). Cloud metadata / link-local (169.254.0.0/16, IPv6 fe80::/10)
+are **always** blocked; private/loopback/CGNAT hosts are allowed by default
+(self-hosted servers on the LAN) and can be hardened per deployment to
+public-only + a host/CIDR allowlist (**Settings → AI → MCP security**,
+`app_config.mcpAllowPrivateHosts` / `mcpHostAllowlist`). Mirrors the DataSource
+guard.
+
+### Visibility scope
+
+Like custom tools / skills / agents, an MCP server carries a scope
+(`personal | team | org`) + `teamId`. Read/use follows the visibility filter
+(own + org + team-of-user), so a shared server's tools reach every entitled
+user; management (edit/delete/secrets) stays owner-or-admin, and scope changes
+are gated by role/membership. Secrets remain bound to the owner's config.
 
 ### `local` transport flow (direct)
 
@@ -811,6 +860,23 @@ result without modifying the agent's flow.
 `messages.controller.ts` passes an `onToolResult` that recursively scans each JSON result: every string with a `/` that
 resolves to an existing file inside `UPLOAD_DIR` generates a `file` event. HTTP URLs and `/api/…` paths are ignored.
 
+### Agent tool filter, wildcards & per-agent model
+
+An `Agent` restricts its tools via `toolFilter` (`{ mode: 'all' | 'names' | 'none', names?: string[] }`).
+In `names` mode an entry ending with `*` matches by **prefix** — `mcp_home_assistant_*`
+selects every tool of that MCP server, `skill_knx_*` every script of that skill — so
+the filter survives tools being added to the selected source. The agent form builds
+these tokens with a **tool picker** fed by `GET /api/agent/tool-catalog` (no need to
+know the naming convention). `Agent.maxIterations` counts **ReAct tool rounds**
+(the LangGraph recursion limit is derived as `2n+1`).
+
+The per-agent LLM config (`Agent.llmConfigId`) is honored on the **main pipeline** too
+(not only the multi-agent runtime): via the OpenAI-compat endpoint, selecting an agent
+as the model runs it on that agent's provider/model — letting e.g. a voice agent use a
+low-latency provider while chat, skills and automations stay on the platform default.
+These overrides ride on `StreamResponseOptions` (`toolOverride`, `agentPromptOverride`,
+`maxIterations`, `llmConfigId`, `origin`) threaded through `streamResponse` → `resolveAgent`.
+
 ---
 
 ## 9. Vector DB (provider-agnostic)
@@ -1018,14 +1084,33 @@ DELETE /api/data-sources/:id
 POST   /api/data-sources/:id/test     ← connection test
 
 # MCP Servers
-GET    /api/mcp-servers
-POST   /api/mcp-servers
+GET    /api/mcp-servers                   ← visible: own + org + team-of-user (scope)
+POST   /api/mcp-servers                   ← scope personal|team|org (org→admin, team→member)
 GET    /api/mcp-servers/:id
 PATCH  /api/mcp-servers/:id
 DELETE /api/mcp-servers/:id
-GET    /api/mcp-servers/:id/secrets
-POST   /api/mcp-servers/:id/secrets
+GET    /api/mcp-servers/:id/secrets       ← owner/admin only
+POST   /api/mcp-servers/:id/secrets       ← owner/admin only
 DELETE /api/mcp-servers/:id/secrets/:key
+POST   /api/mcp-servers/:id/test          ← handshake + tools/list (discovered tools or error)
+
+# API keys (long-lived opaque Bearer credentials, ak_… ; hash at rest, shown once)
+GET    /api/api-keys                      ← own keys (no secrets)
+POST   /api/api-keys                      ← { name, expiresInDays? } → { key, row }
+DELETE /api/api-keys/:id                  ← revoke (owner or admin)
+GET    /api/api-keys/user/:userId         ← [ADMIN] keys of a user
+POST   /api/api-keys/admin                ← [ADMIN] issue for a service account
+
+# OpenAI-compatible API (stateless; JWT or ak_ key as Bearer)
+GET    /api/openai/v1/models              ← 'arkimede' (default pipeline) + the user's agents as models
+POST   /api/openai/v1/chat/completions    ← OpenAI chat format; SSE streaming and non-streaming
+#   ↳ external clients keep the conversation window (no chat rows, no compaction);
+#     incoming system messages discarded (the 4-layer prompt wins); tool events stay
+#     internal (never mapped to OpenAI tool_calls); costs tagged origin='voice'.
+#     model = an agent slug → applies its prompt, tool filter, iteration cap, LLM config.
+
+# Agent tool catalog (for the agent-form tool picker)
+GET    /api/agent/tool-catalog            ← available tools grouped by source (mcp/skill/flow/agent/custom) + per-source wildcard
 
 # App configuration (admin only)
 GET    /api/app-config

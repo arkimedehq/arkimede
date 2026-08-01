@@ -565,10 +565,57 @@ Server MCP configurati dall'utente, convertiti in `DynamicStructuredTool` LangCh
 
 | Transport | Chi spawna il processo                             | Quando usarlo                                 |
 |-----------|----------------------------------------------------|-----------------------------------------------|
-| `http`    | — (server remoto già in ascolto)                   | Server MCP remoto raggiungibile via HTTP      |
-| `sse`     | — (server remoto già in ascolto)                   | Come http ma con risposta SSE                 |
+| `http`    | — (server remoto già in ascolto)                   | Streamable HTTP (endpoint unico, sessione)    |
+| `sse`     | — (server remoto già in ascolto)                   | HTTP+SSE legacy (stream eventi + POST endpoint) |
 | `local`   | **Backend NestJS** (direttamente, `child_process`) | Backend e programma sulla **stessa macchina** |
 | `remote`  | **Bridge Electron** (sulla macchina dell'utente)   | Backend e programma su **macchine diverse**   |
+
+### `http` — client Streamable HTTP
+
+Il transport MCP moderno prodotto dagli SDK ufficiali. Il client
+(`mcp-http-client.ts`) fa il handshake completo: `initialize` cattura il
+`Mcp-Session-Id` del server, invia `notifications/initialized`, poi manda
+`tools/list` / `tools/call` riecheggiando la sessione e l'header
+`MCP-Protocol-Version` negoziato. Sessioni cachate per server e ricreate in
+trasparenza su `400`/`404` (sessione scaduta). Corpi SSE parsati. I server che
+parlano JSON-RPC semplice (senza sessione) continuano a funzionare.
+
+### `sse` — client HTTP+SSE legacy
+
+Il transport 2024-11-05: il client apre uno stream GET di eventi, riceve un
+evento `endpoint` con l'URL POST e legge le risposte JSON-RPC **dallo stream**
+(i POST tornano `202 Accepted`). Una sessione effimera per chiamata.
+
+### Header di auth & secrets
+
+Gli header custom `http`/`sse` supportano `{{secret.KEY}}`; i valori sono
+cifrati (AES-256-GCM) e risolti backend-side al call time — un consumer di un
+server condiviso non li vede mai.
+
+### Test di connessione
+
+`POST /api/mcp-servers/:id/test` esegue handshake + `tools/list` e restituisce i
+tool scoperti (con la modalità di sessione: `streamable` / `plain` /
+`legacy-sse`) o l'errore preciso — lo stesso percorso dell'agente, mostrato in
+UI ("Testa connessione") invece che in un warn nei log.
+
+### Policy anti-SSRF
+
+Il traffico `http`/`sse` passa da `safeFetch` (URL + ogni redirect riconvalidati).
+Metadata cloud / link-local sempre bloccati; host privati/loopback/CGNAT
+ammessi di default (server self-hosted su LAN) e restringibili per deployment a
+soli host pubblici + allowlist host/CIDR (**Impostazioni → AI → Sicurezza MCP**,
+`app_config.mcpAllowPrivateHosts` / `mcpHostAllowlist`). Specchio della guardia
+DataSource.
+
+### Scope di visibilità
+
+Come tool custom / skill / agenti, un server MCP ha uno scope
+(`personal | team | org`) + `teamId`. Lettura/uso segue il filtro di visibilità
+(own + org + team-dell'utente), così i tool di un server condiviso raggiungono
+ogni utente abilitato; la gestione (modifica/eliminazione/secrets) resta
+owner-o-admin e i cambi di scope sono gated da ruolo/membership. I secrets
+restano legati alla config del proprietario.
 
 ### Flusso transport `local` (diretto)
 
@@ -811,6 +858,25 @@ risultato senza modificare il flusso dell'agente.
 `messages.controller.ts` passa `onToolResult` che scansiona ricorsivamente ogni risultato JSON: ogni stringa con `/` che
 si risolve in un file esistente dentro `UPLOAD_DIR` genera un evento `file`. URL HTTP e path `/api/…` sono ignorati.
 
+### Tool filter dell'agente, wildcard & modello per-agente
+
+Un `Agent` restringe i suoi tool via `toolFilter` (`{ mode: 'all' | 'names' | 'none', names?: string[] }`).
+In modalità `names` una voce che finisce con `*` matcha per **prefisso** —
+`mcp_home_assistant_*` seleziona tutti i tool di quel server MCP, `skill_knx_*`
+tutti gli script di quella skill — così il filtro sopravvive all'aggiunta di
+tool alla fonte. Il form agenti costruisce questi token con un **tool picker**
+alimentato da `GET /api/agent/tool-catalog` (niente convenzione di nomi da
+ricordare). `Agent.maxIterations` conta i **giri di tool ReAct** (il recursion
+limit di LangGraph è derivato come `2n+1`).
+
+La config LLM per-agente (`Agent.llmConfigId`) è onorata anche sulla **pipeline
+principale** (non solo nel runtime multi-agente): via l'endpoint OpenAI-compat,
+scegliere un agente come modello lo esegue sul suo provider/model — così es. un
+agente vocale può usare un provider a bassa latenza mentre chat, skill e
+automazioni restano sul default. Questi override viaggiano su
+`StreamResponseOptions` (`toolOverride`, `agentPromptOverride`, `maxIterations`,
+`llmConfigId`, `origin`) passati a `streamResponse` → `resolveAgent`.
+
 ---
 
 ## 9. Vector DB (provider-agnostico)
@@ -1018,14 +1084,33 @@ DELETE /api/data-sources/:id
 POST   /api/data-sources/:id/test     ← test connessione
 
 # MCP Servers
-GET    /api/mcp-servers
-POST   /api/mcp-servers
+GET    /api/mcp-servers                   ← visibili: own + org + team-dell'utente (scope)
+POST   /api/mcp-servers                   ← scope personal|team|org (org→admin, team→membro)
 GET    /api/mcp-servers/:id
 PATCH  /api/mcp-servers/:id
 DELETE /api/mcp-servers/:id
-GET    /api/mcp-servers/:id/secrets
-POST   /api/mcp-servers/:id/secrets
+GET    /api/mcp-servers/:id/secrets       ← solo owner/admin
+POST   /api/mcp-servers/:id/secrets       ← solo owner/admin
 DELETE /api/mcp-servers/:id/secrets/:key
+POST   /api/mcp-servers/:id/test          ← handshake + tools/list (tool scoperti o errore)
+
+# API key (credenziali Bearer opache a lunga scadenza, ak_… ; hash a riposo, mostrate una volta)
+GET    /api/api-keys                      ← chiavi proprie (senza segreti)
+POST   /api/api-keys                      ← { name, expiresInDays? } → { key, row }
+DELETE /api/api-keys/:id                  ← revoca (owner o admin)
+GET    /api/api-keys/user/:userId         ← [ADMIN] chiavi di un utente
+POST   /api/api-keys/admin                ← [ADMIN] emette per un account di servizio
+
+# API compatibile OpenAI (stateless; JWT o chiave ak_ come Bearer)
+GET    /api/openai/v1/models              ← 'arkimede' (pipeline default) + gli agenti dell'utente come modelli
+POST   /api/openai/v1/chat/completions    ← formato chat OpenAI; streaming SSE e non-streaming
+#   ↳ i client esterni mantengono la finestra di conversazione (niente righe chat, niente compaction);
+#     i messaggi system in ingresso scartati (vince il prompt a 4 livelli); gli eventi tool restano
+#     interni (mai mappati su tool_calls OpenAI); costi taggati origin='voice'.
+#     model = slug di un agente → applica prompt, tool filter, cap iterazioni, config LLM.
+
+# Catalogo tool agenti (per il picker nel form agenti)
+GET    /api/agent/tool-catalog            ← tool disponibili raggruppati per fonte (mcp/skill/flow/agent/custom) + wildcard per-fonte
 
 # Configurazione app (admin only)
 GET    /api/app-config

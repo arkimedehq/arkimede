@@ -27,7 +27,8 @@ La combinazione difendibile, in un solo prodotto:
 
 - 🧠 **Agenti stateful** (LangGraph ReAct) *e* 🔀 **workflow deterministici** (canvas DAG) — improvvisazione *e* ripetibilità.
 - 🧩 **Skill eseguibili** — esegui Python/Node/JS non fidato in una sandbox blindata, un container per job.
-- 🔌 **MCP nativo** (Model Context Protocol) — transport `http` · `sse` · `local` · `remote`.
+- 🔌 **MCP nativo** (Model Context Protocol) — transport Streamable HTTP · SSE legacy · `local` · `remote`, con test di connessione in un click e condivisione `personal | team | org`.
+- 🗣️ **Endpoint compatibile OpenAI** — collega qualsiasi client che parla OpenAI (es. una pipeline vocale Home Assistant) ai tuoi agenti; esponi ogni agente come "modello" selezionabile.
 - 🏢 **Multi-tenant by design** — org · team · utenti, con scope risorse `personal | team | org` e progetti condivisi tra più team.
 - 🗄️ **Sorgenti dati eterogenee** — SQL (Postgres/MySQL/MSSQL/Oracle/SQLite), MongoDB, Redis e file share (SMB/SFTP/WebDAV).
 - 🔒 **Sicurezza a capability** — ogni potere (rete, filesystem, operazioni SQL, MCP `local`) è dichiarato e approvato, con default sicuri.
@@ -169,7 +170,7 @@ Oltre alla chat, quattro sistemi integrati — e interconnessi (i flow sono tool
 | 👥 **Multi-Agent** | Agenti riusabili composti in team con topologie `supervisor` / `sequential` / `parallel`. Agent-as-tool per la delega gerarchica. |
 | ⏰ **Auto-Scheduling** | Programma automazioni *dalla chat* («ogni mattina alle 8 controlla la mail e riassumi»). Conferma di default, runner headless, consegna via notifica o thread chat dedicato, con guardrail token/costo per run. |
 
-Altre funzionalità: **tool custom** no-code (HTTP/SQL/RAG/prompt), **RAG con scope** (universale/progetto/personale), **DataSource**, **Skill eseguibili**, una **Sandbox** per codice arbitrario (`run_in_sandbox`), **streaming SSE** con rilevamento automatico dei file, input vocale (Whisper), i18n (EN/IT) e un **bridge** Electron per i processi MCP locali.
+Altre funzionalità: **tool custom** no-code (HTTP/SQL/RAG/prompt), **RAG con scope** (universale/progetto/personale), **DataSource**, **Skill eseguibili** con tier di rete per-skill, una **Sandbox** per codice arbitrario (`run_in_sandbox`), **streaming SSE** con rilevamento automatico dei file, un'**API compatibile OpenAI** per pilotare gli agenti da client esterni, **API key** a lunga scadenza per le integrazioni di servizio, input vocale (Whisper), i18n (EN/IT) e un **bridge** Electron per i processi MCP locali.
 
 👉 Riferimento completo delle funzionalità e architettura: **[PROJECT.md](docs/PROJECT.md)**. Creare Skill: **[SKILLS.md](docs/SKILLS.md)**.
 
@@ -237,7 +238,8 @@ Arkimede usa un **modello a capability**: ogni potere (rete, filesystem, operazi
 
 - **AES-256-GCM** autenticata per i segreti; `TOOL_SECRETS_KEY` obbligatoria (fail-fast).
 - **Docker prod sicuro**: i servizi interni non hanno porte host; password obbligatorie.
-- **MCP `local`** ristretto agli admin; **guard anti-SSRF** su `http`/`sse` (blocca metadata cloud, RFC1918, localhost).
+- **MCP `local`** ristretto agli admin; **guard anti-SSRF** su `http`/`sse` e DataSource: metadata cloud / link-local sempre bloccati, mentre gli host privati/LAN sono ammessi di default (server self-hosted) e restringibili a soli host pubblici + allowlist host/CIDR per deployment.
+- **API key**: opache, hashate a riposo, revocabili, con scadenza opzionale — usabili come credenziali Bearer (incluso l'endpoint compatibile OpenAI) con l'identità del proprietario.
 - **Skill** (codice di terze parti non fidato): egress allowlist, filesystem per-tenant access-aware, container-per-job blindati via broker, capability dichiarate, checksum dei pacchetti.
 - **Audit log strutturato** sui chokepoint (auth, admin, esecuzioni, file, SQL, MCP) con identità "runs-as".
 
