@@ -450,5 +450,34 @@
     "embeddingProviderOpenAiCompatDesc": "Any OpenAI-compatible embedding endpoint",
     "embeddingInternalInfoTitle": "Internal embedding service (auto-configured)",
     "embeddingInternalInfoDesc": "Uses the embedding microservice bundled with the app. URL, model and dimensions are detected automatically — nothing to configure. Press \"Test\" to check the active model."
+  },
+  "mcpSecurity": {
+    "title": "MCP security (anti-SSRF)",
+    "subtitle": "Restricts which hosts http/sse MCP servers may connect to. Prevents using an MCP server to reach internal services or the cloud metadata endpoint.",
+    "loading": "Loading…",
+    "metadataNote": "The cloud metadata endpoint (169.254.169.254 / IPv6 link-local) is always blocked, regardless of these settings.",
+    "allowPrivateLabel": "Allow private/local hosts",
+    "allowPrivateHint": "Needed for self-hosted MCP servers on LAN or localhost. Disable to allow only public hosts (plus the allowlist) in untrusted multi-tenant deployments.",
+    "allowlistLabel": "Host/CIDR allowlist",
+    "allowlistHint": "Hosts, IPs or CIDRs allowed even when private hosts are disabled. One per line (or comma-separated).",
+    "save": "Save",
+    "savedOk": "MCP policy saved"
+  },
+  "apiKeys": {
+    "title": "API keys",
+    "subtitle": "Long-lived credentials for external integrations (voice satellites, scripts, third-party clients). They work as Bearer tokens on the whole API with your identity.",
+    "createdOnce": "Key created. Copy it now: it will never be shown again.",
+    "copy": "Copy",
+    "empty": "No API keys.",
+    "expires": "Expires",
+    "never": "Never",
+    "lastUsed": "Last used",
+    "revoke": "Revoke",
+    "revokeConfirm": "Revoke the key \"{{name}}\"? Integrations using it will stop working.",
+    "fieldName": "Name",
+    "namePlaceholder": "e.g. Voice satellite",
+    "fieldExpiry": "Expiry",
+    "days": "days",
+    "create": "Create key"
   }
 }

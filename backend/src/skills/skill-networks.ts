@@ -72,20 +72,30 @@ export function resolveGrantedNetworks(grantedIds: string[] | undefined): string
   return grantedIds.map((id) => byId.get(id)).filter((n): n is string => !!n);
 }
 
+/** Network tiers an admin can force on a skill ('none' is sandbox-only: jobs need the floor). */
+export const SKILL_NETWORK_MODES = ['internal', 'internet', 'open'] as const;
+export type SkillNetworkMode = (typeof SKILL_NETWORK_MODES)[number];
+
 /**
  * Network params for a skill invocation:
- *  - `network: 'internet'` if the skill declared external domains (runtime.network) → egress
- *    via the squid allowlist; omitted otherwise (the executor defaults to the `internal`
- *    baseline: backend only, no WAN);
+ *  - `network`: the job tier. The admin override (Skill.networkMode) wins when set:
+ *    'open' = full internet (no allowlist), 'internet' = squid allowlist, 'internal' =
+ *    force the baseline even when the skill declares domains. When unset the tier is
+ *    derived: 'internet' if the skill declared external domains (runtime.network),
+ *    otherwise omitted (the executor defaults to the `internal` baseline);
  *  - `grantedNetworks`: the resolved Docker names of the reserved networks granted to it.
  * The baseline internal BE network is added by the executor for every job.
  */
 export function skillNetworkParams(skill: {
   networkDomains?: string[] | null;
   grantedNetworks?: string[] | null;
-}): { network?: 'internet'; grantedNetworks?: string[] } {
-  const out: { network?: 'internet'; grantedNetworks?: string[] } = {};
-  if (skill.networkDomains?.length) out.network = 'internet';
+  networkMode?: SkillNetworkMode | null;
+}): { network?: NetworkMode; grantedNetworks?: string[] } {
+  const out: { network?: NetworkMode; grantedNetworks?: string[] } = {};
+  const mode = skill.networkMode ?? (skill.networkDomains?.length ? 'internet' : undefined);
+  // 'internal' is the executor default → omit (an explicit override still suppresses
+  // the domain-derived 'internet' because the override wins in the line above).
+  if (mode && mode !== 'internal') out.network = mode;
   const granted = resolveGrantedNetworks(skill.grantedNetworks ?? undefined);
   if (granted.length) out.grantedNetworks = granted;
   return out;

@@ -60,6 +60,12 @@ class CreateMcpServerDtoValidated implements CreateMcpServerDto {
   @IsOptional() @IsBoolean()
   loadOnFirst?: boolean;
 
+  @IsOptional() @IsIn(['personal', 'team', 'org'])
+  scope?: 'personal' | 'team' | 'org';
+
+  @IsOptional() @IsString()
+  teamId?: string | null;
+
   @IsOptional() @IsObject()
   secrets?: Record<string, string>;
 }
@@ -96,6 +102,12 @@ class UpdateMcpServerDtoValidated implements UpdateMcpServerDto {
   @IsOptional() @IsBoolean()
   loadOnFirst?: boolean;
 
+  @IsOptional() @IsIn(['personal', 'team', 'org'])
+  scope?: 'personal' | 'team' | 'org';
+
+  @IsOptional() @IsString()
+  teamId?: string | null;
+
   @IsOptional() @IsObject()
   secrets?: Record<string, string>;
 }
@@ -117,7 +129,7 @@ export class McpServersController {
 
   @Post()
   create(@CurrentUser() user: any, @Body() dto: CreateMcpServerDtoValidated) {
-    return this.service.create(user.id, dto, user.role === 'admin');
+    return this.service.create(user.id, dto, user.role === 'admin', user.role);
   }
 
   @Get(':id')
@@ -131,7 +143,7 @@ export class McpServersController {
     @CurrentUser() user: any,
     @Body() dto: UpdateMcpServerDtoValidated,
   ) {
-    const result = await this.service.update(id, user.id, dto, user.role === 'admin');
+    const result = await this.service.update(id, user.id, dto, user.role === 'admin', user.role);
     // Update the config on the bridge if present
     await this.gateway.pushConfigUpdate(user.id);
     return result;
@@ -140,7 +152,7 @@ export class McpServersController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Param('id') id: string, @CurrentUser() user: any) {
-    await this.service.remove(id, user.id);
+    await this.service.remove(id, user.id, user.role === 'admin');
     await this.gateway.pushConfigUpdate(user.id);
   }
 
@@ -148,7 +160,7 @@ export class McpServersController {
 
   @Get(':id/secrets')
   getSecretKeys(@Param('id') id: string, @CurrentUser() user: any) {
-    return this.service.getSecretKeys(id, user.id).then((keys) => ({ keys }));
+    return this.service.getSecretKeys(id, user.id, user.role === 'admin').then((keys) => ({ keys }));
   }
 
   @Put(':id/secrets')
@@ -158,7 +170,7 @@ export class McpServersController {
     @CurrentUser() user: any,
     @Body() body: Record<string, string>,
   ) {
-    return this.service.upsertSecrets(id, body);
+    return this.service.upsertSecretsChecked(id, body, user.id, user.role === 'admin');
   }
 
   @Delete(':id/secrets/:key')
@@ -168,7 +180,7 @@ export class McpServersController {
     @Param('key') key: string,
     @CurrentUser() user: any,
   ) {
-    return this.service.removeSecret(id, key, user.id);
+    return this.service.removeSecret(id, key, user.id, user.role === 'admin');
   }
 
   // ── Bridge status ─────────────────────────────────────────────────────────
@@ -177,6 +189,18 @@ export class McpServersController {
   getBridgeStatus(@Param('id') _id: string, @CurrentUser() user: any) {
     const connected = this.gateway.isBridgeConnected(user.id);
     return { connected };
+  }
+
+  // ── Connection test ───────────────────────────────────────────────────────
+
+  /**
+   * POST /api/mcp-servers/:id/test — performs the real MCP handshake + tool
+   * discovery for the server and returns the tool list or the precise error.
+   */
+  @Post(':id/test')
+  @HttpCode(HttpStatus.OK)
+  testServer(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.service.testServer(id, user.id);
   }
 
   @Post('bridge/refresh')

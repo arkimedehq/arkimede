@@ -29,7 +29,8 @@
     "disable": "Disabilita",
     "enable": "Attiva",
     "resetPassword": "Reset password",
-    "delete": "Elimina"
+    "delete": "Elimina",
+    "apiKeys": "API key"
   },
   "confirm": {
     "deleteUser": "Eliminare definitivamente \"{{name}}\"?"
@@ -64,5 +65,21 @@
   "status": {
     "active": "attivo",
     "disabled": "disabilitato"
+  },
+  "apiKeys": {
+    "title": "API key di {{name}}",
+    "createdOnce": "Chiave creata. Copiala ora: non verrà mai più mostrata.",
+    "copy": "Copia",
+    "empty": "Nessuna API key per questo utente.",
+    "expires": "Scade",
+    "never": "Mai",
+    "lastUsed": "Ultimo uso",
+    "revoke": "Revoca",
+    "revokeConfirm": "Revocare la chiave \"{{name}}\"?",
+    "fieldName": "Nome",
+    "namePlaceholder": "es. Satellite voce",
+    "fieldExpiry": "Scadenza",
+    "days": "giorni",
+    "create": "Crea chiave"
   }
 }

@@ -5,8 +5,9 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Users, Plus, Search, Shield, ShieldOff, KeyRound, Trash2, Ban, CheckCircle2, X, Loader2, ArrowLeft,
+  Users, Plus, Search, Shield, ShieldOff, KeyRound, Key, Trash2, Ban, CheckCircle2, X, Loader2, ArrowLeft, Copy, Check,
 } from 'lucide-react';
+import { apiKeysApi, type ApiKeyRow } from '../api/apiKeys';
 import {
   adminUsersApi, type AdminUser, type UserRole, type UserStatus,
 } from '../api/adminUsers';
@@ -28,6 +29,7 @@ export function UsersSection() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editUser, setEditUser]     = useState<AdminUser | null>(null);
   const [resetUser, setResetUser]   = useState<AdminUser | null>(null);
+  const [apiKeyUser, setApiKeyUser] = useState<AdminUser | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   const pageSize = 25;
@@ -68,6 +70,9 @@ export function UsersSection() {
   }
   if (editUser) {
     return <EditUserEditor user={editUser} onClose={() => setEditUser(null)} onSaved={() => { setEditUser(null); invalidate(); }} />;
+  }
+  if (apiKeyUser) {
+    return <ApiKeyEditor user={apiKeyUser} onClose={() => setApiKeyUser(null)} />;
   }
   if (resetUser) {
     return <ResetPasswordEditor user={resetUser} onClose={() => setResetUser(null)} />;
@@ -168,6 +173,9 @@ export function UsersSection() {
                       <button title={t('actions.resetPassword')} onClick={() => setResetUser(u)} className="p-1.5 text-gray-400 hover:text-gray-200 rounded transition-colors">
                         <KeyRound size={15} />
                       </button>
+                      <button title={t('actions.apiKeys')} onClick={() => setApiKeyUser(u)} className="p-1.5 text-gray-400 hover:text-gray-200 rounded transition-colors">
+                        <Key size={15} />
+                      </button>
                       <button
                         title={t('actions.delete')}
                         disabled={isSelf}
@@ -248,6 +256,108 @@ function EditUserEditor({ user, onClose, onSaved }: { user: AdminUser; onClose: 
       <Field label={t('modal.fieldName')}><input className="input-field w-full" value={name} onChange={(e) => setName(e.target.value)} /></Field>
       <Field label={t('modal.fieldEmail')}><input className="input-field w-full" type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
       <ModalActions onClose={onClose} onConfirm={() => m.mutate()} pending={m.isPending} disabled={!name || !email} />
+    </InlineEditor>
+  );
+}
+
+/**
+ * Admin management of a user's long-lived API keys: list/revoke plus creation
+ * with the clear key shown ONCE (copy button). Built for service accounts
+ * (e.g. a dedicated voice user) that never log into the UI themselves.
+ */
+function ApiKeyEditor({ user, onClose }: { user: AdminUser; onClose: () => void }) {
+  const { t } = useTranslation('users');
+  const qc = useQueryClient();
+  const [name, setName] = useState('');
+  const [days, setDays] = useState('365');
+  const [createdKey, setCreatedKey] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const keysQ = useQuery({
+    queryKey: ['admin-api-keys', user.id],
+    queryFn: () => apiKeysApi.listForUser(user.id),
+  });
+
+  const createM = useMutation({
+    mutationFn: () => apiKeysApi.createForUser(user.id, name, Number(days) || 0),
+    onSuccess: (res) => {
+      setCreatedKey(res.key);
+      setName('');
+      qc.invalidateQueries({ queryKey: ['admin-api-keys', user.id] });
+    },
+    onError: (e: any) => setErr(e?.response?.data?.message ?? e.message),
+  });
+
+  const revokeM = useMutation({
+    mutationFn: (id: string) => apiKeysApi.revoke(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-api-keys', user.id] }),
+    onError: (e: any) => setErr(e?.response?.data?.message ?? e.message),
+  });
+
+  const copyKey = async () => {
+    if (!createdKey) return;
+    try {
+      await navigator.clipboard.writeText(createdKey);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch { /* clipboard unavailable */ }
+  };
+
+  const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString() : '—');
+
+  return (
+    <InlineEditor backLabel={t('header.title')} title={t('apiKeys.title', { name: user.name })} onBack={onClose}>
+      {err && <Banner text={err} onClose={() => setErr(null)} />}
+
+      {/* One-time display of the newly created key */}
+      {createdKey && (
+        <div className="mb-4 p-3 rounded-lg border border-emerald-500/30 bg-emerald-500/15 space-y-2">
+          <p className="text-xs text-emerald-300 font-medium">{t('apiKeys.createdOnce')}</p>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 text-xs font-mono text-gray-200 bg-gray-950/60 rounded px-2 py-1.5 break-all">{createdKey}</code>
+            <button onClick={copyKey} className="p-1.5 text-gray-300 hover:text-white rounded transition-colors" title={t('apiKeys.copy')}>
+              {copied ? <Check size={15} className="text-emerald-400" /> : <Copy size={15} />}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Existing keys */}
+      <div className="mb-4 space-y-1.5">
+        {keysQ.isLoading && <p className="text-xs text-gray-500"><Loader2 size={12} className="inline animate-spin" /> …</p>}
+        {keysQ.data?.length === 0 && <p className="text-xs text-gray-500">{t('apiKeys.empty')}</p>}
+        {keysQ.data?.map((k: ApiKeyRow) => (
+          <div key={k.id} className="flex items-center gap-3 p-2 rounded-lg border border-gray-800">
+            <div className="min-w-0 flex-1">
+              <p className="text-xs text-gray-200 font-medium truncate">{k.name} <span className="text-gray-500 font-mono">{k.prefix}…</span></p>
+              <p className="text-[11px] text-gray-500">
+                {t('apiKeys.expires')}: {k.expiresAt ? fmtDate(k.expiresAt) : t('apiKeys.never')} · {t('apiKeys.lastUsed')}: {fmtDate(k.lastUsedAt)}
+              </p>
+            </div>
+            <button
+              title={t('apiKeys.revoke')}
+              disabled={revokeM.isPending}
+              onClick={() => { if (confirm(t('apiKeys.revokeConfirm', { name: k.name }))) revokeM.mutate(k.id); }}
+              className="p-1.5 text-gray-400 hover:text-red-400 rounded transition-colors"
+            ><Trash2 size={14} /></button>
+          </div>
+        ))}
+      </div>
+
+      {/* Create */}
+      <Field label={t('apiKeys.fieldName')}>
+        <input className="input-field w-full" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('apiKeys.namePlaceholder')} />
+      </Field>
+      <Field label={t('apiKeys.fieldExpiry')}>
+        <select className="input-field w-full" value={days} onChange={(e) => setDays(e.target.value)}>
+          <option value="30">30 {t('apiKeys.days')}</option>
+          <option value="90">90 {t('apiKeys.days')}</option>
+          <option value="365">365 {t('apiKeys.days')}</option>
+          <option value="0">{t('apiKeys.never')}</option>
+        </select>
+      </Field>
+      <ModalActions onClose={onClose} onConfirm={() => createM.mutate()} pending={createM.isPending} disabled={!name.trim()} confirmLabel={t('apiKeys.create')} />
     </InlineEditor>
   );
 }

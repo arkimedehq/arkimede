@@ -31,6 +31,7 @@ import { ScopeSelector } from '../components/ScopeSelector';
 import { daemonsApi, type SkillDaemon, type DaemonStatus } from '../api/daemons';
 import { projectsApi } from '../api/projects';
 import { dataSourcesApi, engineFamily, type DataSource } from '../api/dataSources';
+import { appConfigApi } from '../api/appConfig';
 import { vectorDbApi, type VectorCollection } from '../api/vectorDb';
 import { useStore } from '../store/useStore';
 import type { Project } from '../store/useStore';
@@ -166,9 +167,10 @@ function InternetDomainsSection({ skill }: { skill: Skill }) {
 }
 
 /**
- * Reserved-network grants for a skill (admin, Phase 3). Lists the operator-provisioned
- * networks (SKILL_NETWORK_CATALOG); each checkbox grants/revokes one for this skill.
- * Renders nothing if the operator provisioned no reserved networks.
+ * Network access of a skill (admin): the job network tier (auto/internal/internet/open)
+ * and the reserved-network grants (Phase 3, when the operator provisioned a catalog).
+ * Tier options unavailable in this deployment (broker allowlist, missing egress) are
+ * disabled with the reason — the deploy-time ceiling stays visible, never bypassed.
  */
 function NetworksSection({ skill }: { skill: Skill }) {
   const { t } = useTranslation('skills');
@@ -179,58 +181,116 @@ function NetworksSection({ skill }: { skill: Skill }) {
     queryFn:   skillsApi.getNetworkCatalog,
     staleTime: 5 * 60_000,
   });
+  const { data: isolation } = useQuery({
+    queryKey:  ['isolation-info'],
+    queryFn:   appConfigApi.getIsolationInfo,
+    staleTime: 60_000,
+  });
 
   const mutation = useMutation({
-    mutationFn: (ids: string[]) => skillsApi.setNetworks(skill.id, ids),
+    mutationFn: (access: { grantedNetworks?: string[]; networkMode?: 'internal' | 'internet' | 'open' | null }) =>
+      skillsApi.setNetworks(skill.id, access),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['skills'] });
       qc.invalidateQueries({ queryKey: ['skill', skill.id] });
     },
   });
 
-  if (!catalog || catalog.length === 0) return null;
-
   const granted = new Set(skill.grantedNetworks ?? []);
   const toggle = (id: string) => {
     const next = new Set(granted);
     next.has(id) ? next.delete(id) : next.add(id);
-    mutation.mutate([...next]);
+    mutation.mutate({ grantedNetworks: [...next] });
   };
+
+  const mode = skill.networkMode ?? 'auto';
+  const derived = (skill.networkDomains?.length ?? 0) > 0 ? 'internet' : 'internal';
+  const tiers: Array<{
+    value: 'auto' | 'internal' | 'internet' | 'open';
+    unavailable?: boolean;
+  }> = [
+    { value: 'auto' },
+    { value: 'internal' },
+    { value: 'internet', unavailable: isolation != null && !isolation.internetTierAvailable },
+    { value: 'open',     unavailable: isolation != null && !isolation.openTierAvailable },
+  ];
 
   return (
     <div className="space-y-2">
       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
-        <Network size={13} /> {t('networks.title')}
+        <Network size={13} /> {t('networks.tierTitle')}
       </p>
-      <p className="text-[11px] text-gray-500">{t('networks.hint')}</p>
+      <p className="text-[11px] text-gray-500">{t('networks.tierHint')}</p>
       <div className="space-y-1.5">
-        {catalog.map((n) => (
+        {tiers.map(({ value, unavailable }) => (
           <label
-            key={n.id}
-            className="flex items-start gap-2.5 p-2 rounded-lg border border-gray-800 hover:border-gray-700 cursor-pointer transition-colors"
+            key={value}
+            className={`flex items-start gap-2.5 p-2 rounded-lg border transition-colors ${
+              unavailable
+                ? 'border-gray-800 opacity-60 cursor-not-allowed'
+                : 'border-gray-800 hover:border-gray-700 cursor-pointer'
+            }`}
           >
             <input
-              type="checkbox"
-              checked={granted.has(n.id)}
-              disabled={mutation.isPending}
-              onChange={() => toggle(n.id)}
+              type="radio"
+              name={`network-tier-${skill.id}`}
+              checked={mode === value}
+              disabled={mutation.isPending || unavailable}
+              onChange={() => mutation.mutate({ networkMode: value === 'auto' ? null : value })}
               className="mt-0.5 accent-indigo-500"
             />
             <span className="min-w-0">
-              <span className="text-xs text-gray-200 font-medium">{n.label}</span>
-              {n.kind === 'lan' && (
-                <span className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-300 text-[9px] font-semibold uppercase tracking-wide">
-                  {t('networks.lanBadge')}
+              <span className="text-xs text-gray-200 font-medium">{t(`networks.tier.${value}`)}</span>
+              <span className="block text-[11px] text-gray-500">
+                {value === 'auto'
+                  ? t('networks.tierDesc.auto', { derived: t(`networks.tier.${derived}`) })
+                  : t(`networks.tierDesc.${value}`)}
+              </span>
+              {unavailable && (
+                <span className="block text-[11px] text-amber-600 dark:text-amber-400">
+                  {t(`networks.tierUnavailable.${value}`)}
                 </span>
               )}
-              {n.description && (
-                <span className="block text-[11px] text-gray-500">{n.description}</span>
-              )}
-              <span className="block text-[10px] text-gray-600 font-mono truncate">{n.dockerNetwork}</span>
             </span>
           </label>
         ))}
       </div>
+      {catalog != null && catalog.length > 0 && (
+        <>
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1.5 pt-1">
+            <Network size={13} /> {t('networks.title')}
+          </p>
+          <p className="text-[11px] text-gray-500">{t('networks.hint')}</p>
+          <div className="space-y-1.5">
+            {catalog.map((n) => (
+              <label
+                key={n.id}
+                className="flex items-start gap-2.5 p-2 rounded-lg border border-gray-800 hover:border-gray-700 cursor-pointer transition-colors"
+              >
+                <input
+                  type="checkbox"
+                  checked={granted.has(n.id)}
+                  disabled={mutation.isPending}
+                  onChange={() => toggle(n.id)}
+                  className="mt-0.5 accent-indigo-500"
+                />
+                <span className="min-w-0">
+                  <span className="text-xs text-gray-200 font-medium">{n.label}</span>
+                  {n.kind === 'lan' && (
+                    <span className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-300 text-[9px] font-semibold uppercase tracking-wide">
+                      {t('networks.lanBadge')}
+                    </span>
+                  )}
+                  {n.description && (
+                    <span className="block text-[11px] text-gray-500">{n.description}</span>
+                  )}
+                  <span className="block text-[10px] text-gray-600 font-mono truncate">{n.dockerNetwork}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

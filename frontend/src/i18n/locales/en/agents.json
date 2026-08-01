@@ -50,6 +50,11 @@
     "rolePlaceholder": "role",
     "addMember": "member",
     "exposeAgentToolName": "agent_<name>",
-    "exposeTeamToolName": "team_<name>"
+    "exposeTeamToolName": "team_<name>",
+    "toolPickerLoading": "Loading available tools…",
+    "toolPickerError": "Could not load the available tools.",
+    "toolPickerEmpty": "No tools available. Configure MCP servers, skills, flows or other agents.",
+    "toolPickerHint": "{{count}} selected. Tick individual tools or a whole group.",
+    "toolPickerWholeGroup": "whole group"
   }
 }

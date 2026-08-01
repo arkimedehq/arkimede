@@ -23,6 +23,14 @@ import { McpServerSecret } from './mcp-server-secret.entity';
 
 export type McpTransport = 'http' | 'sse' | 'local' | 'remote';
 
+/**
+ * Visibility scope (mirrors ToolScope):
+ *   personal — visible/usable only by the owner (default)
+ *   team     — visible/usable by members of `teamId`; managed by admin or team owner
+ *   org      — visible/usable by everyone; managed by admins
+ */
+export type McpServerScope = 'personal' | 'team' | 'org';
+
 @Entity('mcp_servers')
 export class McpServer {
   @PrimaryGeneratedColumn('uuid')
@@ -97,6 +105,19 @@ export class McpServer {
    */
   @Column({ type: 'boolean', default: true })
   loadOnFirst: boolean;
+
+  /**
+   * Visibility scope. 'personal' (default) = owner only; 'team' = members of
+   * `teamId`; 'org' = everyone. Shared servers expose their tools to other
+   * users, but the encrypted secrets stay bound to the owner's configuration
+   * (a consumer never sees them, they are resolved backend-side at call time).
+   */
+  @Column({ type: 'varchar', length: 16, default: 'personal' })
+  scope: McpServerScope;
+
+  /** Reference team when scope='team' (null otherwise). */
+  @Column({ type: 'uuid', nullable: true })
+  teamId: string | null;
 
   /** Associated encrypted secrets (API key, token, etc.) */
   @OneToMany(() => McpServerSecret, (s) => s.server, { cascade: true, eager: false })

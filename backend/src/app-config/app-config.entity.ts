@@ -326,6 +326,24 @@ export class AppConfigEntity {
   @Column({ type: 'jsonb', default: () => "'[]'" })
   dataSourceHostAllowlist: string[];
 
+  // ── MCP anti-SSRF policy ────────────────────────────────────────────────────
+
+  /**
+   * If true (default), http/sse MCP servers may target private/loopback/CGNAT
+   * hosts (needed for self-hosted MCP servers on LAN/localhost). The cloud
+   * metadata endpoint (169.254.169.254 / IPv6 link-local) is ALWAYS blocked
+   * regardless. Set false to harden to public hosts only (+ the allowlist below).
+   */
+  @Column({ type: 'boolean', default: true })
+  mcpAllowPrivateHosts: boolean;
+
+  /**
+   * Host/CIDR allowlist that is permitted even when mcpAllowPrivateHosts is
+   * false (e.g. a specific internal MCP host). Entries: hostname, IP, or CIDR.
+   */
+  @Column({ type: 'jsonb', default: () => "'[]'" })
+  mcpHostAllowlist: string[];
+
   @UpdateDateColumn()
   updatedAt: Date;
 }

@@ -89,6 +89,8 @@ export interface Skill {
   networkDomains?: string[];
   /** Reserved networks granted to this skill by an admin (catalog ids, Phase 3). */
   grantedNetworks?: string[];
+  /** Admin override of the job network tier; null/absent = derived from networkDomains. */
+  networkMode?: 'internal' | 'internet' | 'open' | null;
   scripts:     SkillScript[];
   configSpec:  SkillConfigSpecEntry[] | null;
   /**
@@ -304,9 +306,12 @@ export const skillsApi = {
   getNetworkCatalog: () =>
     api.get<SkillNetwork[]>('/skills/networks/catalog').then((r) => r.data),
 
-  /** [Admin] Set the reserved networks granted to a skill (catalog ids) */
-  setNetworks: (id: string, grantedNetworks: string[]) =>
-    api.put<Skill>(`/skills/${id}/networks`, { grantedNetworks }).then((r) => r.data),
+  /** [Admin] Set the network access of a skill: reserved networks (catalog ids) and/or
+   * tier override (null = back to derived; undefined = leave untouched). */
+  setNetworks: (
+    id: string,
+    access: { grantedNetworks?: string[]; networkMode?: 'internal' | 'internet' | 'open' | null },
+  ) => api.put<Skill>(`/skills/${id}/networks`, access).then((r) => r.data),
 
   // ── Config vars ──────────────────────────────────────────────────────────
 

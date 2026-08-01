@@ -16,7 +16,25 @@
   "networks": {
     "title": "Reti riservate",
     "hint": "Concedi a questa skill l'accesso a reti aziendali predisposte dall'operatore (LAN/VPN/sottoreti). Il backend resta sempre raggiungibile.",
-    "lanBadge": "LAN"
+    "lanBadge": "LAN",
+    "tierTitle": "Rete del job",
+    "tierHint": "Livello di accesso di rete dei job di questa skill. Il backend interno resta sempre raggiungibile; il broker riconvalida ogni rete al lancio (tetto deciso al deploy).",
+    "tier": {
+      "auto": "Automatico",
+      "internal": "Solo interna",
+      "internet": "Internet (allowlist)",
+      "open": "Aperta"
+    },
+    "tierDesc": {
+      "auto": "Derivato dalla skill: per questa skill equivale a «{{derived}}».",
+      "internal": "Solo il backend interno, nessuna rete esterna (anche se la skill dichiara domini).",
+      "internet": "Solo i domini dichiarati dalla skill, tramite il proxy con allowlist.",
+      "open": "Accesso di rete completo senza allowlist: internet e rete locale (LAN). Per skill che parlano con dispositivi locali."
+    },
+    "tierUnavailable": {
+      "internet": "Non disponibile: proxy egress non attivo in questo deploy.",
+      "open": "Non disponibile: la rete aperta non è nell'allowlist del broker (deploy hardened)."
+    }
   },
   "scope": {
     "visibility": "Visibilità",

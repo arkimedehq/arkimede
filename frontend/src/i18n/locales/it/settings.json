@@ -450,5 +450,34 @@
     "embeddingProviderOpenAiCompatDesc": "Qualsiasi endpoint embedding compatibile OpenAI",
     "embeddingInternalInfoTitle": "Servizio embedding interno (auto-configurato)",
     "embeddingInternalInfoDesc": "Usa il microservizio embedding incluso nell'app. URL, modello e dimensioni vengono rilevati automaticamente: non serve configurare nulla. Premi \"Testa\" per verificare il modello attivo."
+  },
+  "mcpSecurity": {
+    "title": "Sicurezza MCP (anti-SSRF)",
+    "subtitle": "Limita a quali host possono connettersi i server MCP http/sse. Impedisce di usare un MCP per raggiungere servizi interni o l'endpoint di metadata cloud.",
+    "loading": "Caricamento…",
+    "metadataNote": "L'endpoint di metadata cloud (169.254.169.254 / link-local IPv6) è sempre bloccato, indipendentemente da queste impostazioni.",
+    "allowPrivateLabel": "Consenti host privati/locali",
+    "allowPrivateHint": "Necessario per server MCP self-hosted su LAN o localhost. Disattivalo per consentire solo host pubblici (più l'allowlist) in deployment multi-tenant non fidati.",
+    "allowlistLabel": "Allowlist host/CIDR",
+    "allowlistHint": "Host, IP o CIDR consentiti anche quando gli host privati sono disabilitati. Uno per riga (o separati da virgola).",
+    "save": "Salva",
+    "savedOk": "Policy MCP salvata"
+  },
+  "apiKeys": {
+    "title": "API key",
+    "subtitle": "Credenziali a lunga scadenza per integrazioni esterne (satelliti vocali, script, client di terze parti). Valgono come Bearer token su tutta l'API con la tua identità.",
+    "createdOnce": "Chiave creata. Copiala ora: non verrà mai più mostrata.",
+    "copy": "Copia",
+    "empty": "Nessuna API key.",
+    "expires": "Scade",
+    "never": "Mai",
+    "lastUsed": "Ultimo uso",
+    "revoke": "Revoca",
+    "revokeConfirm": "Revocare la chiave \"{{name}}\"? Le integrazioni che la usano smetteranno di funzionare.",
+    "fieldName": "Nome",
+    "namePlaceholder": "es. Satellite voce",
+    "fieldExpiry": "Scadenza",
+    "days": "giorni",
+    "create": "Crea chiave"
   }
 }

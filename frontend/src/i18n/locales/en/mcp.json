@@ -40,7 +40,11 @@
     "deleteConfirm": "Delete?",
     "no": "No",
     "secret_one": "🔑 {{count}} secret",
-    "secret_other": "🔑 {{count}} secrets"
+    "secret_other": "🔑 {{count}} secrets",
+    "scope": {
+      "team": "Team",
+      "org": "Org"
+    }
   },
   "modal": {
     "editTitle": "Edit MCP server",
@@ -80,6 +84,17 @@
     "create": "Create",
     "errNameRequired": "Name is required",
     "errUrlRequired": "URL required for http/sse transport",
-    "errCommandRequired": "Command required for local/remote transport"
+    "errCommandRequired": "Command required for local/remote transport",
+    "scopeLabel": "Visibility"
+  },
+  "test": {
+    "button": "Test connection",
+    "hint": "Runs the real MCP handshake against the saved configuration and fetches the tools.",
+    "ok": "OK — {{count}} tools in {{ms}}ms",
+    "fail": "Test failed",
+    "noTools": "Connection succeeded, but the server exposes no tools.",
+    "modeStreamable": "streamable session",
+    "modePlain": "plain JSON-RPC",
+    "modeLegacySse": "legacy SSE"
   }
 }

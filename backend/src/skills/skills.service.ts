@@ -49,7 +49,10 @@ import { SkillScript } from './skill-script.entity';
 import { SkillProjectAssignment } from './skill-project-assignment.entity';
 import { SkillConfigVar } from './skill-config-var.entity';
 import { SkillExecutorClient } from './skill-executor.client';
-import { skillNetworkParams, networkCatalog, validNetworkIds, SkillNetwork } from './skill-networks';
+import {
+  skillNetworkParams, networkCatalog, validNetworkIds,
+  SkillNetwork, SkillNetworkMode, SKILL_NETWORK_MODES,
+} from './skill-networks';
 import { EgressSyncService } from './egress-sync.service';
 import { buildSkillTool, buildToolName } from './skill-tool.factory';
 import { mintRunToken } from '../common/internal-token/internal-token';
@@ -1131,24 +1134,44 @@ export class SkillsService implements OnModuleInit {
   }
 
   /**
-   * Sets the reserved networks granted to a skill (admin). Only ids present in the
-   * catalog are kept (unknown ids are dropped, deduped) — a skill can never be granted
-   * a network the operator did not provision.
+   * Sets the network access of a skill (admin): the reserved networks granted to it
+   * and/or the network-tier override. Only catalog ids are kept (unknown ids are
+   * dropped, deduped) — a skill can never be granted a network the operator did not
+   * provision. `networkMode` undefined = untouched; null = reset to derived behavior.
+   * The broker re-validates every resolved network at job launch (deploy-time ceiling).
    */
-  async setGrantedNetworks(id: string, ids: string[], actorId: string): Promise<Skill> {
+  async setGrantedNetworks(
+    id: string,
+    ids: string[] | undefined,
+    actorId: string,
+    networkMode?: SkillNetworkMode | null,
+  ): Promise<Skill> {
     const skill = await this.skillRepo.findOne({ where: { id } });
     if (!skill) throw new NotFoundException(
       I18nContext.current()?.t('skills.notFound', { args: { id } }) ?? `Skill "${id}" not found`,
     );
-    const valid = validNetworkIds();
-    const granted = [...new Set((ids ?? []).filter((x) => valid.has(x)))];
-    await this.skillRepo.update(id, { grantedNetworks: granted });
-    this.logger.log(`Skill ${id} grantedNetworks=[${granted.join(', ')}]`);
+    const patch: Partial<Skill> = {};
+    if (ids !== undefined) {
+      const valid = validNetworkIds();
+      patch.grantedNetworks = [...new Set((ids ?? []).filter((x) => valid.has(x)))];
+    }
+    if (networkMode !== undefined) {
+      if (networkMode !== null && !SKILL_NETWORK_MODES.includes(networkMode)) {
+        throw new BadRequestException(`Invalid networkMode "${networkMode}"`);
+      }
+      patch.networkMode = networkMode;
+    }
+    if (Object.keys(patch).length) await this.skillRepo.update(id, patch);
+    const next = { ...skill, ...patch };
+    this.logger.log(
+      `Skill ${id} grantedNetworks=[${(next.grantedNetworks ?? []).join(', ')}] networkMode=${next.networkMode ?? 'auto'}`,
+    );
     await this.audit?.record({
       actorId, action: 'skill.set_networks', resource: id,
-      outcome: 'ok', ctx: { skillId: id, grantedNetworks: granted },
+      outcome: 'ok',
+      ctx: { skillId: id, grantedNetworks: next.grantedNetworks, networkMode: next.networkMode },
     });
-    return { ...skill, grantedNetworks: granted };
+    return next;
   }
 
   /** Approves a shared skill — makes it visible to all users. */

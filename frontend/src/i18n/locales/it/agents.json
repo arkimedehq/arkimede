@@ -50,6 +50,11 @@
     "rolePlaceholder": "ruolo",
     "addMember": "membro",
     "exposeAgentToolName": "agent_<nome>",
-    "exposeTeamToolName": "team_<nome>"
+    "exposeTeamToolName": "team_<nome>",
+    "toolPickerLoading": "Carico i tool disponibili…",
+    "toolPickerError": "Impossibile caricare i tool disponibili.",
+    "toolPickerEmpty": "Nessun tool disponibile. Configura server MCP, skill, flow o altri agenti.",
+    "toolPickerHint": "{{count}} selezionati. Spunta i singoli tool o un intero gruppo.",
+    "toolPickerWholeGroup": "tutto il gruppo"
   }
 }

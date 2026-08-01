@@ -72,6 +72,16 @@ export class LlmProviderService {
     this.logger.log('Cache modello LLM invalidata');
   }
 
+  /** True when a provider/model pair requires `reasoning_content` in the history. */
+  private static requiresReasoningContent(provider: string, model: string | null): boolean {
+    const modelName = (model ?? '').toLowerCase();
+    if (provider === 'deepseek') return true;
+    if (provider === 'openai') {
+      return /^o[13](-|$)/.test(modelName) || modelName.startsWith('o1-');
+    }
+    return false;
+  }
+
   /**
    * True if the default model requires `reasoning_content` in the history
    * (DeepSeek-R1, OpenAI o1/o3).
@@ -79,17 +89,38 @@ export class LlmProviderService {
   async isReasoningModel(): Promise<boolean> {
     const def = await this.llmConfigsService.getDefault();
     if (!def) return false;
+    return LlmProviderService.requiresReasoningContent(def.provider, def.model);
+  }
 
-    const provider  = def.provider;
-    const modelName = (def.model ?? '').toLowerCase();
+  /** Per-config model cache for agent overrides (mirrors the default-model cache). */
+  private readonly configModelCache = new Map<string, { key: string; model: BaseChatModel }>();
 
-    if (provider === 'deepseek') return true;
-
-    if (provider === 'openai') {
-      return /^o[13](-|$)/.test(modelName) || modelName.startsWith('o1-');
+  /**
+   * Model bundle for a SPECIFIC LLM config — the per-agent override path (e.g.
+   * a voice agent pinned to a low-latency provider while everything else stays
+   * on the default). Same construction as the default path (serving metrics,
+   * dispatcher gates), cached per config id and invalidated on config update.
+   */
+  async getModelBundleForConfigId(llmConfigId: string): Promise<{
+    model: BaseChatModel;
+    provider: LlmProvider;
+    modelName: string | null;
+    isReasoning: boolean;
+  }> {
+    const entity = await this.llmConfigsService.findOne(llmConfigId);
+    const key = `${entity.id}:${entity.updatedAt?.toISOString?.() ?? ''}`;
+    const cached = this.configModelCache.get(entity.id);
+    let model = cached?.key === key ? cached.model : undefined;
+    if (!model) {
+      model = await this.llmConfigsService.buildModelForConfig(entity);
+      this.configModelCache.set(entity.id, { key, model });
     }
-
-    return false;
+    return {
+      model,
+      provider: entity.provider as LlmProvider,
+      modelName: entity.model ?? null,
+      isReasoning: LlmProviderService.requiresReasoningContent(entity.provider, entity.model),
+    };
   }
 
   /** Provider of the default config. */

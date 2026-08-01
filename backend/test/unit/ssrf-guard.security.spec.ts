@@ -33,7 +33,7 @@ describe('SSRF guard — destinazioni bloccate', () => {
   });
 
   it('il messaggio per la destinazione interna nomina l\'host (utente informato)', async () => {
-    await expect(assertPublicUrl('http://169.254.169.254/')).rejects.toThrow(/Internal destination not allowed: 169\.254\.169\.254/);
+    await expect(assertPublicUrl('http://169.254.169.254/')).rejects.toThrow(/Metadata\/link-local destination always blocked: 169\.254\.169\.254/);
   });
 
   // H2 — non-dotted IPv6 encodings that the old regex-based classifier let through.

@@ -17,6 +17,9 @@ import { AgentModule } from './agent/agent.module';
 import { EmbedModule } from './embed/embed.module';
 import { CustomToolsModule } from './custom-tools/custom-tools.module';
 import { McpServersModule } from './mcp-servers/mcp-servers.module';
+import { OpenAiCompatModule } from './openai-compat/openai-compat.module';
+import { ApiKeysModule } from './api-keys/api-keys.module';
+import { ApiKey } from './api-keys/api-key.entity';
 import { DataSourcesModule } from './datasources/datasources.module';
 import { AppConfigModule } from './app-config/app-config.module';
 import { TranscriptionModule } from './transcription/transcription.module';
@@ -101,7 +104,7 @@ import { I18nModule, AcceptLanguageResolver, QueryResolver } from 'nestjs-i18n';
         username: cfg.get('DB_USER', 'postgres'),
         password: cfg.get('DB_PASSWORD', 'postgres'),
         database: cfg.get('DB_NAME', 'arkimede'),
-        entities: [User, Project, ProjectTeam, Chat, Message, FileEntity, CustomTool, ToolSecret, McpServer, McpServerSecret, DataSourceEntity, AppConfigEntity, LlmConfigEntity, VectorDbConfigEntity, VectorCollectionEntity, Skill, SkillScript, SkillProjectAssignment, SkillConfigVar, SkillDaemon, Notification, Feedback, UserMemory, Team, TeamMembership, Flow, FlowRun, Agent, AgentTeam, AgentTeamMember, ScheduledTask, AuditLog, LlmCall],
+        entities: [User, Project, ProjectTeam, Chat, Message, FileEntity, CustomTool, ToolSecret, McpServer, McpServerSecret, DataSourceEntity, AppConfigEntity, LlmConfigEntity, VectorDbConfigEntity, VectorCollectionEntity, Skill, SkillScript, SkillProjectAssignment, SkillConfigVar, SkillDaemon, Notification, Feedback, UserMemory, Team, TeamMembership, Flow, FlowRun, Agent, AgentTeam, AgentTeamMember, ScheduledTask, AuditLog, LlmCall, ApiKey],
         // Automatic migrations at startup — never use synchronize alongside
         synchronize: false,
         migrations: [join(__dirname, 'database/migrations/*.{ts,js}')],
@@ -119,6 +122,8 @@ import { I18nModule, AcceptLanguageResolver, QueryResolver } from 'nestjs-i18n';
     EmbedModule,
     CustomToolsModule,
     McpServersModule,
+    OpenAiCompatModule,
+    ApiKeysModule,
     DataSourcesModule,
     AppConfigModule,
     TranscriptionModule,

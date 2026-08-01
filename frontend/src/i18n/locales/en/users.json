@@ -29,7 +29,8 @@
     "disable": "Disable",
     "enable": "Enable",
     "resetPassword": "Reset password",
-    "delete": "Delete"
+    "delete": "Delete",
+    "apiKeys": "API keys"
   },
   "confirm": {
     "deleteUser": "Permanently delete \"{{name}}\"?"
@@ -64,5 +65,21 @@
   "status": {
     "active": "active",
     "disabled": "disabled"
+  },
+  "apiKeys": {
+    "title": "API keys of {{name}}",
+    "createdOnce": "Key created. Copy it now: it will never be shown again.",
+    "copy": "Copy",
+    "empty": "No API keys for this user.",
+    "expires": "Expires",
+    "never": "Never",
+    "lastUsed": "Last used",
+    "revoke": "Revoke",
+    "revokeConfirm": "Revoke the key \"{{name}}\"?",
+    "fieldName": "Name",
+    "namePlaceholder": "e.g. Voice satellite",
+    "fieldExpiry": "Expiry",
+    "days": "days",
+    "create": "Create key"
   }
 }

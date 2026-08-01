@@ -482,15 +482,61 @@ DataSource (prova la connessione prima o dopo il salvataggio).
 
 **Impostazioni → Server MCP → Nuovo server**
 
-### Transport `http` / `sse`
+### Transport `http` (Streamable HTTP)
 
-Per server MCP remoti già in esecuzione:
+Per server MCP remoti che parlano il transport moderno **Streamable HTTP**
+(endpoint unico, POST JSON-RPC — quello prodotto dagli SDK MCP ufficiali):
 
 ```
 Nome: filesystem
-URL: http://localhost:3001
+URL: http://localhost:3001/mcp
 Transport: http
 ```
+
+Il client esegue il handshake completo della spec: `initialize` (catturando il
+`Mcp-Session-Id` assegnato dal server), `notifications/initialized`, poi
+`tools/list`/`tools/call` con la sessione e l'header `MCP-Protocol-Version`
+negoziato. Le sessioni sono cachate per server e ricreate in trasparenza
+quando il server le fa scadere. I server che parlano JSON-RPC "semplice"
+senza sessione continuano a funzionare (il flusso degrada senza errori).
+
+### Transport `sse` (HTTP+SSE legacy)
+
+Per i server sul transport legacy 2024-11-05 (uno stream GET di eventi che
+annuncia un endpoint POST; le risposte arrivano **sullo stream**):
+
+```
+Nome: domotica
+URL: http://192.168.1.x:8123/mcp_server/sse
+Transport: sse
+```
+
+### Header di autenticazione e secrets
+
+Gli header custom supportano l'interpolazione `{{secret.CHIAVE}}`; i valori
+sono salvati cifrati e non lasciano mai il backend:
+
+```
+Headers: { "Authorization": "Bearer {{secret.API_TOKEN}}" }
+Secrets: API_TOKEN = <il token>
+```
+
+### Test di connessione
+
+Dall'editor del server, **Testa connessione** esegue il handshake reale + la
+scoperta dei tool e mostra i tool trovati (con la modalità di sessione:
+`streamable`, `plain` o `SSE legacy`) oppure la causa esatta del fallimento —
+lo stesso percorso usato dall'agente in chat, ma visibile invece che in un
+warn silenzioso nei log.
+
+### Policy anti-SSRF (admin)
+
+Il traffico MCP `http`/`sse` in uscita è protetto. Di default gli host
+privati/LAN sono **consentiti** (i server MCP self-hosted vivono tipicamente
+sulla LAN); l'endpoint di metadata cloud (169.254.169.254 / link-local IPv6) è
+sempre bloccato. Per deployment multi-tenant non fidati, **Impostazioni → AI →
+Sicurezza MCP** consente di restringere ai soli host pubblici, più una
+allowlist host/CIDR.
 
 ### Transport `local`
 
@@ -933,7 +979,24 @@ Il campo `kind`, derivato all'install, distingue:
 
 Dal drawer di una skill descrittiva, **"Compila a tool"** chiede all'**AI** di dedurre un `input_schema` per ogni script (leggendo codice + `SKILL.md`); l'admin/owner **rivede e conferma** la proposta, poi il manifest viene scritto in `runtime.scripts` nel frontmatter di `SKILL.md` (fonte di verità) e un reinstall promuove la skill a `typed`, esponendo gli script come tool. Endpoint: `propose-compilation` → `compile`.
 
----
+### 12.13 Tier di rete per-skill (admin)
+
+Dal drawer della skill, **Rete del job** consente a un admin di forzare il tier
+di rete dei container-job di quella skill (stesso vocabolario
+`none|internal|internet|open` del Sandbox):
+
+- **Automatico** (default) — derivato dalla skill: `internet` se dichiara
+  domini `runtime.network`, altrimenti la baseline interna.
+- **Solo interna** — forza la baseline anche se la skill dichiara domini.
+- **Internet (allowlist)** — solo i domini dichiarati, via proxy egress.
+- **Aperta** — rete completa inclusa la LAN, senza allowlist. Per le skill che
+  parlano con dispositivi locali (es. protocolli UDP che non passano dal proxy
+  egress HTTP, come KNXnet/IP).
+
+I tier non disponibili nel deployment sono mostrati disabilitati con la causa
+(il broker riconvalida ogni rete al lancio del job: il tetto deciso al deploy
+non è mai aggirabile dalla UI). Le **reti riservate** predisposte dall'operatore
+(`SKILL_NETWORK_CATALOG`) restano assegnabili per-skill accanto al tier.
 
 ## 13. Flows — workflow deterministici a blocchi
 
@@ -1287,6 +1350,45 @@ GET   /api/users/profile
 PATCH /api/users/profile
 {"name": "Mario", "systemPrompt": "Rispondimi sempre in modo conciso."}
 ```
+
+### Chiavi API (credenziali a lunga scadenza)
+
+Chiavi opache `ak_…` per integrazioni esterne (satelliti vocali, script,
+client di terze parti): valide come `Authorization: Bearer` su tutta l'API con
+l'identità del proprietario. In DB è salvato solo l'hash SHA-256 — la chiave in
+chiaro appare **una sola volta** nella risposta di creazione. La revoca
+(cancellazione riga) e un proprietario disabilitato tagliano fuori la chiave
+alla richiesta successiva. UI: **Impostazioni → Profilo** (chiavi proprie) e
+l'azione per-utente nella sezione **Utenti** admin (emette chiavi per gli
+account di servizio senza loggarsi come loro).
+
+```bash
+GET    /api/api-keys                    # chiavi proprie (senza segreti)
+POST   /api/api-keys                    # {name, expiresInDays?} → {key, row} (chiave mostrata una volta)
+DELETE /api/api-keys/:id                # revoca (proprietario o admin)
+GET    /api/api-keys/user/:userId       # [ADMIN] chiavi di un utente
+POST   /api/api-keys/admin              # [ADMIN] {userId, name, expiresInDays?}
+```
+
+### API compatibile OpenAI (client di conversazione esterni)
+
+Uno shim sottile e **stateless** che espone la pipeline dell'agente nel formato
+chat-completions di OpenAI — qualsiasi client che parla OpenAI (es. una
+pipeline vocale Home Assistant) può usare Arkimede come backend conversazionale:
+
+```bash
+GET  /api/openai/v1/models              # 'arkimede' (pipeline default) + gli agenti dell'utente come modelli
+POST /api/openai/v1/chat/completions    # formato OpenAI; streaming SSE e non-streaming
+```
+
+- Il client mantiene la finestra di conversazione e la rimanda a ogni turno;
+  nessuna riga chat creata, nessuna compaction.
+- I messaggi `system` in ingresso sono scartati (vince il prompt a 4 livelli);
+  gli eventi dei tool restano interni — mai mappati su `tool_calls` OpenAI.
+- Scegliere lo slug di un agente come `model` applica il suo system prompt,
+  tool filter, cap di iterazioni e config LLM.
+- Auth: JWT o chiave API come Bearer. I costi sono attribuiti in `llm_calls`
+  con origin `voice`.
 
 ### Chat e messaggi
 

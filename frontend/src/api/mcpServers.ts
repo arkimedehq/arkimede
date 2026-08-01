@@ -3,6 +3,17 @@
 
 import { api } from './client';
 
+/** Result of the connection test (real MCP handshake + tools/list). */
+export interface McpTestResult {
+  ok: boolean;
+  transport: 'http' | 'sse' | 'local' | 'remote';
+  tools: { name: string; description?: string }[];
+  latencyMs: number;
+  /** http/sse only: negotiated session flavor (legacy-sse = event-stream transport). */
+  sessionMode?: 'streamable' | 'plain' | 'legacy-sse';
+  error?: string;
+}
+
 export interface McpServer {
   id: string;
   userId: string;
@@ -17,6 +28,9 @@ export interface McpServer {
   enabled: boolean;
   /** If false, the server's tools do not enter the chat's flat context (only via agent). */
   loadOnFirst: boolean;
+  /** Visibility scope: personal (owner only) | team | org (everyone). */
+  scope: 'personal' | 'team' | 'org';
+  teamId: string | null;
   secrets: { id: string; serverId: string; keyName: string }[];
   createdAt: string;
   updatedAt: string;
@@ -32,6 +46,8 @@ export interface CreateMcpServerPayload {
   headers?: Record<string, string>;
   env?: Record<string, string>;
   loadOnFirst?: boolean;
+  scope?: 'personal' | 'team' | 'org';
+  teamId?: string | null;
   secrets?: Record<string, string>;
 }
 
@@ -67,6 +83,10 @@ export const mcpServersApi = {
 
   removeSecret: (id: string, key: string) =>
     api.delete(`/mcp-servers/${id}/secrets/${key}`),
+
+  /** Real MCP handshake + tool discovery for a configured server. */
+  test: (id: string) =>
+    api.post<McpTestResult>(`/mcp-servers/${id}/test`).then((r) => r.data),
 
   // Bridge
   getBridgeStatus: (id: string) =>

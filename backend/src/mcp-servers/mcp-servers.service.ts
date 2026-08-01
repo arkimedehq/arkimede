@@ -27,13 +27,18 @@ import {BadRequestException, ForbiddenException, Injectable, Logger, NotFoundExc
 import {promises as fsp} from 'fs';
 import {join, resolve} from 'path';
 import {InjectRepository} from '@nestjs/typeorm';
-import {Repository} from 'typeorm';
+import {In, Repository} from 'typeorm';
 import {DynamicStructuredTool} from '@langchain/core/tools';
 import {z} from 'zod';
-import {McpServer} from './mcp-server.entity';
+import {McpServer, McpServerScope, McpTransport} from './mcp-server.entity';
+import {TeamsService} from '../teams/teams.service';
 import {McpServerSecret} from './mcp-server-secret.entity';
 import {decrypt, encrypt} from '../custom-tools/crypto.utils';
-import {safeFetch} from '../common/ssrf-guard';
+import {HttpHostPolicy} from '../common/ssrf-guard';
+import {AppConfigEntity} from '../app-config/app-config.entity';
+import {
+  isSessionError, mcpInitialize, mcpRpc, McpHttpSession, McpHttpTarget, withLegacySseSession,
+} from './mcp-http-client';
 import {AuditService} from '../audit/audit.service';
 import {LocalMcpProcess} from './local-mcp-process';
 
@@ -88,6 +93,8 @@ export interface CreateMcpServerDto {
   env?: Record<string, string>;
   secrets?: Record<string, string>;
   loadOnFirst?: boolean;
+  scope?: McpServerScope;
+  teamId?: string | null;
 }
 
 export interface UpdateMcpServerDto extends Partial<CreateMcpServerDto> {
@@ -118,8 +125,87 @@ export class McpServersService implements OnModuleDestroy {
     private readonly serverRepo: Repository<McpServer>,
     @InjectRepository(McpServerSecret)
     private readonly secretRepo: Repository<McpServerSecret>,
+    @InjectRepository(AppConfigEntity)
+    private readonly appConfigRepo: Repository<AppConfigEntity>,
+    private readonly teams: TeamsService,
     private readonly audit: AuditService,
   ) {}
+
+  private static readonly LIST_SELECT = {
+    id: true, name: true, description: true,
+    transport: true, url: true, command: true, args: true,
+    headers: true, env: true, enabled: true, loadOnFirst: true, userId: true,
+    scope: true, teamId: true, createdAt: true, updatedAt: true,
+    secrets: { id: true, serverId: true, keyName: true },
+  } as const;
+
+  /** OR-conditions for servers VISIBLE to a user: own + org + team-of-user. */
+  private visibilityWhere(
+    userId: string,
+    teamIds: string[],
+    extra: Record<string, unknown> = {},
+  ): Record<string, unknown>[] {
+    const where: Record<string, unknown>[] = [
+      { ...extra, userId },
+      { ...extra, scope: 'org' },
+    ];
+    if (teamIds.length) where.push({ ...extra, scope: 'team', teamId: In(teamIds) });
+    return where;
+  }
+
+  /**
+   * Validates a requested scope/team against the actor's rights (mirrors the
+   * agents rule): org → admin only; team → admin or a member of that team;
+   * personal → always allowed. Returns the normalized {scope, teamId}.
+   */
+  private async resolveScope(
+    user: { id: string; role: string },
+    scope: McpServerScope | undefined,
+    teamId: string | null | undefined,
+    current?: { scope: McpServerScope; teamId: string | null },
+  ): Promise<{ scope: McpServerScope; teamId: string | null }> {
+    const nextScope = scope ?? current?.scope ?? 'personal';
+    if (nextScope === current?.scope && (scope === undefined)) {
+      return { scope: current.scope, teamId: current.teamId };
+    }
+    if (nextScope === 'org') {
+      if (user.role !== 'admin') {
+        throw new ForbiddenException('Only admins can share an MCP server org-wide.');
+      }
+      return { scope: 'org', teamId: null };
+    }
+    if (nextScope === 'team') {
+      const tid = teamId ?? current?.teamId ?? null;
+      if (!tid) throw new BadRequestException('teamId is required for scope=team');
+      if (user.role !== 'admin' && !(await this.teams.isMember(tid, user.id))) {
+        throw new ForbiddenException('You can only share an MCP server with a team you belong to.');
+      }
+      return { scope: 'team', teamId: tid };
+    }
+    return { scope: 'personal', teamId: null };
+  }
+
+  /** Loads a server the user may MANAGE (owner or admin) or throws 404. */
+  private async findManageable(id: string, userId: string, isAdmin: boolean): Promise<McpServer> {
+    const server = await this.serverRepo.findOne({ where: { id } });
+    if (!server || (!isAdmin && server.userId !== userId)) {
+      throw new NotFoundException(`MCP server "${id}" not found`);
+    }
+    return server;
+  }
+
+  /**
+   * Anti-SSRF policy for http/sse MCP servers, read from app_config. Permissive
+   * default (allow private hosts — self-hosted MCP servers live on LAN/localhost;
+   * metadata/link-local always blocked) if the row is missing.
+   */
+  private async getHostPolicy(): Promise<HttpHostPolicy> {
+    const cfg = await this.appConfigRepo.findOne({ where: { id: 1 } }).catch(() => null);
+    return {
+      allowPrivateHosts: cfg?.mcpAllowPrivateHosts ?? true,
+      allowlist: Array.isArray(cfg?.mcpHostAllowlist) ? cfg!.mcpHostAllowlist : [],
+    };
+  }
 
   async onModuleDestroy(): Promise<void> {
     this.logger.log(`Stopping ${this.localProcesses.size} local MCP processes...`);
@@ -130,7 +216,7 @@ export class McpServersService implements OnModuleDestroy {
 
   // ── CRUD ──────────────────────────────────────────────────────────────────
 
-  async create(userId: string, dto: CreateMcpServerDto, isAdmin = false): Promise<McpServer> {
+  async create(userId: string, dto: CreateMcpServerDto, isAdmin = false, role = 'user'): Promise<McpServer> {
     if (dto.transport === 'http' || dto.transport === 'sse') {
       if (!dto.url) throw new BadRequestException('url is required for transport http/sse');
     }
@@ -149,6 +235,8 @@ export class McpServersService implements OnModuleDestroy {
       );
     }
 
+    const { scope, teamId } = await this.resolveScope({ id: userId, role }, dto.scope, dto.teamId);
+
     const server = this.serverRepo.create({
       userId,
       name:        dto.name,
@@ -161,6 +249,8 @@ export class McpServersService implements OnModuleDestroy {
       env:         dto.env ?? null,
       enabled:     true,
       loadOnFirst: dto.loadOnFirst ?? true,
+      scope,
+      teamId,
     });
 
     const saved = await this.serverRepo.save(server);
@@ -177,39 +267,31 @@ export class McpServersService implements OnModuleDestroy {
     return this.findOne(saved.id, userId);
   }
 
+  /** Servers VISIBLE to the user (own + team + org). */
   async findAll(userId: string): Promise<McpServer[]> {
+    const teamIds = await this.teams.teamIdsForUser(userId);
     return this.serverRepo.find({
-      where: { userId },
+      where: this.visibilityWhere(userId, teamIds),
       relations: { secrets: true },
       order: { createdAt: 'DESC' },
-      select: {
-        id: true, name: true, description: true,
-        transport: true, url: true, command: true, args: true,
-        headers: true, env: true, enabled: true, loadOnFirst: true, userId: true,
-        createdAt: true, updatedAt: true,
-        secrets: { id: true, serverId: true, keyName: true },
-      },
+      select: McpServersService.LIST_SELECT,
     });
   }
 
+  /** A single server VISIBLE to the user (own + team + org). Used for read/test/status. */
   async findOne(id: string, userId: string): Promise<McpServer> {
+    const teamIds = await this.teams.teamIdsForUser(userId);
     const server = await this.serverRepo.findOne({
-      where: { id, userId },
+      where: this.visibilityWhere(userId, teamIds, { id }),
       relations: { secrets: true },
-      select: {
-        id: true, name: true, description: true,
-        transport: true, url: true, command: true, args: true,
-        headers: true, env: true, enabled: true, loadOnFirst: true, userId: true,
-        createdAt: true, updatedAt: true,
-        secrets: { id: true, serverId: true, keyName: true },
-      },
+      select: McpServersService.LIST_SELECT,
     });
     if (!server) throw new NotFoundException(`MCP server "${id}" not found`);
     return server;
   }
 
-  async update(id: string, userId: string, dto: UpdateMcpServerDto, isAdmin = false): Promise<McpServer> {
-    const server = await this.findOne(id, userId);
+  async update(id: string, userId: string, dto: UpdateMcpServerDto, isAdmin = false, role = 'user'): Promise<McpServer> {
+    const server = await this.findManageable(id, userId, isAdmin);
     const oldTransport = server.transport;
 
     // Security: if the resulting transport is 'local' (new or unchanged, including
@@ -234,6 +316,14 @@ export class McpServersService implements OnModuleDestroy {
     if (dto.env         !== undefined) server.env         = dto.env ?? null;
     if (dto.enabled     !== undefined) server.enabled     = dto.enabled;
     if (dto.loadOnFirst !== undefined) server.loadOnFirst = dto.loadOnFirst;
+
+    if (dto.scope !== undefined || dto.teamId !== undefined) {
+      const { scope, teamId } = await this.resolveScope(
+        { id: userId, role }, dto.scope, dto.teamId, { scope: server.scope, teamId: server.teamId },
+      );
+      server.scope  = scope;
+      server.teamId = teamId;
+    }
 
     // Handle transport change
     if (dto.transport !== undefined && dto.transport !== oldTransport) {
@@ -271,8 +361,8 @@ export class McpServersService implements OnModuleDestroy {
     return this.findOne(id, userId);
   }
 
-  async remove(id: string, userId: string): Promise<void> {
-    const server = await this.findOne(id, userId);
+  async remove(id: string, userId: string, isAdmin = false): Promise<void> {
+    const server = await this.findManageable(id, userId, isAdmin);
     // Stop the local process if present
     const localProc = this.localProcesses.get(id);
     if (localProc) {
@@ -290,6 +380,14 @@ export class McpServersService implements OnModuleDestroy {
 
   // ── Secrets ───────────────────────────────────────────────────────────────
 
+  /** Owner/admin-guarded secret upsert (the public API path). */
+  async upsertSecretsChecked(
+    serverId: string, secrets: Record<string, string>, userId: string, isAdmin = false,
+  ): Promise<void> {
+    await this.findManageable(serverId, userId, isAdmin);
+    await this.upsertSecrets(serverId, secrets);
+  }
+
   async upsertSecrets(serverId: string, secrets: Record<string, string>): Promise<void> {
     for (const [keyName, plaintext] of Object.entries(secrets)) {
       if (!plaintext) continue;
@@ -306,14 +404,15 @@ export class McpServersService implements OnModuleDestroy {
     }
   }
 
-  async getSecretKeys(serverId: string, userId: string): Promise<string[]> {
-    await this.findOne(serverId, userId);
+  async getSecretKeys(serverId: string, userId: string, isAdmin = false): Promise<string[]> {
+    // Secrets belong to the owner's configuration — only owner/admin may see the keys.
+    await this.findManageable(serverId, userId, isAdmin);
     const secrets = await this.secretRepo.find({ where: { serverId } });
     return secrets.map((s) => s.keyName);
   }
 
-  async removeSecret(serverId: string, keyName: string, userId: string): Promise<void> {
-    await this.findOne(serverId, userId);
+  async removeSecret(serverId: string, keyName: string, userId: string, isAdmin = false): Promise<void> {
+    await this.findManageable(serverId, userId, isAdmin);
     await this.secretRepo.delete({ serverId, keyName });
   }
 
@@ -332,8 +431,12 @@ export class McpServersService implements OnModuleDestroy {
     opts: { flatOnly?: boolean } = {},
   ): Promise<DynamicStructuredTool[]> {
     // flatOnly (chat): excludes servers with loadOnFirst=false (usable only via agent).
+    const teamIds = await this.teams.teamIdsForUser(userId);
+    const extra = opts.flatOnly
+      ? { enabled: true, loadOnFirst: true }
+      : { enabled: true };
     const servers = await this.serverRepo.find({
-      where: opts.flatOnly ? { userId, enabled: true, loadOnFirst: true } : { userId, enabled: true },
+      where: this.visibilityWhere(userId, teamIds, extra),
     });
 
     if (servers.length === 0) return [];
@@ -482,70 +585,153 @@ export class McpServersService implements OnModuleDestroy {
   }
 
   /**
+   * Connection test for a configured MCP server (owner only): performs the real
+   * handshake and tool discovery, returning the tool list or the precise error —
+   * the same path the agent uses, but surfaced to the UI instead of a warn log.
+   */
+  async testServer(id: string, userId: string): Promise<{
+    ok: boolean;
+    transport: McpTransport;
+    tools: { name: string; description?: string }[];
+    latencyMs: number;
+    sessionMode?: 'streamable' | 'plain' | 'legacy-sse';
+    error?: string;
+  }> {
+    const teamIds = await this.teams.teamIdsForUser(userId);
+    const server = await this.serverRepo.findOne({
+      where: this.visibilityWhere(userId, teamIds, { id }),
+    });
+    if (!server) {
+      throw new NotFoundException(`MCP server "${id}" not found`);
+    }
+    const startedAt = Date.now();
+    const done = (partial: {
+      ok: boolean;
+      tools?: { name: string; description?: string }[];
+      sessionMode?: 'streamable' | 'plain' | 'legacy-sse';
+      error?: string;
+    }) => ({
+      ok: partial.ok,
+      transport: server.transport,
+      tools: (partial.tools ?? []).map((t) => ({ name: t.name, description: t.description })),
+      latencyMs: Date.now() - startedAt,
+      ...(partial.sessionMode ? { sessionMode: partial.sessionMode } : {}),
+      ...(partial.error ? { error: partial.error } : {}),
+    });
+
+    try {
+      if (server.transport === 'sse') {
+        const secrets = await this.loadSecrets(server.id);
+        const target  = await this.buildHttpTarget(server, secrets);
+        const result: McpToolsListResult = await withLegacySseSession(
+          target,
+          (client) => client.request('tools/list', {}, 10_000),
+          { clientName: process.env.APP_NAME ?? 'arkimede' },
+        );
+        return done({ ok: true, tools: result?.tools ?? [], sessionMode: 'legacy-sse' });
+      }
+      if (server.transport === 'http') {
+        const secrets = await this.loadSecrets(server.id);
+        const target  = await this.buildHttpTarget(server, secrets);
+        // Always a fresh handshake: a test must exercise the full path.
+        this.httpSessions.delete(server.id);
+        const session = await this.getOrInitHttpSession(server, target, { forceNew: true });
+        const result: McpToolsListResult = await mcpRpc(target, session, 'tools/list', {}, { timeoutMs: 10_000 });
+        return done({
+          ok: true,
+          tools: result?.tools ?? [],
+          sessionMode: session.sessionId ? 'streamable' : 'plain',
+        });
+      }
+      if (server.transport === 'local') {
+        const tools = await this.ensureLocalProcess(server);
+        return done({ ok: true, tools });
+      }
+      // remote: tools come from the Electron bridge registry
+      const bridgeTools = this.bridgeTools.get(userId)?.get(server.id) ?? [];
+      if (!this.bridgeSessions.get(userId)) {
+        return done({ ok: false, error: 'Bridge not connected' });
+      }
+      return done({ ok: true, tools: bridgeTools });
+    } catch (err: any) {
+      return done({ ok: false, error: err?.message ?? String(err) });
+    }
+  }
+
+  /** Cached streamable-HTTP sessions per server (TTL; invalidated on session errors). */
+  private readonly httpSessions = new Map<string, { session: McpHttpSession; at: number }>();
+  private static readonly HTTP_SESSION_TTL_MS = 5 * 60_000;
+
+  /** Resolves URL/headers/policy for an http/sse server (secrets interpolated). */
+  private async buildHttpTarget(server: McpServer, secrets: Record<string, string>): Promise<McpHttpTarget> {
+    return {
+      url: this.interpolate(server.url!, secrets),
+      headers: this.interpolateHeaders(server.headers, secrets),
+      policy: await this.getHostPolicy(),
+    };
+  }
+
+  /** Returns a cached session for the server or performs a fresh MCP handshake. */
+  private async getOrInitHttpSession(
+    server: McpServer,
+    target: McpHttpTarget,
+    opts: { forceNew?: boolean } = {},
+  ): Promise<McpHttpSession> {
+    const cached = this.httpSessions.get(server.id);
+    if (
+      !opts.forceNew &&
+      cached &&
+      Date.now() - cached.at < McpServersService.HTTP_SESSION_TTL_MS
+    ) {
+      return cached.session;
+    }
+    const session = await mcpInitialize(target, { clientName: process.env.APP_NAME ?? 'arkimede' });
+    this.httpSessions.set(server.id, { session, at: Date.now() });
+    return session;
+  }
+
+  /**
+   * Sends a JSON-RPC request to a remote MCP server, per transport:
+   *   - `http` → streamable-HTTP POST client with cached session (handshake on
+   *     first use, one re-initialize + retry when the server reports the session
+   *     as expired/unknown — 400/404);
+   *   - `sse`  → legacy HTTP+SSE transport (event stream + endpoint POSTs, one
+   *     short-lived session per call).
+   */
+  private async httpRpc(
+    server: McpServer,
+    secrets: Record<string, string>,
+    method: string,
+    params: Record<string, unknown>,
+    opts: { timeoutMs?: number } = {},
+  ): Promise<any> {
+    const target = await this.buildHttpTarget(server, secrets);
+    if (server.transport === 'sse') {
+      return withLegacySseSession(
+        target,
+        (client) => client.request(method, params, opts.timeoutMs ?? 15_000),
+        { clientName: process.env.APP_NAME ?? 'arkimede' },
+      );
+    }
+    const session = await this.getOrInitHttpSession(server, target);
+    try {
+      return await mcpRpc(target, session, method, params, opts);
+    } catch (err: any) {
+      if (!isSessionError(err)) throw err;
+      this.httpSessions.delete(server.id);
+      const fresh = await this.getOrInitHttpSession(server, target, { forceNew: true });
+      return mcpRpc(target, fresh, method, params, opts);
+    }
+  }
+
+  /**
    * Calls the remote MCP server (http/sse) to get the tool list.
-   * Runs: initialize → tools/list according to the MCP protocol.
+   * Runs the MCP handshake (initialize → notifications/initialized) and
+   * tools/list over the streamable-HTTP client.
    */
   private async fetchMcpTools(server: McpServer, secrets: Record<string, string>): Promise<McpTool[]> {
-    const url = this.interpolate(server.url!, secrets);
-    const headers = {
-      'Content-Type': 'application/json',
-      Accept: 'application/json, text/event-stream',
-      ...this.interpolateHeaders(server.headers, secrets),
-    };
-
-    // MCP initialize (safeFetch: anti-SSRF on the URL and every redirect hop)
-    const initResp = await safeFetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'initialize',
-        params: {
-          protocolVersion: '2024-11-05',
-          capabilities: { tools: {} },
-          clientInfo: { name: process.env.APP_NAME ?? 'arkimede', version: '1.0.0' },
-        },
-      }),
-      signal: AbortSignal.timeout(10_000),
-    });
-
-    if (!initResp.ok) {
-      throw new Error(`MCP initialize failed: ${initResp.status} ${initResp.statusText}`);
-    }
-
-    // MCP tools/list
-    const listResp = await safeFetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 2,
-        method: 'tools/list',
-        params: {},
-      }),
-      signal: AbortSignal.timeout(10_000),
-    });
-
-    if (!listResp.ok) {
-      throw new Error(`MCP tools/list failed: ${listResp.status} ${listResp.statusText}`);
-    }
-
-    const contentType = listResp.headers.get('content-type') ?? '';
-    let listData: any;
-
-    if (contentType.includes('text/event-stream')) {
-      // SSE: read the first "data:" event with the JSON-RPC response
-      const text = await listResp.text();
-      const match = text.match(/data:\s*(\{.*\})/);
-      if (!match) throw new Error('SSE: no data event found in the tools/list response');
-      listData = JSON.parse(match[1]);
-    } else {
-      listData = await listResp.json();
-    }
-
-    const result: McpToolsListResult = listData.result ?? listData;
-    return result.tools ?? [];
+    const result: McpToolsListResult = await this.httpRpc(server, secrets, 'tools/list', {}, { timeoutMs: 10_000 });
+    return result?.tools ?? [];
   }
 
   // ── Build LangChain tools ─────────────────────────────────────────────────
@@ -643,47 +829,11 @@ export class McpServersService implements OnModuleDestroy {
     toolName: string,
     toolArgs: Record<string, unknown>,
   ): Promise<string> {
-    const url = this.interpolate(server.url!, secrets);
-    const headers = {
-      'Content-Type': 'application/json',
-      Accept: 'application/json, text/event-stream',
-      ...this.interpolateHeaders(server.headers, secrets),
-    };
-
-    // safeFetch: anti-SSRF on the URL and every redirect hop.
-    const resp = await safeFetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: Date.now(),
-        method: 'tools/call',
-        params: { name: toolName, arguments: toolArgs },
-      }),
-      signal: AbortSignal.timeout(30_000),
-    });
-
-    if (!resp.ok) {
-      return `HTTP error ${resp.status} ${resp.statusText}`;
-    }
-
-    const contentType = resp.headers.get('content-type') ?? '';
-    let data: any;
-
-    if (contentType.includes('text/event-stream')) {
-      const text = await resp.text();
-      const match = text.match(/data:\s*(\{.*\})/);
-      if (!match) return 'SSE: no response received';
-      data = JSON.parse(match[1]);
-    } else {
-      data = await resp.json();
-    }
-
-    if (data.error) {
-      return `MCP error: ${JSON.stringify(data.error)}`;
-    }
-
-    const result = data.result;
+    const result = await this.httpRpc(
+      server, secrets, 'tools/call',
+      { name: toolName, arguments: toolArgs },
+      { timeoutMs: 30_000 },
+    );
     if (!result) return 'No result';
 
     // The MCP result is an array of content blocks: return it structured, the

@@ -40,7 +40,7 @@ describe('safeFetch — redirects are re-validated (H3)', () => {
     scriptFetch((_url, hop) => hop === 0
       ? redirect('http://169.254.169.254/latest/meta-data/')
       : new Response('should-not-reach'));
-    await expect(safeFetch('http://1.1.1.1/')).rejects.toThrow(/Internal destination not allowed/);
+    await expect(safeFetch('http://1.1.1.1/')).rejects.toThrow(/Metadata\/link-local destination always blocked/);
   });
 
   it('blocks a redirect to loopback', async () => {

@@ -146,6 +146,10 @@ services:
       # per-skill, as a JSON array of {id,dockerNetwork,label,description}. Each
       # `dockerNetwork` must ALSO be in the broker's BROKER_ALLOWED_NETWORKS. Default empty.
       SKILL_NETWORK_CATALOG: ${SKILL_NETWORK_CATALOG:-}
+      # Name of the full-internet network of the `open` tier (must match the executor's
+      # value): the backend uses it to report open-tier availability against the broker
+      # allowlist in the admin UI (per-skill network tier, sandbox settings).
+      SANDBOX_OPEN_NETWORK: ${SANDBOX_OPEN_NETWORK:-bridge}
     volumes:
       - ${HOST_DATA_DIR}/skills:${HOST_DATA_DIR}/skills
       - ${HOST_DATA_DIR}/skills-output:${HOST_DATA_DIR}/skills-output

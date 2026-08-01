@@ -289,16 +289,16 @@ export class SkillsController {
 
   @Put(':id/networks')
   @UseGuards(AdminGuard)
-  @ApiOperation({ summary: '[ADMIN] Set the reserved networks granted to a skill' })
+  @ApiOperation({ summary: '[ADMIN] Set the network access of a skill (tier override + reserved networks)' })
   @ApiParam({ name: 'id', description: 'Skill UUID' })
-  @ApiResponse({ status: 200, description: 'Updated grantedNetworks (valid catalog ids only)' })
+  @ApiResponse({ status: 200, description: 'Updated network access (valid catalog ids only; networkMode null = derived)' })
   @ApiResponse({ status: 404, description: 'Skill not found' })
   setNetworks(
     @Param('id') id: string,
-    @Body() body: { grantedNetworks?: string[] },
+    @Body() body: { grantedNetworks?: string[]; networkMode?: 'internal' | 'internet' | 'open' | null },
     @CurrentUser() user: any,
   ) {
-    return this.service.setGrantedNetworks(id, body?.grantedNetworks ?? [], user.id);
+    return this.service.setGrantedNetworks(id, body?.grantedNetworks, user.id, body?.networkMode);
   }
 
   // ── Detail ────────────────────────────────────────────────────────────────

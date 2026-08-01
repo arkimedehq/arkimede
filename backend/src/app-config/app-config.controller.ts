@@ -77,6 +77,14 @@ class UpdateDataSourceSecurityConfigDto {
   dataSourceHostAllowlist?: string[];
 }
 
+class UpdateMcpSecurityConfigDto {
+  @IsBoolean()
+  mcpAllowPrivateHosts: boolean;
+
+  @IsOptional() @IsArray() @IsString({ each: true })
+  mcpHostAllowlist?: string[];
+}
+
 class UpdateEmbeddingConfigDto {
   @IsIn(EMBEDDING_PROVIDERS)
   embeddingProvider: EmbeddingProvider;
@@ -263,6 +271,14 @@ export class AppConfigController {
         : broker.allowedNetworks === null
           ? true
           : broker.allowedNetworks.includes(jobEgressNetwork);
+    // The `open` tier attaches the full-internet network (default `bridge`). It is
+    // unavailable when the operator removed that network from the broker allowlist
+    // (hardened deploys) or disabled it outright. A null list = unknown → available
+    // (no false negatives, same policy as the other gates).
+    const sandboxOpenNetwork = process.env.SANDBOX_OPEN_NETWORK || 'bridge';
+    const openTierAvailable =
+      sandboxOpenNetwork !== 'none' &&
+      (broker.allowedNetworks === null || broker.allowedNetworks.includes(sandboxOpenNetwork));
     const value = {
       level,
       name: (['standard', 'isolated', 'maximum'] as const)[level - 1],
@@ -272,6 +288,7 @@ export class AppConfigController {
       jobEgressNetwork,
       brokerAllowedNetworks: broker.allowedNetworks,
       internetTierAvailable: egressReachable && egressNetworkAllowed,
+      openTierAvailable,
       // 'trusted' exec profile needs the broker opt-in; null/old broker =
       // unknown → available (no false negatives), false = would silently
       // fall back to hardened.
@@ -323,6 +340,23 @@ export class AppConfigController {
     return this.service.updateDataSourceSecurityConfig({
       dataSourceAllowPrivateHosts: dto.dataSourceAllowPrivateHosts,
       dataSourceHostAllowlist:     dto.dataSourceHostAllowlist ?? [],
+    }, user?.id);
+  }
+
+  /** GET /api/admin/config/mcp-security — MCP anti-SSRF policy (admin) */
+  @Get('mcp-security')
+  @ApiOperation({ summary: 'MCP anti-SSRF policy (admin)' })
+  getMcpSecurityConfig() {
+    return this.service.getMcpSecurityConfig();
+  }
+
+  /** PATCH /api/admin/config/mcp-security — updates the MCP anti-SSRF policy (admin) */
+  @Patch('mcp-security')
+  @ApiOperation({ summary: 'Update MCP anti-SSRF policy (admin)' })
+  updateMcpSecurityConfig(@Body() dto: UpdateMcpSecurityConfigDto, @CurrentUser() user: any) {
+    return this.service.updateMcpSecurityConfig({
+      mcpAllowPrivateHosts: dto.mcpAllowPrivateHosts,
+      mcpHostAllowlist:     dto.mcpHostAllowlist ?? [],
     }, user?.id);
   }
 

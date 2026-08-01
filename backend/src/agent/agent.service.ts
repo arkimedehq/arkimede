@@ -51,6 +51,25 @@ import {SandboxService} from '../sandbox/sandbox.service';
 import {LlmUsage, sumUsageFromMessages} from '../common/llm-usage.util';
 import {runWithLlmCallContext} from '../usage/llm-call-context';
 
+/**
+ * Optional per-call overrides for streamResponse. Used by headless callers
+ * (e.g. the OpenAI-compat endpoint) that run the standard pipeline with a
+ * restricted tool set, extra agent instructions, or a different cost origin.
+ * All fields optional: the interactive chat path passes nothing and keeps
+ * its historical behavior.
+ */
+export interface StreamResponseOptions {
+  toolOverride?: { mode: 'all' | 'names' | 'none'; names?: string[] };
+  /** Extra agent-specific instructions appended after the 4-level system prompt. */
+  agentPromptOverride?: string;
+  /** Cap on the ReAct loop iterations (defaults to AGENT_RECURSION_LIMIT). */
+  maxIterations?: number;
+  /** Cost-attribution origin for llm_calls (defaults to 'chat'). */
+  origin?: 'chat' | 'voice';
+  /** LLM config override (Agent.llmConfigId): run on that model instead of the default. */
+  llmConfigId?: string;
+}
+
 @Injectable()
 export class AgentService implements OnModuleInit {
   private readonly logger = new Logger(AgentService.name);
@@ -176,10 +195,13 @@ export class AgentService implements OnModuleInit {
     onToolCall: (tool: any) => void,
     signal?: AbortSignal,
     onToolResult?: (toolName: string, result: any, status?: 'success' | 'error', input?: any) => void,
+    opts?: StreamResponseOptions,
   ): Promise<{ inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; provider: string; model: string | null } | null> {
     this.logger.log(`Chat: "${userInput}"`);
-    const isReasoning = await this.llmProviderService.isReasoningModel();
-    const { agent, contextBreakdown, effectiveMaxHistoryTokens, model, effectiveHistory, provider, modelName } = await this.resolveAgent(userId, projectId, userInput, history, chatId);
+    const isReasoning = opts?.llmConfigId
+      ? (await this.llmProviderService.getModelBundleForConfigId(opts.llmConfigId)).isReasoning
+      : await this.llmProviderService.isReasoningModel();
+    const { agent, contextBreakdown, effectiveMaxHistoryTokens, model, effectiveHistory, provider, modelName } = await this.resolveAgent(userId, projectId, userInput, history, chatId, opts?.toolOverride, opts?.agentPromptOverride, opts?.llmConfigId);
     const messages = await this.buildMessages(userInput, effectiveHistory, attachments, inlineContents, attachmentBlocks, isReasoning, effectiveMaxHistoryTokens, model, provider);
 
     // ── Context breakdown log ─────────────────────────────────────────────────
@@ -228,11 +250,12 @@ export class AgentService implements OnModuleInit {
       // Scheduling class + attribution (P1-F2): the whole graph consumption runs
       // inside the call context — the dispatcher and the metrics handler read it
       // when each model call actually fires during the iteration below.
-      await runWithLlmCallContext({ priority: 'interactive', userId, origin: 'chat' }, async () => {
+      await runWithLlmCallContext({ priority: 'interactive', userId, origin: opts?.origin ?? 'chat' }, async () => {
       const stream = await agent.stream(
         { messages },
         {
-          streamMode: 'messages', signal, recursionLimit: AgentService.AGENT_RECURSION_LIMIT,
+          streamMode: 'messages', signal,
+          recursionLimit: opts?.maxIterations ?? AgentService.AGENT_RECURSION_LIMIT,
           // LangGraph does NOT fire the model's instance callbacks (verified on
           // langgraph 1.4/core 1.1): the serving-metrics handler attached by
           // buildModelForConfig must be re-passed via config. Direct invokes
@@ -393,6 +416,86 @@ export class AgentService implements OnModuleInit {
    * @param history   - Conversation history (default: empty)
    * @returns The agent's final text response
    */
+  /**
+   * Catalog of the tools available to a user, grouped by source, with the REAL
+   * tool names (as the agent tool filter matches them) and a per-source wildcard
+   * ("mcp_home_assistant_*", "skill_knx_*"). Powers the agent-form tool picker
+   * so nobody has to hand-type the naming convention. Loads every source
+   * (flatOnly=false → includes tools not injected into the flat chat context).
+   */
+  async buildToolCatalog(userId: string, projectId?: string): Promise<{
+    groups: Array<{
+      source: 'mcp' | 'skill' | 'flow' | 'agent' | 'custom';
+      label: string;
+      wildcard: string | null;
+      tools: Array<{ name: string; description: string }>;
+    }>;
+  }> {
+    const opts = { flatOnly: false };
+    const [customTools, mcpTools, skillTools, flowTools, agentTools, mcpServers, skills] =
+      await Promise.all([
+        this.customToolsService.loadToolsForUser(userId, projectId, opts),
+        this.mcpServersService.loadToolsForUser(userId, opts),
+        this.skillsService.loadToolsForUser(userId, projectId, opts),
+        this.flowsService.loadToolsForUser(userId, projectId, opts),
+        this.multiAgentService.loadToolsForUser(userId, projectId),
+        this.mcpServersService.findAll(userId),
+        this.skillsService.findAll(userId),
+      ]);
+
+    const short = (d: unknown): string => {
+      const s = typeof d === 'string' ? d : '';
+      return s.length > 160 ? `${s.slice(0, 160)}…` : s;
+    };
+    const toEntry = (t: any) => ({ name: t.name as string, description: short(t.description) });
+
+    // Prefix → {label, wildcard} for the sources whose tools carry a slug that
+    // can contain underscores (parsing the name back is ambiguous — match the
+    // known prefixes instead). Longest prefix first so the right group wins.
+    const mcpPrefixes = mcpServers.map((s) => ({
+      prefix: `mcp_${s.name.toLowerCase().replace(/\W+/g, '_')}_`,
+      label: s.name,
+    }));
+    const skillPrefixes = skills.map((s) => ({
+      prefix: `skill_${s.name.replace(/-/g, '_').toLowerCase()}_`,
+      label: s.name,
+    }));
+
+    type Group = { source: 'mcp' | 'skill' | 'flow' | 'agent' | 'custom'; label: string; wildcard: string | null; tools: Array<{ name: string; description: string }> };
+    const groups: Group[] = [];
+    const byWildcard = new Map<string, Group>();
+
+    const assignGrouped = (
+      tools: any[],
+      source: 'mcp' | 'skill',
+      prefixes: { prefix: string; label: string }[],
+    ) => {
+      const sorted = [...prefixes].sort((a, b) => b.prefix.length - a.prefix.length);
+      for (const t of tools) {
+        const match = sorted.find((p) => (t.name as string).startsWith(p.prefix));
+        const wildcard = match ? `${match.prefix}*` : null;
+        const key = `${source}:${wildcard ?? t.name}`;
+        let g = byWildcard.get(key);
+        if (!g) {
+          g = { source, label: match?.label ?? t.name, wildcard, tools: [] };
+          byWildcard.set(key, g);
+          groups.push(g);
+        }
+        g.tools.push(toEntry(t));
+      }
+    };
+
+    assignGrouped(mcpTools, 'mcp', mcpPrefixes);
+    assignGrouped(skillTools, 'skill', skillPrefixes);
+
+    // Flows, agents and custom tools are individual entries (no per-source wildcard).
+    if (flowTools.length) groups.push({ source: 'flow', label: 'Flows', wildcard: null, tools: flowTools.map(toEntry) });
+    if (agentTools.length) groups.push({ source: 'agent', label: 'Agents', wildcard: null, tools: agentTools.map(toEntry) });
+    if (customTools.length) groups.push({ source: 'custom', label: 'Custom tools', wildcard: null, tools: customTools.map(toEntry) });
+
+    return { groups };
+  }
+
   async invoke(userInput: string, history: Message[] = [], userId?: string, projectId?: string): Promise<string> {
     return (await this.invokeWithUsage(userInput, history, userId, projectId)).text;
   }
@@ -808,11 +911,21 @@ export class AgentService implements OnModuleInit {
     history: Message[] = [],
     chatId?: string,
     toolOverride?: { mode: 'all' | 'names' | 'none'; names?: string[] },
+    /** Extra agent-specific instructions appended after the 4-level system prompt. */
+    agentPromptOverride?: string,
+    /** LLM config override (Agent.llmConfigId): null/undefined = platform default. */
+    llmConfigOverride?: string,
   ): Promise<{ agent: any; contextBreakdown: ContextBreakdown; effectiveMaxHistoryTokens: number; model: any; effectiveHistory: Message[]; provider: string; modelName: string | null }> {
+    // Per-agent model override: resolved once (cached per config id), BEFORE the
+    // parallel loads so the bundle is not built twice concurrently.
+    const overrideBundle = llmConfigOverride
+      ? await this.llmProviderService.getModelBundleForConfigId(llmConfigOverride)
+      : null;
+
     // ── Phase 1: parallel loads ──────────────────────────────────────────────
     const [basePrompt, model, customTools, mcpTools, skillTools, flowTools, agentTools, user, project, globalToolConfig, providerModel, feedbackEnabled] = await Promise.all([
       this.appConfigService.getSystemPrompt(),
-      this.llmProviderService.getModel(),
+      overrideBundle ? Promise.resolve(overrideBundle.model) : this.llmProviderService.getModel(),
       userId ? this.customToolsService.loadToolsForUser(userId, projectId, { flatOnly: true }) : Promise.resolve([]),
       userId ? this.mcpServersService.loadToolsForUser(userId, { flatOnly: true })    : Promise.resolve([]),
       userId ? this.skillsService.loadToolsForUser(userId, projectId, { flatOnly: true }) : Promise.resolve([]),
@@ -828,7 +941,9 @@ export class AgentService implements OnModuleInit {
         ? this.projectRepo.findOne({ where: { id: projectId }, select: { id: true, systemPrompt: true } })
         : Promise.resolve(null),
       this.appConfigService.getToolLoadingConfig(),
-      this.llmProviderService.getProviderAndModel(),
+      overrideBundle
+        ? Promise.resolve({ provider: overrideBundle.provider, model: overrideBundle.modelName })
+        : this.llmProviderService.getProviderAndModel(),
       this.appConfigService.getFeedbackMemoryEnabled(),
     ]);
     const provider  = providerModel.provider;
@@ -863,12 +978,18 @@ export class AgentService implements OnModuleInit {
 
     // Override of the tool set (e.g. headless run of an automation with a fixed
     // subset). `none` → no extra tools; `names` → only the listed ones; `all`/null
-    // → standard behavior (semantic/strategy selection).
+    // → standard behavior (semantic/strategy selection). A `names` entry ending
+    // with `*` matches by prefix ("mcp_home_assistant_*" = every tool of that MCP
+    // server, "skill_files_*" = every script of that skill) so agent tool filters
+    // survive tools being added to the selected source.
+    const matchesToolName = (name: string, entry: string): boolean =>
+      entry.endsWith('*') ? name.startsWith(entry.slice(0, -1)) : name === entry;
     const allExtraManifests: ToolManifest[] = !toolOverride || toolOverride.mode === 'all'
       ? fullManifests
       : toolOverride.mode === 'none'
         ? []
-        : fullManifests.filter((m) => (toolOverride.names ?? []).includes(m.name));
+        : fullManifests.filter((m) =>
+            (toolOverride.names ?? []).some((entry) => matchesToolName(m.name, entry)));
 
     // ── Phase 2a: tool selection + schema format ──────────────────────────────
     // Short follow-ups ("retry", "yes, go ahead") carry no semantic signal for
@@ -967,7 +1088,13 @@ export class AgentService implements OnModuleInit {
       }
     }
 
-    const systemPrompt  = this.buildSystemPrompt(basePrompt, userPrompt, projectPrompt, skillsPrompt, userMemory, user?.language);
+    const builtPrompt   = this.buildSystemPrompt(basePrompt, userPrompt, projectPrompt, skillsPrompt, userMemory, user?.language);
+    // Agent-specific instructions (e.g. a named agent invoked through the
+    // OpenAI-compat endpoint) go after the 4-level prompt, same position they
+    // would occupy in a dedicated agent runtime.
+    const systemPrompt  = agentPromptOverride?.trim()
+      ? `${builtPrompt}\n\n## Agent instructions\n${agentPromptOverride.trim()}`
+      : builtPrompt;
 
     // The conversation summary (history compaction) goes in the system prompt:
     // it is the only place accepted by ALL providers (a single system message).

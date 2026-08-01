@@ -26,36 +26,13 @@
 import { ForbiddenException } from '@nestjs/common';
 import { lookup, resolveSrv } from 'node:dns/promises';
 import { isIP } from 'node:net';
-import ipaddr from 'ipaddr.js';
-import { isPrivateIp } from './ssrf-guard';
+import { isPrivateIp, isLinkLocalIp, matchesHostAllowlist, HttpHostPolicy } from './ssrf-guard';
 
-export interface DataSourceHostPolicy {
-  /** If true, private/loopback/CGNAT hosts are allowed (metadata is still blocked). */
-  allowPrivateHosts: boolean;
-  /** Host names, IPs or CIDRs allowed even when allowPrivateHosts is false. */
-  allowlist: string[];
-}
+// Same shape as the HTTP policy — one vocabulary for every outbound guard.
+export type DataSourceHostPolicy = HttpHostPolicy;
 
-/**
- * True only for link-local / cloud-metadata ranges (169.254.0.0/16, fe80::/10) —
- * ALWAYS blocked, independent of config/allowlist. Uses a real IP parser so that
- * non-dotted encodings of the metadata address (e.g. `::ffff:a9fe:a9fe`, the
- * IPv4-mapped form of 169.254.169.254) cannot slip past the invariant.
- */
-export function isLinkLocalIp(ip: string): boolean {
-  let addr: ipaddr.IPv4 | ipaddr.IPv6;
-  try {
-    addr = ipaddr.parse(ip.replace(/^\[|\]$/g, ''));
-  } catch {
-    return false; // unparseable → not classified as link-local (still caught by isPrivateIp/fail-closed)
-  }
-  if (addr.kind() === 'ipv6') {
-    const v6 = addr as ipaddr.IPv6;
-    if (v6.isIPv4MappedAddress()) return v6.toIPv4Address().range() === 'linkLocal';
-    return v6.range() === 'linkLocal';
-  }
-  return (addr as ipaddr.IPv4).range() === 'linkLocal';
-}
+// Re-exported for existing call sites/tests (implementation moved to ssrf-guard).
+export { isLinkLocalIp };
 
 /** Host part of a `host[:port]` token, handling IPv6 literals `[::1]:5432`. */
 function extractHost(hostPort: string): string {
@@ -126,30 +103,6 @@ export function hostsFromConnString(engine: string, connStr: string): string[] {
   return hostsFromUri(raw);
 }
 
-/** IPv4 CIDR membership (e.g. "10.0.0.0/8"). IPv6/exact handled by the caller. */
-function ipv4InCidr(ip: string, cidr: string): boolean {
-  const [net, bitsStr] = cidr.split('/');
-  if (isIP(ip) !== 4 || isIP(net) !== 4) return false;
-  const bits = Number(bitsStr);
-  if (!Number.isInteger(bits) || bits < 0 || bits > 32) return false;
-  const toInt = (a: string) => a.split('.').reduce((acc, o) => (acc << 8) + Number(o), 0) >>> 0;
-  const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
-  return (toInt(ip) & mask) === (toInt(net) & mask);
-}
-
-/** True if `host`/`ip` matches an allowlist entry (hostname, IP, or IPv4 CIDR). */
-function matchesAllowlist(host: string, ip: string, allowlist: string[]): boolean {
-  const h = host.toLowerCase();
-  for (const entry of allowlist) {
-    const a = entry.trim();
-    if (!a) continue;
-    if (a.toLowerCase() === h) return true;   // hostname
-    if (a === ip) return true;                // exact IP
-    if (a.includes('/') && ipv4InCidr(ip, a)) return true; // CIDR
-  }
-  return false;
-}
-
 /**
  * Throws ForbiddenException if the connection string targets a disallowed host.
  * No-op when no network host is involved (sqlite / local / unparseable).
@@ -193,7 +146,7 @@ export async function assertDataSourceTargetAllowed(
         throw new ForbiddenException(`DataSource: destinazione metadata/link-local bloccata (${shown}).`);
       }
       if (isPrivateIp(ip)) {
-        const allowed = policy.allowPrivateHosts || matchesAllowlist(host, ip, policy.allowlist);
+        const allowed = policy.allowPrivateHosts || matchesHostAllowlist(host, ip, policy.allowlist);
         if (!allowed) {
           throw new ForbiddenException(`DataSource: host interno non consentito (${shown}).`);
         }

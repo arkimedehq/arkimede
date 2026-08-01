@@ -219,6 +219,15 @@ export class Skill {
   grantedNetworks: string[];
 
   /**
+   * Admin override of the job network tier ('internal' | 'internet' | 'open').
+   * Null (default) = derived: 'internet' when the skill declares networkDomains,
+   * otherwise the internal baseline. 'open' attaches the full-internet network
+   * (no allowlist) — still subject to the broker's BROKER_ALLOWED_NETWORKS gate.
+   */
+  @Column({ type: 'varchar', length: 16, nullable: true, default: null })
+  networkMode: 'internal' | 'internet' | 'open' | null;
+
+  /**
    * Spec of the configuration variables declared in SKILL.md.
    * Null if SKILL.md has no `config:` section.
    */

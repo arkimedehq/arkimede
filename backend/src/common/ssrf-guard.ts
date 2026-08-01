@@ -53,10 +53,69 @@ export function isPrivateIp(ip: string): boolean {
 }
 
 /**
- * Throws ForbiddenException if the URL is not http/https or if the hostname resolves
- * (even only in part) to an internal/reserved address.
+ * True only for link-local / cloud-metadata ranges (169.254.0.0/16, fe80::/10) —
+ * ALWAYS blocked, independent of any policy or allowlist. Uses a real IP parser so
+ * that non-dotted encodings of the metadata address (e.g. `::ffff:a9fe:a9fe`, the
+ * IPv4-mapped form of 169.254.169.254) cannot slip past the invariant.
  */
-export async function assertPublicUrl(rawUrl: string): Promise<void> {
+export function isLinkLocalIp(ip: string): boolean {
+  let addr: ipaddr.IPv4 | ipaddr.IPv6;
+  try {
+    addr = ipaddr.parse(ip.replace(/^\[|\]$/g, ''));
+  } catch {
+    return false; // unparseable → not classified as link-local (still caught by isPrivateIp/fail-closed)
+  }
+  if (addr.kind() === 'ipv6') {
+    const v6 = addr as ipaddr.IPv6;
+    if (v6.isIPv4MappedAddress()) return v6.toIPv4Address().range() === 'linkLocal';
+    return v6.range() === 'linkLocal';
+  }
+  return (addr as ipaddr.IPv4).range() === 'linkLocal';
+}
+
+/**
+ * Destination policy for user-configured outbound HTTP (MCP servers today).
+ * Link-local/metadata stays blocked regardless. The default (no policy) is the
+ * historical strict behavior: only public hosts.
+ */
+export interface HttpHostPolicy {
+  /** If true, private/loopback/CGNAT hosts are allowed (metadata is still blocked). */
+  allowPrivateHosts: boolean;
+  /** Host names, IPs or IPv4 CIDRs allowed even when allowPrivateHosts is false. */
+  allowlist: string[];
+}
+
+/** IPv4 CIDR membership (e.g. "10.0.0.0/8"). IPv6/exact handled by the caller. */
+function ipv4InCidr(ip: string, cidr: string): boolean {
+  const [net, bitsStr] = cidr.split('/');
+  if (isIP(ip) !== 4 || isIP(net) !== 4) return false;
+  const bits = Number(bitsStr);
+  if (!Number.isInteger(bits) || bits < 0 || bits > 32) return false;
+  const toInt = (a: string) => a.split('.').reduce((acc, o) => (acc << 8) + Number(o), 0) >>> 0;
+  const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+  return (toInt(ip) & mask) === (toInt(net) & mask);
+}
+
+/** True if `host`/`ip` matches an allowlist entry (hostname, IP, or IPv4 CIDR). */
+export function matchesHostAllowlist(host: string, ip: string, allowlist: string[]): boolean {
+  const h = host.toLowerCase();
+  for (const entry of allowlist) {
+    const a = entry.trim();
+    if (!a) continue;
+    if (a.toLowerCase() === h) return true;   // hostname
+    if (a === ip) return true;                // exact IP
+    if (a.includes('/') && ipv4InCidr(ip, a)) return true; // CIDR
+  }
+  return false;
+}
+
+/**
+ * Throws ForbiddenException if the URL is not http/https or if the hostname resolves
+ * (even only in part) to a disallowed address. Without a policy only public hosts
+ * pass (historical strict behavior); with a policy, private hosts are gated by
+ * `allowPrivateHosts`/`allowlist` while link-local/metadata is always blocked.
+ */
+export async function assertPublicUrl(rawUrl: string, policy?: HttpHostPolicy): Promise<void> {
   let url: URL;
   try {
     url = new URL(rawUrl);
@@ -70,11 +129,24 @@ export async function assertPublicUrl(rawUrl: string): Promise<void> {
 
   const host = url.hostname.replace(/^\[|\]$/g, '');
 
+  const check = (ip: string) => {
+    const shown = ip === host ? host : `${host} → ${ip}`;
+    if (isLinkLocalIp(ip)) {
+      throw new ForbiddenException(`Metadata/link-local destination always blocked: ${shown}`);
+    }
+    if (isPrivateIp(ip)) {
+      const allowed = policy
+        ? policy.allowPrivateHosts || matchesHostAllowlist(host, ip, policy.allowlist)
+        : false;
+      if (!allowed) {
+        throw new ForbiddenException(`Internal destination not allowed: ${shown}`);
+      }
+    }
+  };
+
   // Literal IP → direct check
   if (isIP(host)) {
-    if (isPrivateIp(host)) {
-      throw new ForbiddenException(`Internal destination not allowed: ${host}`);
-    }
+    check(host);
     return;
   }
 
@@ -86,9 +158,7 @@ export async function assertPublicUrl(rawUrl: string): Promise<void> {
     throw new ForbiddenException(`Host non risolvibile: ${host}`);
   }
   for (const a of addrs) {
-    if (isPrivateIp(a.address)) {
-      throw new ForbiddenException(`Host resolves to a disallowed internal address: ${host} → ${a.address}`);
-    }
+    check(a.address);
   }
 }
 
@@ -110,14 +180,18 @@ const CROSS_ORIGIN_STRIP = ['authorization', 'cookie', 'proxy-authorization'];
  * Credentials (Authorization/Cookie) are stripped on cross-origin hops, mirroring
  * what the browser/undici follow does automatically.
  */
-export async function safeFetch(rawUrl: string, init: RequestInit = {}): Promise<Response> {
+export async function safeFetch(
+  rawUrl: string,
+  init: RequestInit = {},
+  policy?: HttpHostPolicy,
+): Promise<Response> {
   let url = rawUrl;
   let method = (init.method ?? 'GET').toUpperCase();
   let body = init.body;
   const headers = new Headers(init.headers as HeadersInit | undefined);
 
   for (let hop = 0; ; hop++) {
-    await assertPublicUrl(url);
+    await assertPublicUrl(url, policy);
     const resp = await fetch(url, { ...init, method, body, headers, redirect: 'manual' });
 
     const isRedirect = resp.status >= 300 && resp.status < 400 && resp.status !== 304;

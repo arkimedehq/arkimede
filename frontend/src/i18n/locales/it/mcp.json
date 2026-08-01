@@ -40,7 +40,11 @@
     "deleteConfirm": "Eliminare?",
     "no": "No",
     "secret_one": "🔑 {{count}} secret",
-    "secret_other": "🔑 {{count}} secret"
+    "secret_other": "🔑 {{count}} secret",
+    "scope": {
+      "team": "Team",
+      "org": "Org"
+    }
   },
   "modal": {
     "editTitle": "Modifica server MCP",
@@ -80,6 +84,17 @@
     "create": "Crea",
     "errNameRequired": "Il nome è obbligatorio",
     "errUrlRequired": "URL obbligatorio per transport http/sse",
-    "errCommandRequired": "Comando obbligatorio per transport local/remote"
+    "errCommandRequired": "Comando obbligatorio per transport local/remote",
+    "scopeLabel": "Visibilità"
+  },
+  "test": {
+    "button": "Testa connessione",
+    "hint": "Esegue il handshake MCP reale sulla configurazione salvata e recupera i tool.",
+    "ok": "OK — {{count}} tool in {{ms}}ms",
+    "fail": "Test fallito",
+    "noTools": "Connessione riuscita, ma il server non espone alcun tool.",
+    "modeStreamable": "sessione streamable",
+    "modePlain": "JSON-RPC semplice",
+    "modeLegacySse": "SSE legacy"
   }
 }

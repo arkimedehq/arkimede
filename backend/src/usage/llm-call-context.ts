@@ -21,7 +21,7 @@ export interface LlmCallContext {
   queuedMs?: number;
   /** Attribution, when the caller knows it. */
   userId?: string;
-  origin?: 'chat' | 'automation' | 'flow' | 'team' | 'system';
+  origin?: 'chat' | 'automation' | 'flow' | 'team' | 'system' | 'voice';
 }
 
 const als = new AsyncLocalStorage<LlmCallContext>();

@@ -147,6 +147,14 @@ export const appConfigApi = {
   /** PATCH /api/admin/config/datasource-security — update anti-SSRF policy */
   updateDataSourceSecurityConfig: (payload: DataSourceSecurityConfig): Promise<DataSourceSecurityConfig> =>
     api.patch('/admin/config/datasource-security', payload).then((r) => r.data),
+
+  /** GET /api/admin/config/mcp-security — MCP anti-SSRF policy */
+  getMcpSecurityConfig: (): Promise<McpSecurityConfig> =>
+    api.get('/admin/config/mcp-security').then((r) => r.data),
+
+  /** PATCH /api/admin/config/mcp-security — update MCP anti-SSRF policy */
+  updateMcpSecurityConfig: (payload: McpSecurityConfig): Promise<McpSecurityConfig> =>
+    api.patch('/admin/config/mcp-security', payload).then((r) => r.data),
 };
 
 export interface DataSourceSecurityConfig {
@@ -154,6 +162,13 @@ export interface DataSourceSecurityConfig {
   dataSourceAllowPrivateHosts: boolean;
   /** Host/IP/CIDR allowed even when private hosts are disallowed. */
   dataSourceHostAllowlist: string[];
+}
+
+export interface McpSecurityConfig {
+  /** Allow http/sse MCP servers to target private/loopback/CGNAT hosts (metadata always blocked). */
+  mcpAllowPrivateHosts: boolean;
+  /** Host/IP/CIDR allowed even when private hosts are disallowed. */
+  mcpHostAllowlist: string[];
 }
 
 // ── Sandbox types ───────────────────────────────────────────────────────────
@@ -178,6 +193,8 @@ export interface IsolationInfo {
   brokerAllowedNetworks: string[] | null;
   /** True when the `internet` tier can actually work: egress proxy deployed AND its network declared + allowed by the broker. */
   internetTierAvailable: boolean;
+  /** True when the `open` tier network (default `bridge`) passes the broker allowlist (hardened deploys may remove it). */
+  openTierAvailable: boolean;
   /** False when the broker refuses the 'trusted' exec profile (BROKER_ALLOW_PRIVILEGED_SANDBOX unset → silent fallback to hardened). */
   trustedExecModeAvailable: boolean;
 }

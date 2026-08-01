@@ -16,7 +16,25 @@
   "networks": {
     "title": "Reserved networks",
     "hint": "Grant this skill access to operator-provisioned corporate networks (LAN/VPN/subnets). The backend stays reachable regardless.",
-    "lanBadge": "LAN"
+    "lanBadge": "LAN",
+    "tierTitle": "Job network",
+    "tierHint": "Network access level of this skill's jobs. The internal backend stays reachable regardless; the broker re-validates every network at launch (deploy-time ceiling).",
+    "tier": {
+      "auto": "Automatic",
+      "internal": "Internal only",
+      "internet": "Internet (allowlist)",
+      "open": "Open"
+    },
+    "tierDesc": {
+      "auto": "Derived from the skill: for this skill it resolves to “{{derived}}”.",
+      "internal": "Internal backend only, no external network (even if the skill declares domains).",
+      "internet": "Only the domains the skill declared, through the allowlisting proxy.",
+      "open": "Full network access with no allowlist: internet and local network (LAN). For skills talking to local devices."
+    },
+    "tierUnavailable": {
+      "internet": "Unavailable: the egress proxy is not deployed here.",
+      "open": "Unavailable: the open network is not in the broker's allowlist (hardened deploy)."
+    }
   },
   "scope": {
     "visibility": "Visibility",

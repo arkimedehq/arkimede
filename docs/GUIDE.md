@@ -483,15 +483,59 @@ DataSource form (test the connection before or after saving).
 
 **Settings → MCP Servers → New server**
 
-### `http` / `sse` transport
+### `http` transport (Streamable HTTP)
 
-For remote MCP servers already running:
+For remote MCP servers speaking the modern **Streamable HTTP** transport
+(single endpoint, POST JSON-RPC — what the official MCP SDKs produce):
 
 ```
 Name: filesystem
-URL: http://localhost:3001
+URL: http://localhost:3001/mcp
 Transport: http
 ```
+
+The client performs the full spec handshake: `initialize` (capturing the
+`Mcp-Session-Id` the server assigns), `notifications/initialized`, then
+`tools/list`/`tools/call` with the session and the negotiated
+`MCP-Protocol-Version` header. Sessions are cached per server and re-created
+transparently when the server expires them. Servers that speak plain JSON-RPC
+without sessions keep working (the flow degrades gracefully).
+
+### `sse` transport (legacy HTTP+SSE)
+
+For servers on the legacy 2024-11-05 transport (a GET event stream that
+announces a POST endpoint; responses arrive **on the stream**):
+
+```
+Name: home-automation
+URL: http://192.168.1.x:8123/mcp_server/sse
+Transport: sse
+```
+
+### Authentication headers and secrets
+
+Custom headers support `{{secret.KEY}}` interpolation; secret values are
+stored encrypted and never leave the backend:
+
+```
+Headers: { "Authorization": "Bearer {{secret.API_TOKEN}}" }
+Secrets: API_TOKEN = <the token>
+```
+
+### Connection test
+
+From the server editor, **Test connection** runs the real handshake + tool
+discovery and shows the discovered tools (with the session flavor:
+`streamable`, `plain` or `legacy SSE`) or the exact failure reason — the same
+path the agent uses at chat time, surfaced instead of a silent log warning.
+
+### Anti-SSRF policy (admin)
+
+Outbound `http`/`sse` MCP traffic is guarded. By default private/LAN hosts are
+**allowed** (self-hosted MCP servers typically live on the LAN); the cloud
+metadata endpoint (169.254.169.254 / IPv6 link-local) is always blocked. For
+untrusted multi-tenant deployments, **Settings → AI → MCP security** can harden
+the policy to public hosts only, plus a host/CIDR allowlist.
 
 ### `local` transport
 
@@ -933,6 +977,25 @@ The `kind` field, derived at install time, distinguishes:
 
 From a descriptive skill's drawer, **"Compile to tool"** asks the **AI** to infer an `input_schema` for each script (by reading the code + `SKILL.md`); the admin/owner **reviews and confirms** the proposal, then the manifest is written into `runtime.scripts` in the `SKILL.md` frontmatter (source of truth) and a reinstall promotes the skill to `typed`, exposing the scripts as tools. Endpoints: `propose-compilation` → `compile`.
 
+### 12.13 Per-skill job network tier (admin)
+
+From the skill drawer, **Job network** lets an admin override the network tier
+of that skill's container-jobs (same `none|internal|internet|open` vocabulary
+as the Sandbox):
+
+- **Automatic** (default) — derived from the skill: `internet` when it declares
+  `runtime.network` domains, otherwise the internal baseline.
+- **Internal only** — force the baseline even if the skill declares domains.
+- **Internet (allowlist)** — only the declared domains, via the egress proxy.
+- **Open** — full network including the LAN, no allowlist. For skills talking
+  to local devices (e.g. UDP protocols that cannot cross the HTTP egress
+  proxy, like KNXnet/IP).
+
+Tiers unavailable in the deployment are shown disabled with the reason (the
+broker re-validates every network at job launch: the deploy-time ceiling can
+never be bypassed from the UI). Operator-provisioned **reserved networks**
+(`SKILL_NETWORK_CATALOG`) remain grantable per skill alongside the tier.
+
 ---
 
 ## 13. Flows — deterministic block-based workflows
@@ -1287,6 +1350,44 @@ GET   /api/users/profile
 PATCH /api/users/profile
 {"name": "Alice", "systemPrompt": "Always answer me concisely."}
 ```
+
+### API keys (long-lived credentials)
+
+Opaque `ak_…` keys for external integrations (voice satellites, scripts,
+third-party clients): valid as `Authorization: Bearer` on the whole API with
+the owner's identity. Only the SHA-256 hash is stored — the clear key appears
+**once** in the create response. Revocation (row deletion) and a disabled
+owner cut the key off at the next request. UI: **Settings → Profile** (own
+keys) and the per-user action in the admin **Users** section (issue keys for
+service accounts without logging in as them).
+
+```bash
+GET    /api/api-keys                    # own keys (no secrets)
+POST   /api/api-keys                    # {name, expiresInDays?} → {key, row} (key shown once)
+DELETE /api/api-keys/:id                # revoke (owner or admin)
+GET    /api/api-keys/user/:userId       # [ADMIN] keys of a user
+POST   /api/api-keys/admin              # [ADMIN] {userId, name, expiresInDays?}
+```
+
+### OpenAI-compatible API (external conversation clients)
+
+A thin, **stateless** shim exposing the agent pipeline in the OpenAI
+chat-completions wire format — any OpenAI-speaking client (e.g. a Home
+Assistant voice pipeline) can use Arkimede as its conversation backend:
+
+```bash
+GET  /api/openai/v1/models              # 'arkimede' (default pipeline) + the user's agents as models
+POST /api/openai/v1/chat/completions    # OpenAI format; SSE streaming and non-streaming
+```
+
+- The client keeps the conversation window and resends it each turn; no chat
+  rows are created and no compaction runs.
+- Incoming `system` messages are discarded (the 4-level prompt wins); tool
+  events stay internal — never mapped to OpenAI `tool_calls`.
+- Picking an agent slug as `model` applies that agent's system prompt, tool
+  filter, iteration cap and LLM config.
+- Auth: JWT or API key as Bearer. Costs are attributed in `llm_calls` with
+  origin `voice`.
 
 ### Chat and messages
 

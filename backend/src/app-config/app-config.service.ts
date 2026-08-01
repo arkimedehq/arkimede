@@ -46,6 +46,13 @@ export interface DataSourceSecurityConfigDto {
   dataSourceHostAllowlist: string[];
 }
 
+export interface McpSecurityConfigDto {
+  /** Allow http/sse MCP servers to target private/loopback/CGNAT hosts (metadata always blocked). */
+  mcpAllowPrivateHosts: boolean;
+  /** Host/IP/CIDR allowed even when private hosts are disallowed. */
+  mcpHostAllowlist: string[];
+}
+
 export interface EmbeddingConfigDto {
   embeddingProvider:   EmbeddingProvider;
   embeddingModel:      string | null;
@@ -428,6 +435,43 @@ export class AppConfigService implements OnModuleInit {
       dataSourceAllowPrivateHosts: config?.dataSourceAllowPrivateHosts ?? true,
       dataSourceHostAllowlist:     config?.dataSourceHostAllowlist ?? [],
     };
+  }
+
+  // ── MCP anti-SSRF security ──────────────────────────────────────────────────
+
+  async getMcpSecurityConfig(): Promise<McpSecurityConfigDto> {
+    const config = await this.repo.findOne({ where: { id: CONFIG_ID } });
+    return {
+      mcpAllowPrivateHosts: config?.mcpAllowPrivateHosts ?? true,
+      mcpHostAllowlist:     config?.mcpHostAllowlist ?? [],
+    };
+  }
+
+  async updateMcpSecurityConfig(
+    dto: McpSecurityConfigDto,
+    actorId?: string,
+  ): Promise<McpSecurityConfigDto> {
+    const current = await this.repo.findOne({ where: { id: CONFIG_ID } });
+    const allowlist = Array.isArray(dto.mcpHostAllowlist)
+      ? dto.mcpHostAllowlist.map((s) => String(s).trim()).filter(Boolean)
+      : [];
+    await this.repo.save({
+      ...current,
+      id: CONFIG_ID,
+      mcpAllowPrivateHosts: !!dto.mcpAllowPrivateHosts,
+      mcpHostAllowlist:     allowlist,
+    });
+    this.logger.log(
+      `McpSecurity: allowPrivateHosts=${!!dto.mcpAllowPrivateHosts} allowlist=${allowlist.length}`,
+    );
+    await this.audit?.record({
+      actorId: actorId ?? null,
+      action: 'appconfig.update',
+      resource: 'mcp-security',
+      outcome: 'ok',
+      ctx: { section: 'mcp-security', allowPrivateHosts: !!dto.mcpAllowPrivateHosts, allowlist: allowlist.length },
+    });
+    return this.getMcpSecurityConfig();
   }
 
   async updateDataSourceSecurityConfig(

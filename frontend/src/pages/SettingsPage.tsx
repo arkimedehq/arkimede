@@ -11,9 +11,10 @@ import {
   FolderOpen, Brain, Download, Trash2, Search, Wrench, Plug, UserCircle,
   Save, Eye, EyeOff, KeyRound, Cpu, Wifi, WifiOff, Boxes, Pencil, Plus,
   Star, Server, FileStack, X, Sparkles, Eraser, Zap, Filter, Package, ThumbsUp, BarChart3,
-  Users, UsersRound, Workflow, Network, CalendarClock, Activity, ShieldAlert, Mic, Terminal, Check, DatabaseBackup,
+  Users, UsersRound, Workflow, Network, CalendarClock, Activity, ShieldAlert, Mic, Terminal, Check, Copy, DatabaseBackup,
 } from 'lucide-react';
 import type { LlmProvider, EmbeddingProvider, EmbeddingConfig, ToolLoadingConfig, ToolLoadingStrategy, ToolSchemaFormat, TranscriptionProvider, SandboxNetwork, SandboxExecMode } from '../api/appConfig';
+import { apiKeysApi } from '../api/apiKeys';
 import { filesApi, type FileRecord, type DocScope, type FileScope } from '../api/files';
 import { profileApi } from '../api/profile';
 import { appConfigApi } from '../api/appConfig';
@@ -105,7 +106,7 @@ export default function SettingsPage() {
           the other sections stay centered at max-w-4xl. */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden min-w-0 min-h-0">
         <div className={activeSection === 'flows' ? 'h-full px-4 py-5' : 'max-w-4xl mx-auto px-4 sm:px-8 py-6 sm:py-8'}>
-        {activeSection === 'profile'  && <ProfileSection />}
+        {activeSection === 'profile'  && <div className="space-y-6"><ProfileSection /><ApiKeysCard /></div>}
         {activeSection === 'memory'   && <MemorySection />}
         {activeSection === 'ai'       && <AiSection />}
         {activeSection === 'tools'    && <ToolsSection />}
@@ -1242,6 +1243,7 @@ function AiSection() {
       {isAdmin && <IsolationLevelCard />}
       {isAdmin && <SandboxAdminCard />}
       {isAdmin && <DataSourceSecurityAdminCard />}
+      {isAdmin && <McpSecurityAdminCard />}
       {isAdmin && <SystemPromptCard />}
     </div>
   );
@@ -1717,6 +1719,208 @@ function SandboxAdminCard() {
               className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg">
               {mutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
               {t('sandbox.save')}
+            </button>
+            {msg && <span className={`text-xs ${msg.ok ? 'text-emerald-400' : 'text-red-400'}`}>{msg.text}</span>}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Personal long-lived API keys (profile tab, every user): list/revoke and
+ * creation with the clear key shown ONCE. Used as Bearer credentials by
+ * external integrations (voice satellites, scripts, third-party clients).
+ */
+function ApiKeysCard() {
+  const { t } = useTranslation('settings');
+  const qc = useQueryClient();
+  const [name, setName] = useState('');
+  const [days, setDays] = useState('365');
+  const [createdKey, setCreatedKey] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const keysQ = useQuery({ queryKey: ['api-keys'], queryFn: apiKeysApi.list });
+
+  const createM = useMutation({
+    mutationFn: () => apiKeysApi.create(name, Number(days) || 0),
+    onSuccess: (res) => {
+      setCreatedKey(res.key);
+      setName('');
+      qc.invalidateQueries({ queryKey: ['api-keys'] });
+    },
+    onError: (e: any) => setErr(e?.response?.data?.message ?? e.message),
+  });
+
+  const revokeM = useMutation({
+    mutationFn: (id: string) => apiKeysApi.revoke(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['api-keys'] }),
+    onError: (e: any) => setErr(e?.response?.data?.message ?? e.message),
+  });
+
+  const copyKey = async () => {
+    if (!createdKey) return;
+    try {
+      await navigator.clipboard.writeText(createdKey);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch { /* clipboard unavailable */ }
+  };
+
+  const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString() : '—');
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
+      <div>
+        <h3 className="text-sm font-semibold text-gray-100 flex items-center gap-2">
+          <KeyRound size={14} className="text-blue-400" />
+          {t('apiKeys.title')}
+        </h3>
+        <p className="text-xs text-gray-500 mt-1">{t('apiKeys.subtitle')}</p>
+      </div>
+
+      {err && <p className="text-xs text-red-400">{err}</p>}
+
+      {createdKey && (
+        <div className="p-3 rounded-lg border border-emerald-500/30 bg-emerald-500/15 space-y-2">
+          <p className="text-xs text-emerald-300 font-medium">{t('apiKeys.createdOnce')}</p>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 text-xs font-mono text-gray-200 bg-gray-950/60 rounded px-2 py-1.5 break-all">{createdKey}</code>
+            <button onClick={copyKey} className="p-1.5 text-gray-300 hover:text-white rounded transition-colors" title={t('apiKeys.copy')}>
+              {copied ? <Check size={15} className="text-emerald-400" /> : <Copy size={15} />}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-1.5">
+        {keysQ.data?.length === 0 && <p className="text-xs text-gray-500">{t('apiKeys.empty')}</p>}
+        {keysQ.data?.map((k) => (
+          <div key={k.id} className="flex items-center gap-3 p-2 rounded-lg border border-gray-800">
+            <div className="min-w-0 flex-1">
+              <p className="text-xs text-gray-200 font-medium truncate">{k.name} <span className="text-gray-500 font-mono">{k.prefix}…</span></p>
+              <p className="text-[11px] text-gray-500">
+                {t('apiKeys.expires')}: {k.expiresAt ? fmtDate(k.expiresAt) : t('apiKeys.never')} · {t('apiKeys.lastUsed')}: {fmtDate(k.lastUsedAt)}
+              </p>
+            </div>
+            <button
+              title={t('apiKeys.revoke')}
+              disabled={revokeM.isPending}
+              onClick={() => { if (confirm(t('apiKeys.revokeConfirm', { name: k.name }))) revokeM.mutate(k.id); }}
+              className="p-1.5 text-gray-400 hover:text-red-400 rounded transition-colors"
+            ><Trash2 size={14} /></button>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex items-end gap-2 flex-wrap">
+        <div className="flex-1 min-w-[180px]">
+          <label className="block text-xs font-semibold text-gray-400 mb-1">{t('apiKeys.fieldName')}</label>
+          <input className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200"
+            value={name} onChange={(e) => setName(e.target.value)} placeholder={t('apiKeys.namePlaceholder')} />
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-400 mb-1">{t('apiKeys.fieldExpiry')}</label>
+          <select className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200"
+            value={days} onChange={(e) => setDays(e.target.value)}>
+            <option value="30">30 {t('apiKeys.days')}</option>
+            <option value="90">90 {t('apiKeys.days')}</option>
+            <option value="365">365 {t('apiKeys.days')}</option>
+            <option value="0">{t('apiKeys.never')}</option>
+          </select>
+        </div>
+        <button
+          onClick={() => createM.mutate()}
+          disabled={createM.isPending || !name.trim()}
+          className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg"
+        >
+          {createM.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+          {t('apiKeys.create')}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Admin card for the MCP anti-SSRF policy — mirrors the DataSource one. */
+function McpSecurityAdminCard() {
+  const { t } = useTranslation('settings');
+  const qc = useQueryClient();
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['mcp-security-config'],
+    queryFn: appConfigApi.getMcpSecurityConfig,
+  });
+
+  const [allowPrivate, setAllowPrivate] = useState(true);
+  const [allowlistText, setAllowlistText] = useState('');
+
+  useEffect(() => {
+    if (!data) return;
+    setAllowPrivate(data.mcpAllowPrivateHosts);
+    setAllowlistText((data.mcpHostAllowlist ?? []).join('\n'));
+  }, [data]);
+
+  const mutation = useMutation({
+    mutationFn: () => appConfigApi.updateMcpSecurityConfig({
+      mcpAllowPrivateHosts: allowPrivate,
+      mcpHostAllowlist: allowlistText.split(/[\n,]/).map((s) => s.trim()).filter(Boolean),
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['mcp-security-config'] });
+      setMsg({ ok: true, text: t('mcpSecurity.savedOk') });
+      setTimeout(() => setMsg(null), 3000);
+    },
+    onError: (e: any) => setMsg({ ok: false, text: e?.response?.data?.message ?? e.message }),
+  });
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-5">
+      <div>
+        <h3 className="text-sm font-semibold text-gray-100 flex items-center gap-2">
+          <ShieldAlert size={14} className="text-emerald-400" />
+          {t('mcpSecurity.title')}
+        </h3>
+        <p className="text-xs text-gray-500 mt-1">{t('mcpSecurity.subtitle')}</p>
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center gap-2 text-gray-500 text-xs"><Loader2 size={13} className="animate-spin" /> {t('mcpSecurity.loading')}</div>
+      ) : (
+        <>
+          <div className="flex items-start gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/15 px-3 py-2">
+            <ShieldAlert size={14} className="text-emerald-400 mt-0.5 shrink-0" />
+            <p className="text-xs text-emerald-300">{t('mcpSecurity.metadataNote')}</p>
+          </div>
+
+          <div>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input type="checkbox" checked={allowPrivate} onChange={(e) => setAllowPrivate(e.target.checked)} className="accent-blue-500 w-4 h-4" />
+              <span className="text-sm text-gray-200">{t('mcpSecurity.allowPrivateLabel')}</span>
+            </label>
+            <p className="text-xs text-gray-500 mt-1">{t('mcpSecurity.allowPrivateHint')}</p>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="block text-xs font-semibold text-gray-400">{t('mcpSecurity.allowlistLabel')}</label>
+            <textarea
+              value={allowlistText}
+              onChange={(e) => setAllowlistText(e.target.value)}
+              rows={3}
+              placeholder={"mcp.internal.example\n10.0.5.0/24\n192.168.1.20"}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono resize-y"
+            />
+            <p className="text-xs text-gray-500">{t('mcpSecurity.allowlistHint')}</p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button onClick={() => mutation.mutate()} disabled={mutation.isPending}
+              className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg">
+              {mutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              {t('mcpSecurity.save')}
             </button>
             {msg && <span className={`text-xs ${msg.ok ? 'text-emerald-400' : 'text-red-400'}`}>{msg.text}</span>}
           </div>

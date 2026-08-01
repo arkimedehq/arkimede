@@ -74,8 +74,19 @@ export interface MemberInput { agentId: string; position?: number; role?: string
 
 // ── API ───────────────────────────────────────────────────────────────────────
 
+/** A source group of tools available to the user (for the agent tool picker). */
+export interface ToolCatalogGroup {
+  source: 'mcp' | 'skill' | 'flow' | 'agent' | 'custom';
+  label: string;
+  /** Wildcard token that selects the whole group (e.g. "mcp_home_assistant_*"), or null. */
+  wildcard: string | null;
+  tools: { name: string; description: string }[];
+}
+
 export const agentsApi = {
   list: (): Promise<Agent[]> => api.get('/agents').then((r) => r.data),
+  toolCatalog: (projectId?: string): Promise<{ groups: ToolCatalogGroup[] }> =>
+    api.get('/agent/tool-catalog', { params: projectId ? { projectId } : {} }).then((r) => r.data),
   get: (id: string): Promise<Agent> => api.get(`/agents/${id}`).then((r) => r.data),
   create: (p: UpsertAgentPayload): Promise<Agent> => api.post('/agents', p).then((r) => r.data),
   update: (id: string, p: UpsertAgentPayload): Promise<Agent> => api.put(`/agents/${id}`, p).then((r) => r.data),

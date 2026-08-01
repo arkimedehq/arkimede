@@ -22,6 +22,7 @@ import {
   Download, RefreshCw, AlertCircle, ArrowLeft, X, Save, Copy, Check, Link2,
 } from 'lucide-react';
 import { mcpServersApi, type McpServer, type CreateMcpServerPayload } from '../api/mcpServers';
+import { ScopeSelector } from '../components/ScopeSelector';
 import { useStore } from '../store/useStore';
 import { detectBridgeOS, bridgeOSLabel, bridgeReleasesUrl } from '../utils/bridgeDownload';
 
@@ -40,6 +41,8 @@ interface FormState {
   env: KvEntry[];
   secrets: KvEntry[];
   loadOnFirst: boolean;
+  scope: 'personal' | 'team' | 'org';
+  teamId: string | null;
 }
 
 const emptyForm = (): FormState => ({
@@ -47,6 +50,7 @@ const emptyForm = (): FormState => ({
   url: '', command: '', args: '',
   headers: [], env: [], secrets: [],
   loadOnFirst: true,
+  scope: 'personal', teamId: null,
 });
 
 function serverToForm(s: McpServer): FormState {
@@ -61,6 +65,8 @@ function serverToForm(s: McpServer): FormState {
     env:         Object.entries(s.env ?? {}).map(([key, value]) => ({ key, value })),
     secrets:     (s.secrets ?? []).map((sec) => ({ key: sec.keyName, value: '' })),
     loadOnFirst: s.loadOnFirst ?? true,
+    scope:       s.scope ?? 'personal',
+    teamId:      s.teamId ?? null,
   };
 }
 
@@ -86,6 +92,8 @@ function formToPayload(form: FormState): CreateMcpServerPayload {
     env:         Object.keys(env).length ? env : undefined,
     secrets:     Object.keys(secrets).length ? secrets : undefined,
     loadOnFirst: form.loadOnFirst,
+    scope:       form.scope,
+    teamId:      form.scope === 'team' ? form.teamId : null,
   };
 }
 
@@ -547,6 +555,15 @@ function ServerCard({
               <span className={`text-xs px-1.5 py-0.5 rounded-md ${bg} ${color} font-medium`}>
                 {label}
               </span>
+              {server.scope && server.scope !== 'personal' && (
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-semibold uppercase tracking-wide ${
+                  server.scope === 'org'
+                    ? 'bg-blue-500/15 border border-blue-500/30 text-blue-600 dark:text-blue-300'
+                    : 'bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-300'
+                }`}>
+                  {t(`card.scope.${server.scope}`)}
+                </span>
+              )}
             </div>
             {server.description && (
               <p className="text-xs text-gray-500 mt-0.5 truncate">{server.description}</p>
@@ -583,6 +600,70 @@ function ServerCard({
   );
 }
 
+// ── Connection test panel (existing servers) ─────────────────────────────────
+
+/**
+ * Runs the real MCP handshake + tool discovery against the SAVED configuration
+ * and shows the discovered tools or the precise failure reason.
+ */
+function McpTestPanel({ serverId }: { serverId: string }) {
+  const { t } = useTranslation('mcp');
+  const testMutation = useMutation({ mutationFn: () => mcpServersApi.test(serverId) });
+  const r = testMutation.data;
+
+  return (
+    <div className="mt-5 pt-4 border-t border-gray-800 space-y-2">
+      <div className="flex items-center gap-3 flex-wrap">
+        <button
+          type="button"
+          onClick={() => testMutation.mutate()}
+          disabled={testMutation.isPending}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-200 bg-gray-800
+            hover:bg-gray-700 border border-gray-700 rounded-lg transition-colors disabled:opacity-50"
+        >
+          {testMutation.isPending ? <Loader2 size={13} className="animate-spin" /> : <Wifi size={13} />}
+          {t('test.button')}
+        </button>
+        {r && r.ok && (
+          <span className="text-xs text-emerald-400">
+            {t('test.ok', { count: r.tools.length, ms: r.latencyMs })}
+            {r.sessionMode && (
+              <span className="text-gray-500"> · {t(
+                r.sessionMode === 'streamable' ? 'test.modeStreamable'
+                : r.sessionMode === 'legacy-sse' ? 'test.modeLegacySse'
+                : 'test.modePlain',
+              )}</span>
+            )}
+          </span>
+        )}
+        {r && !r.ok && <span className="text-xs text-red-400">{t('test.fail')}</span>}
+      </div>
+      <p className="text-[11px] text-gray-600">{t('test.hint')}</p>
+      {r && !r.ok && r.error && (
+        <div className="flex items-start gap-2 p-3 bg-red-900/20 border border-red-800/50 rounded-lg">
+          <XCircle size={14} className="text-red-400 mt-0.5 flex-shrink-0" />
+          <p className="text-xs text-red-300 break-all">{r.error}</p>
+        </div>
+      )}
+      {r?.ok && r.tools.length === 0 && (
+        <p className="text-xs text-amber-500 dark:text-amber-400">{t('test.noTools')}</p>
+      )}
+      {r?.ok && r.tools.length > 0 && (
+        <div className="max-h-52 overflow-y-auto space-y-1.5 rounded-lg border border-gray-800 bg-gray-900/50 p-2.5">
+          {r.tools.map((tool) => (
+            <div key={tool.name} className="text-xs leading-snug">
+              <span className="font-mono text-gray-200">{tool.name}</span>
+              {tool.description && (
+                <span className="text-gray-500"> — {tool.description.length > 140 ? `${tool.description.slice(0, 140)}…` : tool.description}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Create/edit editor (inline, replaces the list) ───────────────────────────
 
 function ServerEditor({
@@ -595,6 +676,7 @@ function ServerEditor({
   onSaved: () => void;
 }) {
   const { t } = useTranslation('mcp');
+  const isAdmin = useStore((s) => s.user?.role === 'admin');
   const [form, setForm] = useState<FormState>(server ? serverToForm(server) : emptyForm());
   const [error, setError] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -696,6 +778,19 @@ function ServerEditor({
                 onChange={(e) => set('description', e.target.value)}
                 placeholder={t('modal.descriptionPlaceholder')}
                 disabled={isPending}
+              />
+            </div>
+
+            {/* Visibility scope: personal | team | org (shares the server's tools) */}
+            <div>
+              <Label>{t('modal.scopeLabel')}</Label>
+              <ScopeSelector
+                scope={form.scope}
+                teamId={form.teamId}
+                onScope={(s) => set('scope', s)}
+                onTeam={(id) => set('teamId', id)}
+                disabled={isPending}
+                allowOrg={isAdmin}
               />
             </div>
 
@@ -863,6 +958,9 @@ function ServerEditor({
               </div>
             )}
           </div>
+
+        {/* Connection test — existing server only (tests the SAVED configuration) */}
+        {isEditing && server && <McpTestPanel serverId={server.id} />}
 
         {/* Footer */}
         <div className="flex items-center gap-2 mt-6 pt-4 border-t border-gray-800">
