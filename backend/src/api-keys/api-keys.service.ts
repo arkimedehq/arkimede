@@ -107,7 +107,7 @@ export class ApiKeysService {
    * Validates a clear `ak_…` credential → the owner's request identity, or
    * throws UnauthorizedException (unknown/expired key, disabled owner).
    */
-  async validate(clearKey: string): Promise<{ id: string; email: string; role: string }> {
+  async validate(clearKey: string): Promise<{ id: string; email: string; role: string; apiKeyPrefix: string }> {
     const row = await this.keyRepo.findOne({ where: { keyHash: hashApiKey(clearKey) } });
     if (!row) throw new UnauthorizedException('Invalid API key');
     if (isApiKeyExpired(row.expiresAt)) throw new UnauthorizedException('API key expired');
@@ -123,6 +123,8 @@ export class ApiKeysService {
       // Fire-and-forget: the request must not pay for the bookkeeping write.
       void this.keyRepo.update(row.id, { lastUsedAt: new Date(now) }).catch(() => undefined);
     }
-    return { id: user.id, email: user.email, role: user.role };
+    // apiKeyPrefix: display prefix of the key used — lets downstream consumers
+    // (e.g. the invocation log) attribute the call to a specific credential.
+    return { id: user.id, email: user.email, role: user.role, apiKeyPrefix: row.prefix };
   }
 }

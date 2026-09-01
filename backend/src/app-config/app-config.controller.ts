@@ -11,9 +11,10 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AppConfigService } from './app-config.service';
-import { EmbeddingProvider, ToolLoadingStrategy, ToolSchemaFormat, TranscriptionProvider } from './app-config.entity';
+import { EmbeddingProvider, ToolLoadingStrategy, ToolSchemaFormat, TranscriptionProvider, TtsProvider } from './app-config.entity';
 import { EmbeddingProviderService } from '../embed/embedding.provider.service';
 import { TranscriptionService } from '../transcription/transcription.service';
+import { TtsService } from '../tts/tts.service';
 import { SkillExecutorClient } from '../skills/skill-executor.client';
 
 class UpdateSystemPromptDto {
@@ -25,6 +26,8 @@ const EMBEDDING_PROVIDERS: EmbeddingProvider[] = [
 ];
 
 const TRANSCRIPTION_PROVIDERS: TranscriptionProvider[] = ['internal', 'openai', 'groq', 'openai-compatible'];
+
+const TTS_PROVIDERS: TtsProvider[] = ['internal', 'openai', 'openai-compatible'];
 
 const TOOL_LOADING_STRATEGIES: ToolLoadingStrategy[] = ['always_inject_all', 'top_k_rag', 'auto'];
 const TOOL_SCHEMA_FORMATS: ToolSchemaFormat[]         = ['full', 'compressed', 'deferred'];
@@ -130,6 +133,24 @@ class UpdateTranscriptionConfigDto {
   transcriptionBaseUrl?: string | null;
 }
 
+class UpdateTtsConfigDto {
+  @IsIn(TTS_PROVIDERS)
+  ttsProvider: TtsProvider;
+
+  @IsOptional() @IsString()
+  ttsModel?: string | null;
+
+  /** Plaintext API key. String → encrypt; null → remove; undefined → leave untouched. */
+  @IsOptional() @IsString()
+  ttsApiKey?: string | null;
+
+  @IsOptional() @IsString()
+  ttsBaseUrl?: string | null;
+
+  @IsOptional() @IsString()
+  ttsVoice?: string | null;
+}
+
 @ApiTags('admin')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, AdminGuard)
@@ -144,6 +165,9 @@ export class AppConfigController {
 
     @Inject(forwardRef(() => TranscriptionService))
     private readonly transcription: TranscriptionService,
+
+    @Inject(forwardRef(() => TtsService))
+    private readonly tts: TtsService,
 
     @Inject(SkillExecutorClient)
     private readonly executorClient: SkillExecutorClient,
@@ -429,5 +453,37 @@ export class AppConfigController {
   async testTranscriptionConnection() {
     this.transcription.invalidateCache();
     return this.transcription.testConnection();
+  }
+
+  // ── TTS Config (Piper) ──────────────────────────────────────────────────────
+
+  /** GET /api/admin/config/tts — current text-to-speech configuration */
+  @Get('tts')
+  @ApiOperation({ summary: 'Current text-to-speech configuration' })
+  getTtsConfig() {
+    return this.service.getTtsConfig();
+  }
+
+  /** PATCH /api/admin/config/tts — updates the text-to-speech configuration */
+  @Patch('tts')
+  @ApiOperation({ summary: 'Update text-to-speech configuration' })
+  async updateTtsConfig(@Body() dto: UpdateTtsConfigDto, @CurrentUser() user: any) {
+    const result = await this.service.updateTtsConfig({
+      ttsProvider: dto.ttsProvider,
+      ttsModel:    dto.ttsModel ?? null,
+      ttsApiKey:   dto.ttsApiKey,   // undefined = leave the key untouched
+      ttsBaseUrl:  dto.ttsBaseUrl ?? null,
+      ttsVoice:    dto.ttsVoice ?? null,
+    }, user?.id);
+    this.tts.invalidateCache();
+    return result;
+  }
+
+  /** POST /api/admin/config/tts/test — checks the TTS endpoint with a micro-synthesis */
+  @Post('tts/test')
+  @ApiOperation({ summary: 'Test the connection to the configured TTS provider' })
+  async testTtsConnection() {
+    this.tts.invalidateCache();
+    return this.tts.testConnection();
   }
 }

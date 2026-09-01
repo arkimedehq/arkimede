@@ -33,3 +33,7 @@ services:
   whisper:
     ports:
       - "9000:9000"
+
+  piper:
+    ports:
+      - "9100:9100"

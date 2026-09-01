@@ -101,5 +101,10 @@
     "placeholder": "What should have been answered? The correction will help the agent avoid repeating the mistake.",
     "saving": "Saving…",
     "saveCorrection": "Save correction"
+  },
+  "tts": {
+    "speak": "Read aloud",
+    "stop": "Stop reading",
+    "error": "Speech synthesis failed"
   }
 }

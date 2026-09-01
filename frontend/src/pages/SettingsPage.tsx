@@ -11,9 +11,9 @@ import {
   FolderOpen, Brain, Download, Trash2, Search, Wrench, Plug, UserCircle,
   Save, Eye, EyeOff, KeyRound, Cpu, Wifi, WifiOff, Boxes, Pencil, Plus,
   Star, Server, FileStack, X, Sparkles, Eraser, Zap, Filter, Package, ThumbsUp, BarChart3,
-  Users, UsersRound, Workflow, Network, CalendarClock, Activity, ShieldAlert, Mic, Terminal, Check, Copy, DatabaseBackup,
+  Users, UsersRound, Workflow, Network, CalendarClock, Activity, ShieldAlert, Mic, Terminal, Check, Copy, DatabaseBackup, Volume2,
 } from 'lucide-react';
-import type { LlmProvider, EmbeddingProvider, EmbeddingConfig, ToolLoadingConfig, ToolLoadingStrategy, ToolSchemaFormat, TranscriptionProvider, SandboxNetwork, SandboxExecMode } from '../api/appConfig';
+import type { LlmProvider, EmbeddingProvider, EmbeddingConfig, ToolLoadingConfig, ToolLoadingStrategy, ToolSchemaFormat, TranscriptionProvider, TtsProvider, SandboxNetwork, SandboxExecMode } from '../api/appConfig';
 import { apiKeysApi } from '../api/apiKeys';
 import { filesApi, type FileRecord, type DocScope, type FileScope } from '../api/files';
 import { profileApi } from '../api/profile';
@@ -3468,6 +3468,7 @@ function VectorDbSection() {
       <ActiveCollectionCard />
       <EmbeddingConfigCard />
       <TranscriptionConfigCard />
+      <TtsConfigCard />
     </div>
   );
 }
@@ -4882,6 +4883,321 @@ function TranscriptionConfigCard() {
               ? <Wifi size={13} className="text-emerald-400" />
               : <Wifi size={13} />}
             {t('transcription.testBtn')}
+          </button>
+          <button
+            onClick={() => saveMutation.mutate()}
+            disabled={saveMutation.isPending}
+            className="flex items-center gap-1.5 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500
+              disabled:opacity-50 text-white text-sm rounded-lg transition-colors"
+          >
+            {saveMutation.isPending ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+            {t('common:actions.save')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+// ── TTS provider metadata (Piper) ──────────────────────────────────────────────
+const TTS_PROVIDERS: {
+  value:         TtsProvider;
+  label:         string;
+  descKey:       string;
+  needsKey:      boolean;
+  needsUrl:      boolean;
+  defaultUrl?:   string;
+  defaultModels: string[];
+  defaultVoices: string[];
+  internal?:     boolean;
+}[] = [
+  {
+    value: 'internal', label: 'Interno (default)',
+    descKey: 'tts.providerInternalDesc',
+    needsKey: false, needsUrl: false,
+    defaultModels: [], internal: true,
+    defaultVoices: ['it_IT-paola-medium', 'en_US-lessac-medium', 'en_GB-alba-medium', 'de_DE-thorsten-medium', 'fr_FR-siwis-medium', 'es_ES-davefx-medium'],
+  },
+  {
+    value: 'openai', label: 'OpenAI',
+    descKey: 'tts.providerOpenAiDesc',
+    needsKey: true, needsUrl: false,
+    defaultModels: ['gpt-4o-mini-tts', 'tts-1', 'tts-1-hd'],
+    defaultVoices: ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'],
+  },
+  {
+    value: 'openai-compatible', label: 'Self-hosted',
+    descKey: 'tts.providerCompatDesc',
+    needsKey: false, needsUrl: true, defaultUrl: 'http://localhost:9100/v1',
+    defaultModels: ['tts-1'],
+    defaultVoices: [],
+  },
+];
+
+// ── Card: text-to-speech configuration (Piper) ─────────────────────────────────
+function TtsConfigCard() {
+  const { t } = useTranslation('settings');
+  const qc = useQueryClient();
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['tts-config'],
+    queryFn:  appConfigApi.getTtsConfig,
+    staleTime: 60_000,
+  });
+
+  const [provider, setProvider] = useState<TtsProvider>('internal');
+  const [model,    setModel]    = useState('');
+  const [voice,    setVoice]    = useState('');
+  const [apiKey,   setApiKey]   = useState('');
+  const [baseUrl,  setBaseUrl]  = useState('');
+  const [showKey,  setShowKey]  = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [testState, setTestState] = useState<'idle' | 'pending' | 'ok' | 'error'>('idle');
+  const [testError, setTestError] = useState('');
+
+  useEffect(() => {
+    if (!data) return;
+    // ttsProvider null = never saved → the backend uses its env fallback (internal by default)
+    setProvider(data.ttsProvider ?? 'internal');
+    setModel(data.ttsModel ?? '');
+    setVoice(data.ttsVoice ?? '');
+    setBaseUrl(data.ttsBaseUrl ?? '');
+  }, [data]);
+
+  // Provider change: pre-populate the default URL if empty
+  useEffect(() => {
+    const meta = TTS_PROVIDERS.find((p) => p.value === provider);
+    if (meta?.defaultUrl && !baseUrl) setBaseUrl(meta.defaultUrl);
+  }, [provider]);
+
+  const providerMeta = TTS_PROVIDERS.find((p) => p.value === provider)!;
+
+  const saveMutation = useMutation({
+    mutationFn: () => appConfigApi.updateTtsConfig({
+      ttsProvider: provider,
+      ttsModel:    model || null,
+      ttsVoice:    voice || null,
+      ttsApiKey:   apiKey || undefined,   // undefined = don't touch the key
+      ttsBaseUrl:  baseUrl || null,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tts-config'] });
+      setApiKey('');
+      setMsg({ ok: true, text: t('tts.savedOk') });
+      setTimeout(() => setMsg(null), 3000);
+    },
+    onError: (e: any) => setMsg({ ok: false, text: e?.response?.data?.message ?? t('vectordb.errorGeneric') }),
+  });
+
+  const handleTest = async () => {
+    setTestState('pending');
+    setTestError('');
+    try {
+      const result = await appConfigApi.testTtsConnection();
+      setTestState(result.ok ? 'ok' : 'error');
+      if (!result.ok) setTestError(result.error ?? t('tts.connectionFailed'));
+    } catch (e: any) {
+      setTestState('error');
+      setTestError(e?.response?.data?.message ?? t('vectordb.errorGeneric'));
+    }
+    setTimeout(() => setTestState('idle'), 5000);
+  };
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-5">
+      <div className="flex items-center gap-2">
+        <Volume2 size={15} className="text-indigo-400" />
+        <h3 className="text-sm font-semibold text-gray-100">{t('tts.title')}</h3>
+      </div>
+      <p className="text-sm text-gray-500">{t('tts.subtitle')}</p>
+
+      {isLoading && (
+        <div className="flex items-center gap-2 text-gray-500 text-sm">
+          <Loader2 size={14} className="animate-spin" /> {t('vectordb.loading')}
+        </div>
+      )}
+
+      {/* ── Provider ── */}
+      <div>
+        <label className="block text-xs font-medium text-gray-400 mb-1.5">{t('tts.providerLabel')}</label>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          {TTS_PROVIDERS.map((p) => (
+            <button
+              key={p.value}
+              onClick={() => setProvider(p.value)}
+              className={`flex flex-col items-start px-3 py-2.5 rounded-lg border text-left transition-colors
+                ${provider === p.value
+                  ? 'border-indigo-500 bg-indigo-900/30 text-white'
+                  : 'border-gray-700 bg-gray-800/50 text-gray-400 hover:border-gray-600 hover:text-gray-300'}`}
+            >
+              <span className="text-sm font-medium">{p.label}</span>
+              <span className="text-xs mt-0.5 opacity-70">{t(p.descKey)}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Internal service info box (auto-configured) ── */}
+      {providerMeta.internal && (
+        <div className="flex items-start gap-2.5 bg-indigo-900/40 border border-indigo-800/50 rounded-lg px-3.5 py-3">
+          <Volume2 size={15} className="text-indigo-400 flex-shrink-0 mt-0.5" />
+          <div className="text-xs text-gray-400 leading-relaxed">
+            <p className="text-gray-300 font-medium mb-0.5">{t('tts.internalInfoTitle')}</p>
+            <p>{t('tts.internalInfoDesc')}</p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Model ── */}
+      {!providerMeta.internal && (
+      <div>
+        <label className="block text-xs font-medium text-gray-400 mb-1">{t('tts.modelLabel')}</label>
+        <input
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          placeholder={`es. ${providerMeta.defaultModels[0]}`}
+          list={`tts-models-${provider}`}
+          className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm
+            text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500
+            transition-colors font-mono"
+        />
+        <datalist id={`tts-models-${provider}`}>
+          {providerMeta.defaultModels.map((m) => <option key={m} value={m} />)}
+        </datalist>
+        <div className="flex flex-wrap gap-1.5 mt-1">
+          {providerMeta.defaultModels.map((m) => (
+            <button
+              key={m}
+              onClick={() => setModel(m)}
+              className={`px-2 py-0.5 text-xs rounded border transition-colors
+                ${model === m
+                  ? 'border-indigo-500 bg-indigo-900/40 text-indigo-300'
+                  : 'border-gray-700 text-gray-500 hover:border-gray-600 hover:text-gray-400'}`}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
+      </div>
+      )}
+
+      {/* ── Voice ── */}
+      <div>
+        <label className="block text-xs font-medium text-gray-400 mb-1">{t('tts.voiceLabel')}</label>
+        <input
+          value={voice}
+          onChange={(e) => setVoice(e.target.value)}
+          placeholder={providerMeta.internal ? t('tts.voiceInternalPlaceholder') : (providerMeta.defaultVoices[0] ?? '')}
+          list={`tts-voices-${provider}`}
+          className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm
+            text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500
+            transition-colors font-mono"
+        />
+        <datalist id={`tts-voices-${provider}`}>
+          {providerMeta.defaultVoices.map((v) => <option key={v} value={v} />)}
+        </datalist>
+        {providerMeta.defaultVoices.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mt-1">
+            {providerMeta.defaultVoices.map((v) => (
+              <button
+                key={v}
+                onClick={() => setVoice(v)}
+                className={`px-2 py-0.5 text-xs rounded border transition-colors
+                  ${voice === v
+                    ? 'border-indigo-500 bg-indigo-900/40 text-indigo-300'
+                    : 'border-gray-700 text-gray-500 hover:border-gray-600 hover:text-gray-400'}`}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+        )}
+        <p className="text-[11px] text-gray-600 mt-1">{t('tts.voiceHint')}</p>
+      </div>
+
+      {/* ── API Key (cloud) ── */}
+      {providerMeta.needsKey && (
+        <div>
+          <label className="block text-xs font-medium text-gray-400 mb-1">
+            {t('tts.apiKeyLabel')}
+            {data?.hasTtsApiKey && (
+              <span className="ml-2 text-emerald-500 font-normal">✓ {t('tts.apiKeyConfigured')}</span>
+            )}
+          </label>
+          <div className="relative">
+            <input
+              type={showKey ? 'text' : 'password'}
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder={data?.hasTtsApiKey ? t('tts.apiKeyKeepPlaceholder') : t('llm.apiKeyPastePlaceholder')}
+              className="w-full px-3 py-1.5 pr-9 bg-gray-800 border border-gray-700 rounded-lg text-sm
+                text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500
+                transition-colors font-mono"
+            />
+            <button
+              type="button"
+              onClick={() => setShowKey((p) => !p)}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
+            >
+              {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Base URL (self-hosted / compatible) ── */}
+      {providerMeta.needsUrl && (
+        <div>
+          <label className="block text-xs font-medium text-gray-400 mb-1">{t('tts.baseUrlLabel')}</label>
+          <input
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            placeholder={providerMeta.defaultUrl ?? 'http://localhost:9100/v1'}
+            className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm
+              text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500
+              transition-colors font-mono"
+          />
+        </div>
+      )}
+
+      {/* ── Actions ── */}
+      <div className="flex items-center justify-between pt-1">
+        <div className="flex items-center gap-2">
+          {testState === 'pending' && (
+            <span className="text-xs text-gray-400 flex items-center gap-1.5">
+              <Loader2 size={12} className="animate-spin" /> {t('tts.testPending')}
+            </span>
+          )}
+          {testState === 'ok' && (
+            <span className="text-xs text-emerald-400 flex items-center gap-1.5">
+              <Wifi size={13} /> {t('tts.testOk')}
+            </span>
+          )}
+          {testState === 'error' && (
+            <span className="text-xs text-red-400 flex items-center gap-1.5">
+              <WifiOff size={13} /> {testError || t('tts.connectionFailed')}
+            </span>
+          )}
+          {msg && testState === 'idle' && (
+            <span className={`text-xs flex items-center gap-1.5 ${msg.ok ? 'text-emerald-400' : 'text-red-400'}`}>
+              {msg.ok ? <CheckCircle size={13} /> : <XCircle size={13} />}
+              {msg.text}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleTest}
+            disabled={testState === 'pending'}
+            className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-700 hover:border-gray-600
+              text-gray-300 hover:text-white text-sm rounded-lg transition-colors disabled:opacity-50"
+          >
+            {testState === 'pending'
+              ? <Loader2 size={13} className="animate-spin" />
+              : testState === 'ok'
+              ? <Wifi size={13} className="text-emerald-400" />
+              : <Wifi size={13} />}
+            {t('tts.testBtn')}
           </button>
           <button
             onClick={() => saveMutation.mutate()}

@@ -94,6 +94,27 @@ services:
       start_period: 60s          # loading the Whisper model may take a while
     # No port exposed to the host: reachable only by the backend (internal network)
 
+  piper:
+    build:
+      context: ./piper-service
+      dockerfile: Dockerfile
+      args:
+        PIPER_VOICE: ${PIPER_VOICE:-it_IT-paola-medium}
+    restart: unless-stopped
+    environment:
+      PIPER_VOICE: ${PIPER_VOICE:-it_IT-paola-medium}
+      PIPER_MODELS_DIR: /models
+      PIPER_OFFLINE: ${PIPER_OFFLINE:-0}
+    volumes:
+      - piper_models:/models
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:9100/health').status==200 else 1)"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s          # loading the Piper voice may take a while
+    # No port exposed to the host: reachable only by the backend (internal network)
+
   skill-executor:
     build:
       context: ./executor
@@ -173,6 +194,7 @@ services:
       QDRANT_URL: http://qdrant:6333
       EMBEDDING_BASE_URL: http://embedding:8000/v1
       TRANSCRIPTION_BASE_URL: http://whisper:9000/v1
+      TTS_BASE_URL: http://piper:9100/v1
       SKILL_EXECUTOR_URL: http://skill-executor:4000
       REDIS_URL: redis://redis:6379
       UPLOAD_DIR: /app/uploads
@@ -190,6 +212,8 @@ services:
         condition: service_healthy
       whisper:
         condition: service_started   # on-demand transcription: does not block boot on model loading
+      piper:
+        condition: service_started   # on-demand TTS: does not block boot on voice loading
       skill-executor:
         condition: service_healthy
     ports:
@@ -232,3 +256,4 @@ volumes:
   skills_data:
   backups:               # admin backup archives (pg_dump + volumes), downloadable from the UI
   nix_store:             # persistent /nix/store for the executor — avoids re-download on rebuild
+  piper_models:          # Piper voices (.onnx) — survive rebuilds, on-demand downloads land here

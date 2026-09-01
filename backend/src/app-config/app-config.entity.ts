@@ -61,6 +61,15 @@ export type EmbeddingProvider =
 export type TranscriptionProvider = 'internal' | 'openai' | 'groq' | 'openai-compatible';
 
 /**
+ * Supported text-to-speech providers. They all speak the same OpenAI-compatible
+ * `/v1/audio/speech` contract; only the endpoint changes.
+ * - openai            → OpenAI cloud API (gpt-4o-mini-tts, tts-1)
+ * - openai-compatible → any self-hosted TTS with an OpenAI-compatible API
+ * - internal          → the app's internal Piper service (piper-service), auto-configured
+ */
+export type TtsProvider = 'internal' | 'openai' | 'openai-compatible';
+
+/**
  * Global application configuration — singleton table (always a single row, id = 1).
  *
  * Contains parameters editable at runtime by admins without the need for a redeploy.
@@ -189,6 +198,45 @@ export class AppConfigEntity {
    */
   @Column({ type: 'varchar', length: 500, nullable: true })
   transcriptionBaseUrl: string | null;
+
+  // ── Text-to-speech configuration (Piper) ────────────────────────────────────
+
+  /**
+   * Active TTS provider (OpenAI-compatible `/v1/audio/speech` endpoint).
+   * Null = unset: the env fallback TTS_PROVIDER applies (default 'internal',
+   * the bundled piper-service). No admin UI yet — env-only config in v1.
+   */
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  ttsProvider: TtsProvider | null;
+
+  /**
+   * TTS model name (e.g. gpt-4o-mini-tts, tts-1). If null, the provider's
+   * default is used (the internal Piper service ignores it).
+   */
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  ttsModel: string | null;
+
+  /**
+   * Encrypted API key (AES-256-CBC) for cloud providers (OpenAI).
+   * If null, it tries the corresponding environment variable.
+   * Format: "<iv_hex>:<ciphertext_hex>".
+   */
+  @Column({ type: 'text', nullable: true })
+  ttsApiKey: string | null;
+
+  /**
+   * Base URL for self-hosted / OpenAI-compatible providers.
+   * Example (local): http://piper:9100/v1
+   */
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  ttsBaseUrl: string | null;
+
+  /**
+   * Default voice id (e.g. a Piper voice like it_IT-paola-medium, or 'alloy'
+   * for OpenAI). If null, the provider's default is used.
+   */
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  ttsVoice: string | null;
 
   // ── Tool loading configuration ──────────────────────────────────────────────
 

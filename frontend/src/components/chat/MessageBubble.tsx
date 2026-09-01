@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright © 2026 Andrea Genovese
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { format } from 'date-fns';
 import { it } from 'date-fns/locale';
-import { Paperclip, Download, Loader2, Wrench, ChevronRight, Check, X, ThumbsUp, ThumbsDown, ExternalLink, Terminal, Trash2 } from 'lucide-react';
+import { Paperclip, Download, Loader2, Wrench, ChevronRight, Check, X, ThumbsUp, ThumbsDown, ExternalLink, Terminal, Trash2, Volume2, Square } from 'lucide-react';
 import type { Message, ToolCallRecord } from '../../store/useStore';
 import { useStore } from '../../store/useStore';
 import { downloadWithAuth } from '../../utils/downloadWithAuth';
@@ -257,6 +257,94 @@ const markdownComponents: React.ComponentProps<typeof ReactMarkdown>['components
   },
 };
 
+// ── SpeakButton (read the assistant message aloud) ───────────────────────────
+//
+// Synthesizes the message text via the OpenAI-compatible TTS route
+// (POST /api/openai/v1/audio/speech — the session JWT is enough) and plays the
+// returned audio blob. Click again while playing to stop. Whole-utterance
+// synthesis: the button only appears once streaming is finished.
+
+/** Reduces markdown to speakable plain text (code blocks and tables are skipped). */
+export function ttsPlainText(md: string): string {
+  return md
+    .replace(/```[\s\S]*?```/g, ' ')          // fenced code blocks
+    .replace(/`([^`]+)`/g, '$1')              // inline code → its content
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')    // images
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')  // links → their label
+    .replace(/^\s*\|.*\|\s*$/gm, ' ')         // table rows
+    .replace(/^#{1,6}\s+/gm, '')              // heading markers
+    .replace(/^\s*[-*+]\s+/gm, '')            // list bullets
+    .replace(/[*_~>#]/g, '')                  // emphasis leftovers
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function SpeakButton({ text }: { text: string }) {
+  const { t } = useTranslation('chat');
+  const [state, setState] = useState<'idle' | 'loading' | 'playing' | 'error'>('idle');
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const stop = () => {
+    const audio = audioRef.current;
+    if (audio) {
+      audio.pause();
+      URL.revokeObjectURL(audio.src);
+      audioRef.current = null;
+    }
+    setState('idle');
+  };
+
+  // Stop the audio if the message unmounts (chat change, truncate).
+  useEffect(() => stop, []);
+
+  const handleClick = async () => {
+    if (state === 'playing') { stop(); return; }
+    if (state === 'loading') return;
+
+    setState('loading');
+    try {
+      // The DTO caps input at 4096 chars — trim client-side to avoid a 400.
+      const input = ttsPlainText(text).slice(0, 4096);
+      const res = await api.post('/openai/v1/audio/speech', { input }, { responseType: 'blob' });
+      const audio = new Audio(URL.createObjectURL(res.data as Blob));
+      audioRef.current = audio;
+      audio.onended = stop;
+      audio.onerror = () => {
+        stop();
+        setState('error');
+        setTimeout(() => setState('idle'), 3000);
+      };
+      await audio.play();
+      setState('playing');
+    } catch (err) {
+      console.error('[SpeakButton] synthesis failed:', err);
+      stop();
+      setState('error');
+      setTimeout(() => setState('idle'), 3000);
+    }
+  };
+
+  return (
+    <button
+      onClick={handleClick}
+      className={`transition-colors ${
+        state === 'error'
+          ? 'text-red-400'
+          : state === 'playing'
+            ? 'text-indigo-400 hover:text-indigo-300'
+            : 'text-gray-600 hover:text-gray-300'
+      }`}
+      title={state === 'playing' ? t('tts.stop') : state === 'error' ? t('tts.error') : t('tts.speak')}
+    >
+      {state === 'loading'
+        ? <Loader2 size={13} className="animate-spin" />
+        : state === 'playing'
+          ? <Square size={12} />
+          : <Volume2 size={13} />}
+    </button>
+  );
+}
+
 // ── TokenBadge ────────────────────────────────────────────────────────────────
 
 function TokenBadge({ inputTokens, outputTokens }: { inputTokens?: number | null; outputTokens?: number | null }) {
@@ -304,8 +392,9 @@ function SandboxCallBody({ input, output }: { input: any; output: any }) {
   const activeChatId = useStore((s) => s.activeChatId);
   const lang = typeof input?.language === 'string' ? input.language : 'shell';
   const code = typeof input?.code === 'string' ? input.code : formatValue(input);
-  // Extracts the workspace files from the output ("file nel workspace: a, b, c/"); excludes dirs.
-  const m = typeof output === 'string' ? output.match(/file nel workspace:\s*(.+)/) : null;
+  // Extracts the workspace files from the output ("files in the workspace: a, b, c/");
+  // excludes dirs. Also matches the legacy Italian label persisted in old messages.
+  const m = typeof output === 'string' ? output.match(/files? (?:in the|nel) workspace:\s*(.+)/) : null;
   const files = m ? m[1].split(',').map((s) => s.trim()).filter((f) => f && !f.endsWith('/')) : [];
   return (
     <div className="px-2.5 pb-2 space-y-1.5 text-[11px]">
@@ -606,6 +695,9 @@ export default function MessageBubble({ message, isStreaming, feedbackEnabled, f
         {/* Bottom row: time + token badge (assistant only, only if showTokenCount) */}
         <div className={`flex items-center gap-2 px-1 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
           <span className="text-xs text-gray-600">{time}</span>
+          {!isUser && !isStreaming && message.id !== 'streaming' && message.content.trim() && (
+            <SpeakButton text={message.content} />
+          )}
           {!isUser && !isStreaming && showTokenCount && (
             <TokenBadge
               inputTokens={message.inputTokens}

@@ -21,15 +21,22 @@
  *    next request.
  */
 import {
-  Body, Controller, Get, HttpCode, HttpStatus, Post, Res, UseGuards,
+  BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Logger, Post, Res,
+  UploadedFile, UseGuards, UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
 import { randomUUID } from 'node:crypto';
 import { AgentService, StreamResponseOptions } from '../agent/agent.service';
 import { AgentsService } from '../agents/agents.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { TranscriptionService } from '../transcription/transcription.service';
+import { TtsService } from '../tts/tts.service';
+import { InvocationsService } from '../invocations/invocations.service';
+import { InvocationToolCall } from '../invocations/invocation.entity';
+import { SpeechRequestDto } from './openai-audio.dto';
 import {
   agentSlug, chunkFrame, completionBody, errorBody, mapOpenAiMessages,
   OpenAiChatRequest, toOpenAiUsage, usageFrame,
@@ -38,14 +45,47 @@ import {
 /** Default model id exposed for the user's standard pipeline. */
 const DEFAULT_MODEL_ID = 'arkimede';
 
+/** Audio size limit: 25 MB (aligned with the OpenAI/Whisper limit). */
+const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
+
+/**
+ * Collects the pipeline's tool events into InvocationToolCall records for the
+ * invocation log (same onToolCall/onToolResult pairing as the chat SSE flow in
+ * messages.controller.ts; truncation happens in InvocationsService at write time).
+ */
+function makeToolCollector() {
+  const records: (InvocationToolCall & { startedAt: number })[] = [];
+  return {
+    records,
+    onToolCall: (toolCall: any) => {
+      records.push({ name: toolCall?.name ?? '', input: toolCall?.input, startedAt: Date.now() });
+    },
+    onToolResult: (toolName: string, result: any, status?: 'success' | 'error', input?: any) => {
+      const record = records.find((r) => r.name === toolName && r.output === undefined);
+      if (record) {
+        record.output = result;
+        record.ok = status !== 'error';
+        record.durationMs = Date.now() - record.startedAt;
+        // The complete input is only known when the call ends (args arrive as deltas).
+        if (input !== undefined) record.input = input;
+      }
+    },
+  };
+}
+
 @ApiTags('openai-compat')
 @ApiBearerAuth()
 @Controller('api/openai/v1')
 @UseGuards(JwtAuthGuard)
 export class OpenAiCompatController {
+  private readonly logger = new Logger('OpenAiCompat');
+
   constructor(
     private readonly agentService: AgentService,
     private readonly agentsService: AgentsService,
+    private readonly transcription: TranscriptionService,
+    private readonly tts: TtsService,
+    private readonly invocations: InvocationsService,
   ) {}
 
   /**
@@ -94,9 +134,17 @@ export class OpenAiCompatController {
     try {
       opts = await this.resolveModelOptions(modelId, user.id);
     } catch {
+      this.logger.warn(`model "${modelId}" not found (user ${user.email ?? user.id})`);
       res.status(404).json(errorBody(`Model "${modelId}" not found.`, 'model_not_found'));
       return;
     }
+
+    // Metadata only: the agent pipeline already logs the query text itself.
+    const t0 = Date.now();
+    this.logger.log(
+      `→ [${modelId}] ${body?.stream ? 'stream' : 'sync'} from ${user.email ?? user.id}: ` +
+      `${history.length} history msg, input ${userInput.length} chars`,
+    );
 
     const id = `chatcmpl-${randomUUID()}`;
     const created = Math.floor(Date.now() / 1000);
@@ -108,6 +156,25 @@ export class OpenAiCompatController {
 
     const historyMessages = history.map((h) => ({ role: h.role, content: h.content })) as any[];
 
+    // Invocation log: external calls are otherwise invisible (no chat rows).
+    const tools = makeToolCollector();
+    const logInvocation = (outputText: string, usage: any, error?: string) =>
+      void this.invocations.record({
+        userId: user.id ?? null,
+        origin: 'voice',
+        route: 'chat',
+        model: modelId,
+        apiKeyPrefix: user.apiKeyPrefix ?? null,
+        inputPreview: userInput,
+        outputPreview: outputText || null,
+        toolCalls: tools.records,
+        inputTokens: usage?.inputTokens ?? null,
+        outputTokens: usage?.outputTokens ?? null,
+        durationMs: Date.now() - t0,
+        status: error ? 'error' : 'ok',
+        error: error ?? (abort.signal.aborted ? 'client aborted' : null),
+      });
+
     if (body?.stream) {
       res.status(200);
       res.setHeader('Content-Type', 'text/event-stream');
@@ -117,14 +184,15 @@ export class OpenAiCompatController {
       // OpenAI opens the stream with the role delta.
       res.write(chunkFrame(id, created, modelId, { role: 'assistant' }));
 
+      let text = '';
       try {
         const usage = await this.agentService.streamResponse(
           userInput, user.id, undefined, undefined, historyMessages,
           [], [], [],
-          (chunk) => res.write(chunkFrame(id, created, modelId, { content: chunk })),
-          () => undefined,          // tool calls stay internal
+          (chunk) => { text += chunk; res.write(chunkFrame(id, created, modelId, { content: chunk })); },
+          tools.onToolCall,         // tool events feed the invocation log only
           abort.signal,
-          undefined,                // tool results stay internal
+          tools.onToolResult,
           opts,
         );
         res.write(chunkFrame(id, created, modelId, {}, 'stop'));
@@ -132,7 +200,11 @@ export class OpenAiCompatController {
           res.write(usageFrame(id, created, modelId, toOpenAiUsage(usage)));
         }
         res.write('data: [DONE]\n\n');
+        this.logger.log(`← [${modelId}] stream done in ${Date.now() - t0}ms${abort.signal.aborted ? ' (client aborted)' : ''}`);
+        logInvocation(text, usage);
       } catch (err: any) {
+        this.logger.warn(`← [${modelId}] stream failed in ${Date.now() - t0}ms: ${err?.message ?? 'Internal error'}`);
+        logInvocation(text, null, err?.message ?? 'Internal error');
         // Headers are already out: surface the error as an SSE event and close.
         res.write(`data: ${JSON.stringify(errorBody(err?.message ?? 'Internal error', 'server_error'))}\n\n`);
       } finally {
@@ -143,23 +215,127 @@ export class OpenAiCompatController {
     }
 
     // Non-streaming: buffer the deltas and return the complete body.
+    let text = '';
     try {
-      let text = '';
       const usage = await this.agentService.streamResponse(
         userInput, user.id, undefined, undefined, historyMessages,
         [], [], [],
         (chunk) => { text += chunk; },
-        () => undefined,
+        tools.onToolCall,
         abort.signal,
-        undefined,
+        tools.onToolResult,
         opts,
       );
       finished = true;
+      this.logger.log(`← [${modelId}] sync done in ${Date.now() - t0}ms, ${text.length} chars`);
+      logInvocation(text, usage);
       res.json(completionBody(id, created, modelId, text, toOpenAiUsage(usage)));
     } catch (err: any) {
       finished = true;
+      this.logger.warn(`← [${modelId}] sync failed in ${Date.now() - t0}ms: ${err?.message ?? 'Internal error'}`);
+      logInvocation(text, null, err?.message ?? 'Internal error');
       res.status(500).json(errorBody(err?.message ?? 'Internal error', 'server_error'));
     }
+  }
+
+  /**
+   * POST /api/openai/v1/audio/transcriptions — speech-to-text in the standard
+   * OpenAI dialect (multipart field `file`; `model` is accepted but the
+   * configured transcription provider decides). The frontend's non-standard
+   * `/api/transcription` (field `audio`) stays untouched.
+   */
+  @Post('audio/transcriptions')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'OpenAI-compatible audio transcription (Whisper)' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', format: 'binary' },
+        model: { type: 'string' },
+        language: { type: 'string' },
+        response_format: { type: 'string', enum: ['json', 'text'] },
+      },
+    },
+  })
+  @UseInterceptors(
+    FileInterceptor('file', {
+      // No storage → memoryStorage: the buffer stays in RAM (file.buffer).
+      limits: { fileSize: MAX_AUDIO_BYTES },
+    }),
+  )
+  async transcriptions(
+    @UploadedFile() file: Express.Multer.File,
+    @Body('language') language: string | undefined,
+    @Body('response_format') responseFormat: string | undefined,
+    @CurrentUser() user: any,
+    @Res() res: Response,
+  ): Promise<void> {
+    if (!file?.buffer?.length) {
+      throw new BadRequestException('transcription.emptyAudio');
+    }
+    const lang = language && /^[a-z]{2}$/i.test(language) ? language.toLowerCase() : undefined;
+    const t0 = Date.now();
+    const inputPreview = `${file.originalname || 'audio'} (${file.buffer.length} bytes${lang ? `, lang=${lang}` : ''})`;
+    const log = (outputPreview: string | null, error?: string) =>
+      void this.invocations.record({
+        userId: user.id ?? null, origin: 'voice', route: 'transcription',
+        apiKeyPrefix: user.apiKeyPrefix ?? null,
+        inputPreview, outputPreview,
+        durationMs: Date.now() - t0,
+        status: error ? 'error' : 'ok', error: error ?? null,
+      });
+
+    let text: string;
+    try {
+      text = await this.transcription.transcribe(file.buffer, file.originalname || 'audio.webm', lang);
+    } catch (err: any) {
+      log(null, err?.message ?? 'transcription failed');
+      throw err;
+    }
+    log(text);
+    if (responseFormat === 'text') {
+      res.type('text/plain').send(text);
+      return;
+    }
+    res.json({ text });
+  }
+
+  /**
+   * POST /api/openai/v1/audio/speech — text-to-speech in the standard OpenAI
+   * dialect. Returns raw audio bytes (wav from the internal Piper service).
+   */
+  @Post('audio/speech')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'OpenAI-compatible speech synthesis (Piper)' })
+  async speech(
+    @Body() dto: SpeechRequestDto,
+    @CurrentUser() user: any,
+    @Res() res: Response,
+  ): Promise<void> {
+    const format = dto.response_format ?? 'wav';
+    const t0 = Date.now();
+    const log = (outputPreview: string | null, error?: string) =>
+      void this.invocations.record({
+        userId: user.id ?? null, origin: 'voice', route: 'speech',
+        model: dto.voice ?? null,
+        apiKeyPrefix: user.apiKeyPrefix ?? null,
+        inputPreview: dto.input, outputPreview,
+        durationMs: Date.now() - t0,
+        status: error ? 'error' : 'ok', error: error ?? null,
+      });
+
+    let audio: Buffer;
+    try {
+      audio = await this.tts.synthesize(dto.input, dto.voice, format);
+    } catch (err: any) {
+      log(null, err?.message ?? 'speech synthesis failed');
+      throw err;
+    }
+    log(`audio/${format} — ${audio.length} bytes`);
+    res.setHeader('Content-Type', format === 'mp3' ? 'audio/mpeg' : 'audio/wav');
+    res.send(audio);
   }
 
   /**

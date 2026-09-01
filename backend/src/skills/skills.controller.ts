@@ -154,14 +154,15 @@ export class SkillsController {
   @Post('registry/install')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
-    summary: 'Install a skill from the public registry',
+    summary: 'Install or update a skill from the public registry',
     description:
       'Downloads the ZIP from the GitHub registry and installs it into the personal collection. ' +
+      'If the user already owns a skill with the same name, it is updated in place ' +
+      '(files overwritten, config vars preserved). ' +
       'The downloadUrl must come from a domain in the whitelist (raw.githubusercontent.com, etc.).',
   })
-  @ApiResponse({ status: 201, description: 'Skill installed, dependencies installing' })
+  @ApiResponse({ status: 201, description: 'Skill installed or updated, dependencies installing' })
   @ApiResponse({ status: 403, description: 'Domain not allowed' })
-  @ApiResponse({ status: 409, description: 'A skill with the same name is already installed' })
   @ApiResponse({ status: 502, description: 'Download failed' })
   async installFromRegistry(
     @Body() dto: RegistryInstallDto,
@@ -170,12 +171,13 @@ export class SkillsController {
     // E3: download + checksum verification (mismatch → 403; missing → admin only, unless strict)
     try {
       const zipBuffer = await this.registry.downloadVerified(dto.downloadUrl, user.role === 'admin');
-      const result = await this.service.uploadAndCreate(user.id, zipBuffer);
+      const { skill, updated } = await this.service.installOrUpdateFromZip(user.id, zipBuffer);
       await this.audit.record({
-        actorId: user.id, action: 'skill.registry_install', resource: dto.downloadUrl,
-        outcome: 'ok', ctx: { skillId: (result as any)?.id },
+        actorId: user.id, action: updated ? 'skill.registry_update' : 'skill.registry_install',
+        resource: dto.downloadUrl,
+        outcome: 'ok', ctx: { skillId: skill.id },
       });
-      return result;
+      return skill;
     } catch (err: any) {
       await this.audit.record({
         actorId: user.id, action: 'skill.registry_install', resource: dto.downloadUrl,

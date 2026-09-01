@@ -2426,12 +2426,32 @@ function MySkillsTab({ userId, onOpen }: { userId: string; onOpen: (s: Skill) =>
 // ── Tab 2: Marketplace (GitHub registry) ────────────────────────────────────
 
 /**
+ * Compares two semver-ish version strings numerically, segment by segment
+ * (non-numeric segments fall back to a string comparison).
+ * Returns >0 if a is newer than b, 0 if equal, <0 if older.
+ */
+function compareVersions(a: string, b: string): number {
+  const pa = a.split('.');
+  const pb = b.split('.');
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const sa = pa[i] ?? '0';
+    const sb = pb[i] ?? '0';
+    const na = Number(sa);
+    const nb = Number(sb);
+    const diff = Number.isNaN(na) || Number.isNaN(nb) ? sa.localeCompare(sb) : na - nb;
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+/**
  * Card for a public registry skill.
  *
  * States:
  *   - "Install"     → not yet installed
- *   - "Installed"   → already present in the user's collection
- *   - Installing    → download + install in progress
+ *   - "Installed"   → already present in the user's collection, same (or newer) version
+ *   - "Update"      → installed but the registry has a newer version
+ *   - Installing    → download + install/update in progress
  *
  * The body shows registry metadata; it does not open a drawer
  * (the skill is not yet installed locally, has no DB details).
@@ -2439,17 +2459,19 @@ function MySkillsTab({ userId, onOpen }: { userId: string; onOpen: (s: Skill) =>
  */
 function MarketplaceCard({
   skill,
-  isInstalled,
+  installedVersion,
   onInstall,
   isInstalling,
 }: {
-  skill:        RegistrySkill;
-  isInstalled:  boolean;
-  onInstall:    () => void;
-  isInstalling: boolean;
+  skill:             RegistrySkill;
+  installedVersion?: string;
+  onInstall:         () => void;
+  isInstalling:      boolean;
 }) {
   const { t } = useTranslation('skills');
   const totalDeps = skill.dependencies.python.length + skill.dependencies.javascript.length;
+  const isInstalled = installedVersion !== undefined;
+  const hasUpdate   = isInstalled && compareVersions(skill.version, installedVersion) > 0;
 
   return (
     <div className="px-4 py-3.5 bg-gray-900 border border-gray-800 rounded-xl hover:border-gray-700 transition-colors">
@@ -2459,10 +2481,16 @@ function MarketplaceCard({
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-medium text-gray-100 truncate">{skill.name}</span>
             <span className="text-xs text-gray-600 font-mono">v{skill.version}</span>
-            {isInstalled && (
+            {isInstalled && !hasUpdate && (
               <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md
                 bg-emerald-900/40 border border-emerald-700/40 text-emerald-300 text-[10px]">
                 <CheckCircle size={9} /> {t('marketplace.installed')}
+              </span>
+            )}
+            {hasUpdate && (
+              <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md
+                bg-amber-900/40 border border-amber-700/40 text-amber-300 text-[10px]">
+                <RefreshCw size={9} /> {t('marketplace.updateAvailable', { installed: installedVersion })}
               </span>
             )}
           </div>
@@ -2513,7 +2541,21 @@ function MarketplaceCard({
 
         {/* Action */}
         <div className="flex-shrink-0 pt-0.5">
-          {isInstalled ? (
+          {hasUpdate ? (
+            <button
+              onClick={onInstall}
+              disabled={isInstalling}
+              title={t('marketplace.updateTitle', { installed: installedVersion, available: skill.version })}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs
+                bg-amber-600 hover:bg-amber-500 text-white transition-colors
+                disabled:opacity-50 disabled:cursor-wait"
+            >
+              {isInstalling
+                ? <><Loader2 size={12} className="animate-spin" /> {t('marketplace.updating')}</>
+                : <><RefreshCw size={12} /> {t('marketplace.update')}</>
+              }
+            </button>
+          ) : isInstalled ? (
             <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs
               border border-gray-700 text-gray-500 cursor-default select-none">
               <CheckCircle size={12} /> {t('marketplace.installed')}
@@ -2559,14 +2601,14 @@ function PublicSkillsTab({ userId }: { userId: string }) {
     retry:     1,
   });
 
-  // Skills installed by the user (for the "Installed" badge)
+  // Skills installed by the user (for the "Installed" badge and update detection)
   const { data: mySkills = [] } = useQuery({
     queryKey: ['skills'],
     queryFn:  skillsApi.list,
     staleTime: 30_000,
   });
-  const mySkillNames = new Set(
-    mySkills.filter((s) => s.ownerId === userId).map((s) => s.name),
+  const myVersionByName = new Map(
+    mySkills.filter((s) => s.ownerId === userId).map((s) => [s.name, s.version]),
   );
 
   const allSkills = registry?.skills ?? [];
@@ -2691,7 +2733,7 @@ function PublicSkillsTab({ userId }: { userId: string }) {
           <div key={s.name}>
             <MarketplaceCard
               skill={s}
-              isInstalled={mySkillNames.has(s.name)}
+              installedVersion={myVersionByName.get(s.name)}
               isInstalling={installing.has(s.name)}
               onInstall={() => handleInstall(s)}
             />

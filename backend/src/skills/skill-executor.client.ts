@@ -86,6 +86,9 @@ export interface SandboxResult {
   files?: string[];
   /** Top-level deliverables materialized in the per-user skills-output dir this run. */
   outputs?: string[];
+  /** New top-level files created in the workspace this run (delta) — private to the
+   *  session unless promoted to SKILLS_OUTPUT_DIR. Used to nudge the agent. */
+  newFiles?: string[];
   /** true = broker container-job; false = in-process (dev, NOT isolated). */
   isolated?: boolean;
 }

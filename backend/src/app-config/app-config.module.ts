@@ -10,6 +10,7 @@ import { LlmProviderService } from './llm-provider.service';
 import { EmbedModule } from '../embed/embed.module';
 import { LlmConfigsModule } from '../llm-configs/llm-configs.module';
 import { TranscriptionModule } from '../transcription/transcription.module';
+import { TtsModule } from '../tts/tts.module';
 import { SkillExecutorClient } from '../skills/skill-executor.client';
 
 @Module({
@@ -17,6 +18,7 @@ import { SkillExecutorClient } from '../skills/skill-executor.client';
     TypeOrmModule.forFeature([AppConfigEntity]),
     forwardRef(() => EmbedModule),  // forwardRef: EmbedModule uses AppConfigService → circular
     forwardRef(() => TranscriptionModule), // forwardRef: TranscriptionService uses AppConfigService → circular
+    forwardRef(() => TtsModule),    // forwardRef: TtsService uses AppConfigService → circular
     LlmConfigsModule,               // provides LlmConfigsService (used by AppConfigService and LlmProviderService)
   ],
   // SkillExecutorClient: local provider (depends only on ConfigService), used by

@@ -147,6 +147,17 @@ export class SandboxService {
               .map((f) => `- ${f}: /api/files/raw?rel=${encodeURIComponent(f)}`)
               .join('\n');
             parts.push(`deliverables (downloadable — give the user these Markdown links):\n${links}`);
+          } else if (res.newFiles?.length) {
+            // Agent-facing nudge (NOT shown to the user): the run created files but delivered
+            // none. Files left only in the workspace stay private to the session (at best
+            // reachable from the chat's tool panel — never for API/voice clients, and never
+            // in the reply text or files panel). Remind the agent to promote user-facing ones.
+            parts.push(
+              `note: this run created ${res.newFiles.length} file(s) only in the workspace ` +
+              `(${res.newFiles.join(', ')}) — these stay private to the session and get no ` +
+              `download link in your reply. If any is a deliverable for the user, re-write it ` +
+              `to SKILLS_OUTPUT_DIR and share the \`?rel=\` link; otherwise ignore this.`,
+            );
           }
           return parts.join('\n\n') || '(no output)';
         } catch (err: any) {

@@ -179,7 +179,11 @@
     "emptyTitle": "No skills in the registry",
     "emptyHint": "Contribute by publishing your skills on GitHub.",
     "noMatch": "No skill matches \"{{q}}\"",
-    "installFailed": "Installation failed"
+    "installFailed": "Installation failed",
+    "update": "Update",
+    "updating": "Updating…",
+    "updateAvailable": "v{{installed}} installed",
+    "updateTitle": "Update from v{{installed}} to v{{available}} (configuration is preserved)"
   },
   "review": {
     "noReview": "No skill pending review",

@@ -126,6 +126,10 @@ export interface SandboxResult {
   files?: string[];
   /** Top-level deliverables materialized in the per-user skills-output dir this run. */
   outputs?: string[];
+  /** New top-level FILES created in the workspace THIS run (delta vs before the run),
+   *  excluding directories and the staged script. Lets the backend nudge the agent when a
+   *  would-be deliverable was left private in the workspace (no user-facing download link). */
+  newFiles?: string[];
   /** true = broker container-job; false = in-process (dev, NOT isolated). Set by the /sandbox route. */
   isolated?: boolean;
 }
@@ -187,6 +191,15 @@ function listWorkspace(dir: string, exclude: string): string[] {
       .filter((e) => e.name !== exclude)
       .map((e) => (e.isDirectory() ? `${e.name}/` : e.name));
   } catch { return []; }
+}
+
+/** New top-level FILES that appeared in the workspace during this run: present after but
+ *  not before, excluding directories (trailing `/`) and the staged script (already excluded
+ *  by listWorkspace). Lets the backend remind the agent that a file left only in the
+ *  workspace is private (no user-facing download link). */
+function newWorkspaceFiles(before: string[], after: string[]): string[] {
+  const prev = new Set(before);
+  return after.filter((n) => !n.endsWith('/') && !prev.has(n));
 }
 
 function scriptFileName(language: SandboxRequest['language']): string {
@@ -314,6 +327,7 @@ export async function runSandbox(req: SandboxRequest): Promise<SandboxResult> {
   };
   try { fs.mkdirSync(userOutDir, { recursive: true }); } catch { /* */ }
   const outBefore = snapshotOutputs(userOutDir);
+  const wsBefore  = listWorkspace(workspace, fileName);   // for the new-file delta below
 
   log.info(`session=${req.session_id} lang=${req.language} ws=${workspace} timeout=${timeout_ms}ms`);
 
@@ -352,13 +366,15 @@ export async function runSandbox(req: SandboxRequest): Promise<SandboxResult> {
     child.on('close', (code) => {
       clearTimeout(timer);
       if (trace.trim()) log.info(`shell commands executed:\n${trace.trim().split('\n').map((l) => `    ${l}`).join('\n')}`);
+      const filesAfter = listWorkspace(workspace, fileName);
       resolve({
         stdout,
         stderr: killed ? `[KILLED: timeout ${timeout_ms}ms]\n` + stderr : stderr,
         exit_code: killed ? 124 : (code ?? 1),
         duration_ms: Date.now() - start,
-        files: listWorkspace(workspace, fileName),
+        files: filesAfter,
         outputs: newOutputs(userOutDir, outBefore),
+        newFiles: newWorkspaceFiles(wsBefore, filesAfter),
       });
     });
 
@@ -387,6 +403,7 @@ export async function runSandboxViaBroker(req: SandboxRequest): Promise<SandboxR
   // path the executor sees) → snapshot before/after to report the files produced.
   const userOutDir = userOutputDir(req.user_id);
   const outBefore  = snapshotOutputs(userOutDir);
+  const wsBefore   = listWorkspace(workspace, fileName);   // for the new-file delta below
 
   const env: Record<string, string> = {
     USER_ID:              req.user_id ?? '',
@@ -435,12 +452,14 @@ export async function runSandboxViaBroker(req: SandboxRequest): Promise<SandboxR
   }
 
   const r: any = await res.json();
+  const filesAfter = listWorkspace(workspace, fileName);
   return {
     stdout:      r.stdout ?? '',
     stderr:      r.stderr ?? '',
     exit_code:   typeof r.exit_code === 'number' ? r.exit_code : 1,
     duration_ms: typeof r.duration_ms === 'number' ? r.duration_ms : (Date.now() - t0),
-    files:       listWorkspace(workspace, fileName),
+    files:       filesAfter,
     outputs:     newOutputs(userOutDir, outBefore),
+    newFiles:    newWorkspaceFiles(wsBefore, filesAfter),
   };
 }

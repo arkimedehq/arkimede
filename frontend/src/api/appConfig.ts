@@ -45,6 +45,26 @@ export interface UpdateTranscriptionConfigPayload {
   transcriptionBaseUrl?:  string | null;
 }
 
+export type TtsProvider = 'internal' | 'openai' | 'openai-compatible';
+
+export interface TtsConfig {
+  /** Null = unset (the backend applies the env fallback, default internal). */
+  ttsProvider:  TtsProvider | null;
+  ttsModel:     string | null;
+  hasTtsApiKey: boolean;
+  ttsBaseUrl:   string | null;
+  ttsVoice:     string | null;
+}
+
+export interface UpdateTtsConfigPayload {
+  ttsProvider: TtsProvider;
+  ttsModel?:   string | null;
+  /** Non-empty string → save, null → clear, undefined → leave untouched */
+  ttsApiKey?:  string | null;
+  ttsBaseUrl?: string | null;
+  ttsVoice?:   string | null;
+}
+
 export interface EmbeddingConfig {
   embeddingProvider:    EmbeddingProvider;
   embeddingModel:       string | null;
@@ -111,6 +131,20 @@ export const appConfigApi = {
   /** POST /api/admin/config/transcription/test — test the Whisper endpoint */
   testTranscriptionConnection: (): Promise<{ ok: boolean; error?: string; model?: string }> =>
     api.post('/admin/config/transcription/test').then((r) => r.data),
+
+  // ── TTS Config (Piper) ──────────────────────────────────────────────────────
+
+  /** GET /api/admin/config/tts — text-to-speech configuration */
+  getTtsConfig: (): Promise<TtsConfig> =>
+    api.get('/admin/config/tts').then((r) => r.data),
+
+  /** PATCH /api/admin/config/tts — update text-to-speech configuration */
+  updateTtsConfig: (payload: UpdateTtsConfigPayload): Promise<TtsConfig> =>
+    api.patch('/admin/config/tts', payload).then((r) => r.data),
+
+  /** POST /api/admin/config/tts/test — test the TTS endpoint (micro-synthesis) */
+  testTtsConnection: (): Promise<{ ok: boolean; error?: string; model?: string }> =>
+    api.post('/admin/config/tts/test').then((r) => r.data),
 
   // ── Tool Loading Config ─────────────────────────────────────────────────────
 

@@ -101,5 +101,10 @@
     "placeholder": "Cosa andava risposto? La correzione aiuterà l'agente a non ripetere l'errore.",
     "saving": "Salvataggio…",
     "saveCorrection": "Salva correzione"
+  },
+  "tts": {
+    "speak": "Leggi ad alta voce",
+    "stop": "Interrompi la lettura",
+    "error": "Sintesi vocale non riuscita"
   }
 }

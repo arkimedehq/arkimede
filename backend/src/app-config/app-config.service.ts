@@ -4,7 +4,7 @@
 import { Injectable, Logger, OnModuleInit, Inject, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { AppConfigEntity, EmbeddingProvider, ToolLoadingStrategy, ToolSchemaFormat, TranscriptionProvider } from './app-config.entity';
+import { AppConfigEntity, EmbeddingProvider, ToolLoadingStrategy, ToolSchemaFormat, TranscriptionProvider, TtsProvider } from './app-config.entity';
 import { SYSTEM_PROMPT } from '../prompts/prompts';
 import { encrypt, decrypt } from '../custom-tools/crypto.utils';
 import { LlmConfigsService } from '../llm-configs/llm-configs.service';
@@ -72,6 +72,15 @@ export interface TranscriptionConfigDto {
   /** Plaintext key — encrypted before saving. Null = remove. Undefined = leave untouched. */
   transcriptionApiKey?:  string | null;
   transcriptionBaseUrl:  string | null;
+}
+
+export interface TtsConfigDto {
+  ttsProvider: TtsProvider;
+  ttsModel:    string | null;
+  /** Plaintext key — encrypted before saving. Null = remove. Undefined = leave untouched. */
+  ttsApiKey?:  string | null;
+  ttsBaseUrl:  string | null;
+  ttsVoice:    string | null;
 }
 
 @Injectable()
@@ -321,6 +330,91 @@ export class AppConfigService implements OnModuleInit {
     if (!config?.transcriptionApiKey) return null;
     try {
       return decrypt(config.transcriptionApiKey);
+    } catch {
+      return null;
+    }
+  }
+
+  // ── TTS Configuration (Piper) ───────────────────────────────────────────────
+
+  /**
+   * Returns the current TTS configuration.
+   * ttsProvider null = unset (the caller applies the env fallback TTS_PROVIDER).
+   * ttsApiKey is masked: only `hasTtsApiKey` (boolean).
+   */
+  async getTtsConfig(): Promise<{
+    ttsProvider:  TtsProvider | null;
+    ttsModel:     string | null;
+    hasTtsApiKey: boolean;
+    ttsBaseUrl:   string | null;
+    ttsVoice:     string | null;
+  }> {
+    const config = await this.repo.findOne({ where: { id: CONFIG_ID } });
+    return {
+      ttsProvider:  config?.ttsProvider ?? null,
+      ttsModel:     config?.ttsModel    ?? null,
+      hasTtsApiKey: !!config?.ttsApiKey,
+      ttsBaseUrl:   config?.ttsBaseUrl  ?? null,
+      ttsVoice:     config?.ttsVoice    ?? null,
+    };
+  }
+
+  /**
+   * Updates the TTS configuration.
+   *
+   * ttsApiKey:
+   *   - Non-empty string → encrypt and save
+   *   - null              → clear the key
+   *   - undefined         → leave the existing key untouched
+   */
+  async updateTtsConfig(
+    dto: TtsConfigDto,
+    actorId?: string,
+  ): Promise<ReturnType<typeof this.getTtsConfig>> {
+    const current = await this.repo.findOne({ where: { id: CONFIG_ID } });
+
+    let encryptedKey = current?.ttsApiKey ?? null;
+    if (dto.ttsApiKey === null) {
+      encryptedKey = null;
+    } else if (typeof dto.ttsApiKey === 'string' && dto.ttsApiKey.trim() !== '') {
+      encryptedKey = encrypt(dto.ttsApiKey.trim());
+    }
+
+    await this.repo.save({
+      ...current,
+      id: CONFIG_ID,
+      systemPrompt: current?.systemPrompt ?? SYSTEM_PROMPT,
+      ttsProvider: dto.ttsProvider,
+      ttsModel:    dto.ttsModel   || null,
+      ttsApiKey:   encryptedKey,
+      ttsBaseUrl:  dto.ttsBaseUrl || null,
+      ttsVoice:    dto.ttsVoice   || null,
+    });
+
+    this.logger.log(`TtsConfig: updated — provider=${dto.ttsProvider}`);
+    await this.audit?.record({
+      actorId: actorId ?? null,
+      action: 'appconfig.update',
+      resource: 'tts',
+      outcome: 'ok',
+      ctx: {
+        section: 'tts',
+        provider: dto.ttsProvider,
+        apiKeyChanged: dto.ttsApiKey !== undefined,
+      },
+    });
+    return this.getTtsConfig();
+  }
+
+  /**
+   * Decrypts and returns the plaintext TTS API key (internal use only).
+   * Used by TtsService to build the OpenAI client.
+   */
+  async getRawTtsApiKey(): Promise<string | null> {
+    const config = await this.repo.findOne({ where: { id: CONFIG_ID } });
+    if (!config?.ttsApiKey) return null;
+    try {
+      return decrypt(config.ttsApiKey);
     } catch {
       return null;
     }

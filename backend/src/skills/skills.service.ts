@@ -423,6 +423,22 @@ export class SkillsService implements OnModuleInit {
   }
 
   /**
+   * Installs a ZIP package, or updates in place when the user already owns a
+   * skill with the same name (registry flow: install and update share one
+   * endpoint). The update path preserves the user's SkillConfigVar.
+   */
+  async installOrUpdateFromZip(userId: string, fileBuffer: Buffer): Promise<{ skill: Skill; updated: boolean }> {
+    const { manifest } = this.parseAndValidateZip(fileBuffer);
+    const existing = await this.skillRepo.findOne({
+      where: { ownerId: userId, name: manifest.name },
+    });
+    if (existing) {
+      return { skill: await this.updateFromZip(existing.id, userId, fileBuffer), updated: true };
+    }
+    return { skill: await this.uploadAndCreate(userId, fileBuffer), updated: false };
+  }
+
+  /**
    * Synchronizes a skill installed from the marketplace with the current version of the source.
    *
    * Overwrites the files with those of the source skill (shared+approved) and updates

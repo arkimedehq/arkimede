@@ -179,7 +179,11 @@
     "emptyTitle": "Nessuna skill nel registry",
     "emptyHint": "Contribuisci pubblicando le tue skill su GitHub.",
     "noMatch": "Nessuna skill corrisponde a \"{{q}}\"",
-    "installFailed": "Installazione fallita"
+    "installFailed": "Installazione fallita",
+    "update": "Aggiorna",
+    "updating": "Aggiornando...",
+    "updateAvailable": "v{{installed}} installata",
+    "updateTitle": "Aggiorna dalla v{{installed}} alla v{{available}} (le configurazioni sono preservate)"
   },
   "review": {
     "noReview": "Nessuna skill in attesa di review",

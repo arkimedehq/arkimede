@@ -2,7 +2,6 @@
   "title": "Attività in corso",
   "subtitle": "Tutto ciò che è in esecuzione o schedulato per te. Aggiornamento automatico ogni 10s.",
   "loadError": "Impossibile caricare le attività.",
-
   "counts": {
     "daemons": "Daemon attivi",
     "automationsActive": "Automazioni attive",
@@ -11,14 +10,12 @@
     "scheduledFlows": "Flow schedulati",
     "recentRuns": "Run recenti"
   },
-
   "daemon": {
     "blockTitle": "Daemon skill",
     "empty": "Nessun daemon in esecuzione.",
     "startedPrefix": "avvio",
     "lastEventPrefix": "ultimo evt"
   },
-
   "automation": {
     "blockTitle": "Automazioni",
     "empty": "Nessuna automazione programmata.",
@@ -29,16 +26,30 @@
     "lastRunPrefix": "ultimo",
     "tokSuffix": "tok"
   },
-
   "scheduledFlow": {
     "blockTitle": "Flow schedulati",
     "empty": "Nessun flow con trigger cron/scheduled attivo.",
     "oncePrefix": "una volta"
   },
-
   "recentRun": {
     "blockTitle": "Run recenti",
     "empty": "Nessun run registrato.",
     "deletedFlow": "(flow eliminato)"
+  },
+  "invocations": {
+    "blockTitle": "Invocazioni esterne (OpenAI-compat)",
+    "count": "{{count}} totali",
+    "empty": "Nessuna invocazione esterna registrata. Le chiamate dei client OpenAI-compatibili (satelliti vocali, integrazioni) compariranno qui.",
+    "filterAllRoutes": "Tutte",
+    "routeChat": "Chat",
+    "routeTranscription": "Trascrizione",
+    "routeSpeech": "Sintesi",
+    "allUsers": "Tutti gli utenti",
+    "apiKey": "Chiave API usata",
+    "input": "Input",
+    "output": "Output",
+    "error": "Errore",
+    "loadMore": "Carica altre ({{count}} rimanenti)",
+    "capReached": "Limite di 100 righe raggiunto — usa i filtri per restringere"
   }
 }
