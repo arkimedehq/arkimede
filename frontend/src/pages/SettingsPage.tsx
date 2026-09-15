@@ -4628,7 +4628,8 @@ const TRANSCRIPTION_PROVIDERS: {
     value: 'internal', label: 'Interno (default)',
     descKey: 'transcription.providerInternalDesc',
     needsKey: false, needsUrl: false,
-    defaultModels: [], internal: true,
+    // Sizes the bundled whisper-service can switch to at runtime (download on first use)
+    defaultModels: ['tiny', 'base', 'small', 'medium', 'large-v3', 'large-v3-turbo'], internal: true,
   },
   {
     value: 'openai', label: 'OpenAI',
@@ -4782,6 +4783,37 @@ function TranscriptionConfigCard() {
               <p className="mt-1 text-emerald-400 font-mono">{detectedModel}</p>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ── Model size (internal): switched at runtime by the service, download on first use ── */}
+      {providerMeta.internal && (
+        <div>
+          <label className="block text-xs font-medium text-gray-400 mb-1">{t('transcription.modelLabel')}</label>
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              onClick={() => setModel('')}
+              className={`px-2 py-0.5 text-xs rounded border transition-colors
+                ${model === ''
+                  ? 'border-indigo-500 bg-indigo-900/40 text-indigo-300'
+                  : 'border-gray-700 text-gray-500 hover:border-gray-600 hover:text-gray-400'}`}
+            >
+              {t('transcription.internalModelAuto')}
+            </button>
+            {providerMeta.defaultModels.map((m) => (
+              <button
+                key={m}
+                onClick={() => setModel(m)}
+                className={`px-2 py-0.5 text-xs rounded border transition-colors font-mono
+                  ${model === m
+                    ? 'border-indigo-500 bg-indigo-900/40 text-indigo-300'
+                    : 'border-gray-700 text-gray-500 hover:border-gray-600 hover:text-gray-400'}`}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-gray-600 mt-1">{t('transcription.internalModelHint')}</p>
         </div>
       )}
 

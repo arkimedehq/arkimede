@@ -86,6 +86,9 @@ services:
       WHISPER_MODEL: ${WHISPER_MODEL:-small}
       WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
       WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
+      WHISPER_MODELS_DIR: /models
+    volumes:
+      - whisper_models:/models
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:9000/health').status==200 else 1)"]
       interval: 15s
@@ -261,3 +264,4 @@ volumes:
   backups:               # admin backup archives (pg_dump + volumes), downloadable from the UI
   nix_store:             # persistent /nix/store for the executor — avoids re-download on rebuild
   piper_models:          # Piper voices (.onnx) — survive rebuilds, on-demand downloads land here
+  whisper_models:        # Whisper model cache — seeded with the default model, runtime switches land here

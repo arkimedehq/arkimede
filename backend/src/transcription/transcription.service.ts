@@ -67,14 +67,16 @@ export class TranscriptionService {
     const provider = cfg.transcriptionProvider;
 
     // ── Provider 'internal': whisper-service bundled with the app ─────────────────
-    // URL from the deployment (env), model auto-detected from the service. Zero config.
+    // URL from the deployment (env). Model: the size chosen by the admin (the service
+    // switches at runtime, downloading on first use), else the one currently loaded.
     if (provider === 'internal') {
       const baseUrl = this.env.get<string>('TRANSCRIPTION_BASE_URL', DEFAULT_BASE_URLS.internal!);
-      const probed = await this.probeInternal(baseUrl);
+      const chosen = cfg.transcriptionModel?.trim() || null;
+      const probed = chosen ? null : await this.probeInternal(baseUrl);
       return {
         enabled:  cfg.transcriptionEnabled,
         provider,
-        model:    probed ?? cfg.transcriptionModel ?? MODEL_DEFAULTS.internal,
+        model:    chosen ?? probed ?? MODEL_DEFAULTS.internal,
         apiKey:   null,
         baseUrl,
       };
@@ -95,7 +97,7 @@ export class TranscriptionService {
   }
 
   /**
-   * Probes the internal whisper-service to auto-detect the model name.
+   * Probes the internal whisper-service for the model currently loaded (data[0]).
    * Best-effort: returns null on error/timeout (the caller uses the default).
    */
   private async probeInternal(baseUrl: string): Promise<string | null> {

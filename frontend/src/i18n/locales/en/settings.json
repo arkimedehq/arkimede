@@ -355,7 +355,7 @@
     "providerGroqDesc": "Groq cloud — very fast and cheap",
     "providerCompatDesc": "Self-hosted Whisper (faster-whisper / whisper.cpp)",
     "internalInfoTitle": "Internal Whisper service (auto-configured)",
-    "internalInfoDesc": "Uses the Whisper service bundled with the app. URL and model are detected automatically — nothing to configure. Press \"Test\" to check the active model.",
+    "internalInfoDesc": "Uses the Whisper service bundled with the app. The URL is detected from the deployment: nothing to configure. Pick the model size below or keep the service's own; press \"Test\" to verify (and download) the active model.",
     "modelLabel": "Model",
     "apiKeyLabel": "API Key",
     "apiKeyConfigured": "configured",
@@ -365,7 +365,9 @@
     "connectionFailed": "Connection to the transcription endpoint failed",
     "testBtn": "Test",
     "testPending": "Testing…",
-    "testOk": "Endpoint reachable"
+    "testOk": "Endpoint reachable",
+    "internalModelAuto": "auto (service model)",
+    "internalModelHint": "The service keeps one model loaded at a time and downloads a new one on first use (Test). Indicative RAM on CPU (int8): tiny 0.3 GB · base 0.5 GB · small 1 GB · medium 2.5 GB · large-v3 4 GB · large-v3-turbo 2.5 GB (near large-v3 quality, much faster)."
   },
   "tts": {
     "title": "Speech synthesis (Piper)",

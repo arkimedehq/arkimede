@@ -180,6 +180,20 @@ curl -s http://localhost:3000/api/openai/v1/audio/speech \
   `TtsService` (rispecchiare i test del servizio di trascrizione se
   presenti); validazione del DTO nel controller (`input` vuoto → 400).
 
+## Parte 2b — Cambio modello Whisper a runtime (2026-09-15)
+
+`whisper-service` rispecchia le voci di Piper: il campo `model` di
+`/v1/audio/transcriptions` può indicare una qualsiasi taglia di
+`ALLOWED_MODELS` (tiny, base, small, medium, large-v3, large-v3-turbo); una
+taglia diversa viene caricata sotto lock — scaricata alla prima richiesta in
+`/models`, volume nominato inizializzato con il default dell'immagine
+(`WHISPER_MODEL`) — e sostituisce la precedente (un solo modello in RAM).
+`/v1/models` elenca per primo il modello corrente con i flag
+`current`/`downloaded`. `TranscriptionService` invia il `transcriptionModel`
+scelto dall'admin per il provider interno (vuoto = modello corrente del
+servizio); la card mostra le taglie come chip con la guida RAM e "Testa" avvia
+il download.
+
 ## Parte 3 — Server vocale Wyoming (Home Assistant & co.)
 
 Stato: IMPLEMENTATO (2026-09-15) — `backend/src/wyoming/`, migration 084,
