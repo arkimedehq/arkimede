@@ -1390,6 +1390,20 @@ POST /api/openai/v1/chat/completions    # formato OpenAI; streaming SSE e non-st
 - Auth: JWT o chiave API come Bearer. I costi sono attribuiti in `llm_calls`
   con origin `voice`.
 
+### Server vocale Wyoming (Home Assistant)
+
+Arkimede può esporre i provider STT/TTS configurati con il protocollo Wyoming
+(quello che Home Assistant usa per gli add-on Whisper/Piper):
+
+- Impostazioni → Voce e audio → **Server vocale Wyoming** → abilita, e
+  facoltativamente limita i client (IP / CIDR). Porta da `WYOMING_PORT`
+  (default 10300).
+- Home Assistant → Aggiungi integrazione → *Wyoming Protocol* →
+  `<host-arkimede>:10300` → scegli i nuovi STT/TTS nella pipeline di Assist.
+
+Funziona con qualsiasi provider scelto nel pannello (Whisper/Piper interni o
+cloud). Il protocollo non ha autenticazione: abilitalo solo su reti fidate.
+
 ### Chat e messaggi
 
 ```bash

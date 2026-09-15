@@ -56,6 +56,21 @@ export interface TtsConfig {
   ttsVoice:     string | null;
 }
 
+/** Wyoming voice server (Home Assistant & co.): config + live status. */
+export interface WyomingConfig {
+  wyomingEnabled:      boolean;
+  wyomingAllowedCidrs: string | null;
+  running:   boolean;
+  port:      number;
+  clients:   number;
+  lastError: string | null;
+}
+
+export interface UpdateWyomingConfigPayload {
+  wyomingEnabled:       boolean;
+  wyomingAllowedCidrs?: string | null;
+}
+
 export interface UpdateTtsConfigPayload {
   ttsProvider: TtsProvider;
   ttsModel?:   string | null;
@@ -145,6 +160,16 @@ export const appConfigApi = {
   /** POST /api/admin/config/tts/test — test the TTS endpoint (micro-synthesis) */
   testTtsConnection: (): Promise<{ ok: boolean; error?: string; model?: string }> =>
     api.post('/admin/config/tts/test').then((r) => r.data),
+
+  // ── Wyoming voice server ────────────────────────────────────────────────────
+
+  /** GET /api/admin/config/wyoming — configuration + live listener status */
+  getWyomingConfig: (): Promise<WyomingConfig> =>
+    api.get('/admin/config/wyoming').then((r) => r.data),
+
+  /** PATCH /api/admin/config/wyoming — update the configuration (listener restarted at once) */
+  updateWyomingConfig: (payload: UpdateWyomingConfigPayload): Promise<WyomingConfig> =>
+    api.patch('/admin/config/wyoming', payload).then((r) => r.data),
 
   // ── Tool Loading Config ─────────────────────────────────────────────────────
 

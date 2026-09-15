@@ -11,7 +11,7 @@ import {
   FolderOpen, Brain, Download, Trash2, Search, Wrench, Plug, UserCircle,
   Save, Eye, EyeOff, KeyRound, Cpu, Wifi, WifiOff, Boxes, Pencil, Plus,
   Star, Server, FileStack, X, Sparkles, Eraser, Zap, Filter, Package, ThumbsUp, BarChart3,
-  Users, UsersRound, Workflow, Network, CalendarClock, Activity, ShieldAlert, Mic, Terminal, Check, Copy, DatabaseBackup, Volume2,
+  Users, UsersRound, Workflow, Network, CalendarClock, Activity, ShieldAlert, Mic, Terminal, Check, Copy, DatabaseBackup, Volume2, Radio,
 } from 'lucide-react';
 import type { LlmProvider, EmbeddingProvider, EmbeddingConfig, ToolLoadingConfig, ToolLoadingStrategy, ToolSchemaFormat, TranscriptionProvider, TtsProvider, SandboxNetwork, SandboxExecMode } from '../api/appConfig';
 import { apiKeysApi } from '../api/apiKeys';
@@ -57,6 +57,7 @@ const SECTIONS: { id: string; icon: React.ElementType; adminOnly?: boolean; disa
   { id: 'database', icon: Database },
   { id: 'usage',    icon: BarChart3 },
   { id: 'vectordb', icon: Boxes, adminOnly: true },
+  { id: 'voice',    icon: Mic, adminOnly: true },
   { id: 'feedback', icon: ThumbsUp, adminOnly: true },
   { id: 'users',    icon: Users, adminOnly: true },
   { id: 'teams',    icon: UsersRound, adminOnly: true },
@@ -64,7 +65,7 @@ const SECTIONS: { id: string; icon: React.ElementType; adminOnly?: boolean; disa
   { id: 'backup',   icon: DatabaseBackup, adminOnly: true },
 ];
 
-type SectionId = 'profile' | 'memory' | 'ai' | 'tools' | 'mcp' | 'skills' | 'flows' | 'agents' | 'agentteams' | 'automations' | 'activity' | 'files' | 'database' | 'usage' | 'vectordb' | 'feedback' | 'users' | 'teams' | 'audit' | 'backup';
+type SectionId = 'profile' | 'memory' | 'ai' | 'tools' | 'mcp' | 'skills' | 'flows' | 'agents' | 'agentteams' | 'automations' | 'activity' | 'files' | 'database' | 'usage' | 'vectordb' | 'voice' | 'feedback' | 'users' | 'teams' | 'audit' | 'backup';
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function SettingsPage() {
@@ -121,6 +122,7 @@ export default function SettingsPage() {
         {activeSection === 'database' && <DataSourcesSection />}
         {activeSection === 'usage'    && <UsageSection isAdmin={isAdmin} />}
         {activeSection === 'vectordb' && isAdmin && <VectorDbSection />}
+        {activeSection === 'voice'    && isAdmin && <VoiceSection />}
         {activeSection === 'feedback' && isAdmin && <FeedbackSection />}
         {activeSection === 'users'    && isAdmin && <UsersSection />}
         {activeSection === 'teams'    && isAdmin && <TeamsSection />}
@@ -3467,8 +3469,24 @@ function VectorDbSection() {
       <VectorCollectionsCard />
       <ActiveCollectionCard />
       <EmbeddingConfigCard />
+    </div>
+  );
+}
+
+/** Voice & audio: transcription (Whisper), speech synthesis (Piper) and the Wyoming server for voice hubs. */
+function VoiceSection() {
+  const { t } = useTranslation('settings');
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-lg font-semibold text-white">{t('voice.title')}</h2>
+        <p className="text-sm text-gray-500 mt-1">
+          {t('voice.subtitle')}
+        </p>
+      </div>
       <TranscriptionConfigCard />
       <TtsConfigCard />
+      <WyomingConfigCard />
     </div>
   );
 }
@@ -4915,7 +4933,7 @@ const TTS_PROVIDERS: {
     descKey: 'tts.providerInternalDesc',
     needsKey: false, needsUrl: false,
     defaultModels: [], internal: true,
-    defaultVoices: ['it_IT-paola-medium', 'en_US-lessac-medium', 'en_GB-alba-medium', 'de_DE-thorsten-medium', 'fr_FR-siwis-medium', 'es_ES-davefx-medium'],
+    defaultVoices: ['it_IT-paola-medium', 'it_IT-serena-medium', 'it_IT-riccardo-x_low', 'en_US-lessac-medium', 'en_GB-alba-medium', 'de_DE-thorsten-medium', 'fr_FR-siwis-medium', 'es_ES-davefx-medium'],
   },
   {
     value: 'openai', label: 'OpenAI',
@@ -5209,6 +5227,135 @@ function TtsConfigCard() {
             {t('common:actions.save')}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Wyoming voice server card ────────────────────────────────────────────────
+/**
+ * Exposes the configured STT/TTS providers to voice hubs (Home Assistant) over
+ * the Wyoming protocol. Opt-in toggle + client allowlist; the port comes from
+ * the deployment (WYOMING_PORT) and is shown read-only with the live status.
+ */
+function WyomingConfigCard() {
+  const { t } = useTranslation('settings');
+  const qc = useQueryClient();
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['wyoming-config'],
+    queryFn:  appConfigApi.getWyomingConfig,
+    staleTime: 30_000,
+  });
+
+  const [enabled, setEnabled] = useState(false);
+  const [cidrs,   setCidrs]   = useState('');
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    if (!data) return;
+    setEnabled(data.wyomingEnabled);
+    setCidrs(data.wyomingAllowedCidrs ?? '');
+  }, [data]);
+
+  const saveMutation = useMutation({
+    mutationFn: () => appConfigApi.updateWyomingConfig({
+      wyomingEnabled:      enabled,
+      wyomingAllowedCidrs: cidrs.trim() || null,
+    }),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['wyoming-config'] });
+      setMsg(res.wyomingEnabled && !res.running
+        ? { ok: false, text: res.lastError ?? t('wyoming.startFailed') }
+        : { ok: true, text: t('wyoming.savedOk') });
+      setTimeout(() => setMsg(null), 4000);
+    },
+    onError: (e: any) => setMsg({ ok: false, text: e?.response?.data?.message ?? t('vectordb.errorGeneric') }),
+  });
+
+  const dirty = !!data && (enabled !== data.wyomingEnabled || cidrs.trim() !== (data.wyomingAllowedCidrs ?? ''));
+  const hostHint = window.location.hostname;
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-5">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Radio size={15} className="text-indigo-400" />
+          <h3 className="text-sm font-semibold text-gray-100">{t('wyoming.title')}</h3>
+        </div>
+        {data && (
+          <span className={`text-[11px] px-2 py-0.5 rounded-full border ${
+            data.running
+              ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10'
+              : 'text-gray-400 border-gray-700 bg-gray-800'
+          }`}>
+            {data.running ? t('wyoming.statusRunning', { port: data.port }) : t('wyoming.statusStopped')}
+          </span>
+        )}
+      </div>
+      <p className="text-sm text-gray-500">{t('wyoming.subtitle')}</p>
+
+      {/* ── Enable toggle ── */}
+      <div className="flex items-center justify-between py-2 border-t border-gray-800">
+        <div className="pr-4">
+          <p className="text-sm text-gray-200">{t('wyoming.enableLabel')}</p>
+          <p className="text-xs text-gray-500 mt-0.5">{t('wyoming.enableHint')}</p>
+        </div>
+        <button
+          role="switch"
+          aria-checked={enabled}
+          disabled={isLoading}
+          onClick={() => setEnabled((v) => !v)}
+          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors
+            disabled:opacity-50 focus:outline-none ${enabled ? 'bg-blue-600' : 'bg-gray-700'}`}
+        >
+          <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform
+            ${enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+        </button>
+      </div>
+
+      {/* ── Allowlist ── */}
+      <div>
+        <label className="block text-xs font-medium text-gray-400 mb-1">{t('wyoming.allowlistLabel')}</label>
+        <input
+          value={cidrs}
+          onChange={(e) => setCidrs(e.target.value)}
+          placeholder="192.168.1.0/24, 10.0.0.5"
+          className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm
+            text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500
+            transition-colors font-mono"
+        />
+        <p className="text-[11px] text-gray-600 mt-1">{t('wyoming.allowlistHint')}</p>
+      </div>
+
+      {/* ── How to connect ── */}
+      <div className="bg-gray-800/50 border border-gray-700/50 rounded-lg p-3 text-xs text-gray-400 space-y-1">
+        <p className="text-gray-300 font-medium mb-0.5">{t('wyoming.howToTitle')}</p>
+        <p>{t('wyoming.howToDesc')}</p>
+        <p className="font-mono text-gray-200 pt-1">{hostHint}:{data?.port ?? 10300}</p>
+        <p className="text-gray-500">{t('wyoming.portHint')}</p>
+      </div>
+
+      {data?.lastError && (
+        <p className="text-xs text-red-400">{t('wyoming.lastError')}: {data.lastError}</p>
+      )}
+
+      {/* ── Actions ── */}
+      <div className="flex items-center justify-between pt-1">
+        <div>
+          {msg && (
+            <span className={`text-xs ${msg.ok ? 'text-emerald-400' : 'text-red-400'}`}>{msg.text}</span>
+          )}
+        </div>
+        <button
+          onClick={() => saveMutation.mutate()}
+          disabled={saveMutation.isPending || isLoading || !dirty}
+          className="flex items-center gap-1.5 px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40
+            text-white text-sm rounded-lg transition-colors"
+        >
+          {saveMutation.isPending ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+          {t('wyoming.saveBtn')}
+        </button>
       </div>
     </div>
   );

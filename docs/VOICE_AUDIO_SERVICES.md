@@ -167,3 +167,46 @@ curl -s http://localhost:3000/api/openai/v1/audio/speech \
 - Unit tests: `TtsService` provider selection + client caching
   (mirror the transcription service tests if present); controller DTO
   validation (empty `input` → 400).
+
+## Part 3 — Wyoming voice server (Home Assistant & co.)
+
+Status: IMPLEMENTED (2026-09-15) — `backend/src/wyoming/`, migration 084,
+admin card "Wyoming voice server" (Settings → Voice & audio).
+
+Voice hubs such as Home Assistant speak the [Wyoming protocol](https://github.com/rhasspy/wyoming)
+to their speech-to-text and text-to-speech providers (the official Whisper/Piper
+add-ons are Wyoming servers). Arkimede exposes **the STT/TTS providers configured
+in the admin panel** — internal Whisper + Piper, or any cloud/OpenAI-compatible
+endpoint — as a Wyoming server, so a hub can use Arkimede as a native
+STT/TTS provider with zero extra components (no HACS, no API keys on the hub).
+
+Design (mirrors the rest of the platform: one feature, admin-configured):
+
+- `WyomingService` opens a TCP listener (`net.createServer`) **only when
+  `app_config.wyomingEnabled` is true**; the admin toggle (re)starts it at
+  runtime through `applyConfig()` — no container restart.
+- Port = deployment-level `WYOMING_PORT` (default 10300), published by
+  `docker-compose.yml` on the backend service. When disabled nothing listens
+  → connection refused. The admin card shows the port read-only + live status.
+- The protocol has **no authentication**: access is gated by the optional
+  client allowlist `wyomingAllowedCidrs` (IPs / IPv4 CIDRs, checked on every
+  connection with the same matcher as the SSRF policies). Default off.
+- `wyoming.protocol.ts` — pure framing (`encodeEvent` / `WyomingDecoder`) and
+  PCM ⇄ WAV helpers, unit-tested in `test/unit/wyoming-protocol.spec.ts`.
+- Events handled per connection (Home Assistant opens one per request):
+  `describe → info` (capabilities built from `TranscriptionService.describe()`
+  and `TtsService.describe()`: real model/voice names, voice language derived
+  from ids like `it_IT-paola-medium`), `transcribe` + `audio-start/chunk/stop
+  → transcript` (PCM buffered, wrapped as WAV, sent to the configured STT),
+  `synthesize → audio-start/chunk*/stop` (TTS output WAV parsed and streamed as
+  PCM in its native format), `ping → pong`. Unknown events are ignored.
+- Guards: 16 MB max frame, ~5 min max audio per transcription, 120 s idle
+  timeout per socket, provider failures reported as a Wyoming `error` event.
+- Not in scope (yet): `handle` events (Wyoming conversation agent → would call
+  `AgentService` directly with an admin-chosen user/agent), streaming
+  `synthesize-*`, wake-word.
+
+Home Assistant setup: Settings → Devices & services → Add integration →
+*Wyoming Protocol* → host = Arkimede's IP, port = 10300 → the STT and TTS
+entities appear; select them in the Assist pipeline. Satellites (Voice PE,
+Companion app) then use Arkimede's models through the hub.

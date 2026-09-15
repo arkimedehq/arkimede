@@ -195,6 +195,7 @@ services:
       EMBEDDING_BASE_URL: http://embedding:8000/v1
       TRANSCRIPTION_BASE_URL: http://whisper:9000/v1
       TTS_BASE_URL: http://piper:9100/v1
+      WYOMING_PORT: ${WYOMING_PORT:-10300}
       SKILL_EXECUTOR_URL: http://skill-executor:4000
       REDIS_URL: redis://redis:6379
       UPLOAD_DIR: /app/uploads
@@ -218,6 +219,9 @@ services:
         condition: service_healthy
     ports:
       - "3000:3000"              # public API entry point
+      # Wyoming voice server for Home Assistant & co. Nothing listens until an admin
+      # enables it in the app (Settings → "Wyoming voice server") → connection refused.
+      - "${WYOMING_PORT:-10300}:${WYOMING_PORT:-10300}"
     healthcheck:
       # Public /api/health probe (no JWT). Uses busybox wget (node:20-alpine has it,
       # not curl). --spider = HEAD-less GET, returns non-zero on 5xx (e.g. 503 when DB down).

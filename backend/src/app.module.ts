@@ -24,6 +24,7 @@ import { DataSourcesModule } from './datasources/datasources.module';
 import { AppConfigModule } from './app-config/app-config.module';
 import { TranscriptionModule } from './transcription/transcription.module';
 import { TtsModule } from './tts/tts.module';
+import { WyomingModule } from './wyoming/wyoming.module';
 import { InvocationsModule } from './invocations/invocations.module';
 import { AgentInvocation } from './invocations/invocation.entity';
 import { VectorDbModule } from './vector-db/vector-db.module';
@@ -131,6 +132,7 @@ import { I18nModule, AcceptLanguageResolver, QueryResolver } from 'nestjs-i18n';
     AppConfigModule,
     TranscriptionModule,
     TtsModule,
+    WyomingModule,
     InvocationsModule,
     VectorDbModule,
     SkillsModule,

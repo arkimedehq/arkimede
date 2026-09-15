@@ -74,6 +74,11 @@ export interface TranscriptionConfigDto {
   transcriptionBaseUrl:  string | null;
 }
 
+export interface WyomingConfigDto {
+  wyomingEnabled:      boolean;
+  wyomingAllowedCidrs: string | null;
+}
+
 export interface TtsConfigDto {
   ttsProvider: TtsProvider;
   ttsModel:    string | null;
@@ -333,6 +338,44 @@ export class AppConfigService implements OnModuleInit {
     } catch {
       return null;
     }
+  }
+
+  // ── Wyoming voice server ────────────────────────────────────────────────────
+
+  /** Returns the Wyoming server configuration (enabled flag + client allowlist). */
+  async getWyomingConfig(): Promise<{ wyomingEnabled: boolean; wyomingAllowedCidrs: string | null }> {
+    const config = await this.repo.findOne({ where: { id: CONFIG_ID } });
+    return {
+      wyomingEnabled:      config?.wyomingEnabled      ?? false,
+      wyomingAllowedCidrs: config?.wyomingAllowedCidrs ?? null,
+    };
+  }
+
+  /** Updates the Wyoming server configuration (the caller restarts the listener). */
+  async updateWyomingConfig(
+    dto: WyomingConfigDto,
+    actorId?: string,
+  ): Promise<ReturnType<typeof this.getWyomingConfig>> {
+    const current = await this.repo.findOne({ where: { id: CONFIG_ID } });
+    // Normalize the allowlist: trim entries, drop empties, keep a canonical comma list.
+    const cidrs = (dto.wyomingAllowedCidrs ?? '')
+      .split(',').map((c) => c.trim()).filter(Boolean).join(',');
+    await this.repo.save({
+      ...current,
+      id: CONFIG_ID,
+      systemPrompt: current?.systemPrompt ?? SYSTEM_PROMPT,
+      wyomingEnabled:      dto.wyomingEnabled,
+      wyomingAllowedCidrs: cidrs || null,
+    });
+    this.logger.log(`WyomingConfig: updated — enabled=${dto.wyomingEnabled} allowlist=${cidrs || '(any)'}`);
+    await this.audit?.record({
+      actorId: actorId ?? null,
+      action: 'appconfig.update',
+      resource: 'wyoming',
+      outcome: 'ok',
+      ctx: { section: 'wyoming', enabled: dto.wyomingEnabled, allowlist: cidrs || null },
+    });
+    return this.getWyomingConfig();
   }
 
   // ── TTS Configuration (Piper) ───────────────────────────────────────────────

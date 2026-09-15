@@ -15,6 +15,7 @@ import { EmbeddingProvider, ToolLoadingStrategy, ToolSchemaFormat, Transcription
 import { EmbeddingProviderService } from '../embed/embedding.provider.service';
 import { TranscriptionService } from '../transcription/transcription.service';
 import { TtsService } from '../tts/tts.service';
+import { WyomingService } from '../wyoming/wyoming.service';
 import { SkillExecutorClient } from '../skills/skill-executor.client';
 
 class UpdateSystemPromptDto {
@@ -151,6 +152,15 @@ class UpdateTtsConfigDto {
   ttsVoice?: string | null;
 }
 
+class UpdateWyomingConfigDto {
+  @IsBoolean()
+  wyomingEnabled: boolean;
+
+  /** Comma-separated IPs / IPv4 CIDRs; empty or null = any client. */
+  @IsOptional() @IsString()
+  wyomingAllowedCidrs?: string | null;
+}
+
 @ApiTags('admin')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, AdminGuard)
@@ -168,6 +178,9 @@ export class AppConfigController {
 
     @Inject(forwardRef(() => TtsService))
     private readonly tts: TtsService,
+
+    @Inject(forwardRef(() => WyomingService))
+    private readonly wyoming: WyomingService,
 
     @Inject(SkillExecutorClient)
     private readonly executorClient: SkillExecutorClient,
@@ -485,5 +498,27 @@ export class AppConfigController {
   async testTtsConnection() {
     this.tts.invalidateCache();
     return this.tts.testConnection();
+  }
+
+  // ── Wyoming voice server ────────────────────────────────────────────────────
+
+  /** GET /api/admin/config/wyoming — configuration + live listener status */
+  @Get('wyoming')
+  @ApiOperation({ summary: 'Wyoming voice server configuration and status' })
+  async getWyomingConfig() {
+    const cfg = await this.service.getWyomingConfig();
+    return { ...cfg, ...this.wyoming.getStatus() };
+  }
+
+  /** PATCH /api/admin/config/wyoming — updates the configuration and (re)starts the listener */
+  @Patch('wyoming')
+  @ApiOperation({ summary: 'Update the Wyoming voice server configuration' })
+  async updateWyomingConfig(@Body() dto: UpdateWyomingConfigDto, @CurrentUser() user: any) {
+    const cfg = await this.service.updateWyomingConfig({
+      wyomingEnabled:      dto.wyomingEnabled,
+      wyomingAllowedCidrs: dto.wyomingAllowedCidrs ?? null,
+    }, user?.id);
+    await this.wyoming.applyConfig();
+    return { ...cfg, ...this.wyoming.getStatus() };
   }
 }

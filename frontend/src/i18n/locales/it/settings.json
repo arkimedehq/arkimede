@@ -17,6 +17,7 @@
     "database": "Sorgenti dati",
     "usage": "Consumi",
     "vectordb": "Vector DB",
+    "voice": "Voce e audio",
     "feedback": "Feedback",
     "users": "Utenti",
     "teams": "Team",
@@ -389,6 +390,23 @@
     "testPending": "Verifica in corso…",
     "testOk": "Endpoint raggiungibile"
   },
+  "wyoming": {
+    "title": "Server vocale Wyoming (Home Assistant)",
+    "subtitle": "Espone i provider di trascrizione e sintesi vocale configurati qui sopra con il protocollo Wyoming, così Home Assistant (e qualsiasi hub compatibile) li usa come STT/TTS nativi — anche con i satelliti Voice PE. Funziona con qualsiasi provider: Whisper/Piper interni o servizi cloud.",
+    "enableLabel": "Abilita il server Wyoming",
+    "enableHint": "Il protocollo non prevede autenticazione: attivalo solo su reti fidate e limita i client con la lista sotto.",
+    "allowlistLabel": "Client consentiti (IP o CIDR IPv4, separati da virgola)",
+    "allowlistHint": "Vuoto = qualsiasi client. Esempio: 192.168.1.0/24 per tutta la LAN, oppure l'IP del server Home Assistant.",
+    "howToTitle": "Come collegare Home Assistant",
+    "howToDesc": "Impostazioni → Dispositivi e servizi → Aggiungi integrazione → \"Wyoming Protocol\" → inserisci host e porta di questo server. Poi nella pipeline di Assist scegli i nuovi STT/TTS.",
+    "portHint": "La porta è definita dal deployment (WYOMING_PORT nel .env, default 10300) e deve corrispondere alla porta pubblicata del container.",
+    "statusRunning": "in ascolto sulla porta {{port}}",
+    "statusStopped": "spento",
+    "lastError": "Ultimo errore",
+    "savedOk": "Configurazione Wyoming salvata",
+    "startFailed": "Configurazione salvata ma il server non è partito",
+    "saveBtn": "Salva"
+  },
   "vectordb": {
     "title": "Vector Database",
     "subtitle": "Configura il database vettoriale e il modello di embedding usato per indicizzare i documenti.",
@@ -473,6 +491,10 @@
     "embeddingProviderOpenAiCompatDesc": "Qualsiasi endpoint embedding compatibile OpenAI",
     "embeddingInternalInfoTitle": "Servizio embedding interno (auto-configurato)",
     "embeddingInternalInfoDesc": "Usa il microservizio embedding incluso nell'app. URL, modello e dimensioni vengono rilevati automaticamente: non serve configurare nulla. Premi \"Testa\" per verificare il modello attivo."
+  },
+  "voice": {
+    "title": "Voce e audio",
+    "subtitle": "Trascrizione vocale (Whisper), sintesi vocale (Piper) e server Wyoming per gli hub vocali come Home Assistant."
   },
   "mcpSecurity": {
     "title": "Sicurezza MCP (anti-SSRF)",

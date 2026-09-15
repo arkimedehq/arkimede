@@ -126,6 +126,19 @@ export class TranscriptionService {
     return { client, model: config.model, enabled: config.enabled };
   }
 
+  /**
+   * Describes the active provider/model (for capability advertisement, e.g. the
+   * Wyoming `info` event). Never throws: on error it falls back to the defaults.
+   */
+  async describe(): Promise<{ provider: TranscriptionProvider; model: string; enabled: boolean }> {
+    try {
+      const cfg = await this.loadConfig();
+      return { provider: cfg.provider, model: cfg.model, enabled: cfg.enabled };
+    } catch {
+      return { provider: 'internal', model: MODEL_DEFAULTS.internal, enabled: false };
+    }
+  }
+
   /** True if the microphone button is enabled by the admin. */
   async isEnabled(): Promise<boolean> {
     return (await this.appConfig.getTranscriptionConfig()).transcriptionEnabled;

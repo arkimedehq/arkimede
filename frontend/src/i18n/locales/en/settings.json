@@ -17,6 +17,7 @@
     "database": "Data Sources",
     "usage": "Usage",
     "vectordb": "Vector DB",
+    "voice": "Voice & audio",
     "feedback": "Feedback",
     "users": "Users",
     "teams": "Teams",
@@ -389,6 +390,23 @@
     "testPending": "Testing…",
     "testOk": "Endpoint reachable"
   },
+  "wyoming": {
+    "title": "Wyoming voice server (Home Assistant)",
+    "subtitle": "Exposes the transcription and speech synthesis providers configured above over the Wyoming protocol, so Home Assistant (and any compatible hub) uses them as native STT/TTS — Voice PE satellites included. Works with any provider: internal Whisper/Piper or cloud services.",
+    "enableLabel": "Enable the Wyoming server",
+    "enableHint": "The protocol has no authentication: enable it on trusted networks only and restrict clients with the list below.",
+    "allowlistLabel": "Allowed clients (IPs or IPv4 CIDRs, comma-separated)",
+    "allowlistHint": "Empty = any client. Example: 192.168.1.0/24 for the whole LAN, or the Home Assistant server's IP.",
+    "howToTitle": "How to connect Home Assistant",
+    "howToDesc": "Settings → Devices & services → Add integration → \"Wyoming Protocol\" → enter this server's host and port. Then pick the new STT/TTS in your Assist pipeline.",
+    "portHint": "The port is deployment-level (WYOMING_PORT in the .env, default 10300) and must match the container's published port.",
+    "statusRunning": "listening on port {{port}}",
+    "statusStopped": "stopped",
+    "lastError": "Last error",
+    "savedOk": "Wyoming configuration saved",
+    "startFailed": "Configuration saved but the server did not start",
+    "saveBtn": "Save"
+  },
   "vectordb": {
     "title": "Vector Database",
     "subtitle": "Configure the vector database and the embedding model used to index documents.",
@@ -473,6 +491,10 @@
     "embeddingProviderOpenAiCompatDesc": "Any OpenAI-compatible embedding endpoint",
     "embeddingInternalInfoTitle": "Internal embedding service (auto-configured)",
     "embeddingInternalInfoDesc": "Uses the embedding microservice bundled with the app. URL, model and dimensions are detected automatically — nothing to configure. Press \"Test\" to check the active model."
+  },
+  "voice": {
+    "title": "Voice & audio",
+    "subtitle": "Voice transcription (Whisper), speech synthesis (Piper) and the Wyoming server for voice hubs such as Home Assistant."
   },
   "mcpSecurity": {
     "title": "MCP security (anti-SSRF)",

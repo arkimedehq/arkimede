@@ -238,6 +238,23 @@ export class AppConfigEntity {
   @Column({ type: 'varchar', length: 200, nullable: true })
   ttsVoice: string | null;
 
+  // ── Wyoming voice server (Home Assistant & co.) ─────────────────────────────
+
+  /**
+   * Exposes the configured STT/TTS providers over the Wyoming protocol (TCP)
+   * so voice hubs such as Home Assistant can use them natively. Default false:
+   * the protocol has no authentication, the admin opts in explicitly.
+   */
+  @Column({ type: 'boolean', default: false })
+  wyomingEnabled: boolean;
+
+  /**
+   * Comma-separated allowlist of client IPs / IPv4 CIDRs (e.g. "192.168.1.0/24").
+   * Null/empty = any client may connect. Checked on every TCP connection.
+   */
+  @Column({ type: 'varchar', length: 1000, nullable: true })
+  wyomingAllowedCidrs: string | null;
+
   // ── Tool loading configuration ──────────────────────────────────────────────
 
   /**

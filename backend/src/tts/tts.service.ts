@@ -106,6 +106,41 @@ export class TtsService {
     };
   }
 
+  /**
+   * Describes the active provider/model/voice (for capability advertisement, e.g.
+   * the Wyoming `info` event). For the internal Piper the default voice is not
+   * known to the backend (PIPER_VOICE lives in the service): it is probed from
+   * `/v1/models`, which lists the voices already downloaded. Never throws.
+   */
+  async describe(): Promise<{ provider: TtsProvider; model: string; voice: string | null; voices: string[] }> {
+    try {
+      const cfg = await this.loadConfig();
+      let voices: string[] = [];
+      if (cfg.provider === 'internal' && cfg.baseUrl) {
+        voices = await this.probeInternalVoices(cfg.baseUrl);
+      }
+      const voice = cfg.voice || voices[0] || (cfg.provider === 'internal' ? null : VOICE_DEFAULTS[cfg.provider]);
+      return { provider: cfg.provider, model: cfg.model, voice, voices };
+    } catch {
+      return { provider: 'internal', model: MODEL_DEFAULTS.internal, voice: null, voices: [] };
+    }
+  }
+
+  /** Lists the voices of the internal piper-service (best-effort, 3s timeout). */
+  private async probeInternalVoices(baseUrl: string): Promise<string[]> {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 3000);
+      const res = await fetch(`${baseUrl.replace(/\/$/, '')}/models`, { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (!res.ok) return [];
+      const json: any = await res.json();
+      return (json?.data ?? []).map((m: any) => String(m.id)).filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
   /** Builds (or reuses) the OpenAI client for speech synthesis. */
   private async getClient(): Promise<{ client: OpenAI; model: string; voice: string | null }> {
     if (this.cached) return this.cached;
