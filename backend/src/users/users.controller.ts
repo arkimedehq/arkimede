@@ -2,7 +2,7 @@
 // Copyright © 2026 Andrea Genovese
 
 import {Body, Controller, Get, HttpCode, HttpStatus, Inject, Optional, Patch, Post, UseGuards,} from '@nestjs/common';
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, Min, MinLength } from 'class-validator';
 import { Type } from 'class-transformer';
 import {JwtAuthGuard} from '../common/guards/jwt-auth.guard';
 import {CurrentUser} from '../common/decorators/current-user.decorator';
@@ -55,9 +55,11 @@ class UpdateProfileDto {
   memoryThreshold?: number | null;
 }
 
+// Decorators are required: the global ValidationPipe runs with whitelist:true and strips
+// every undecorated property, which would leave both fields undefined.
 class ChangePasswordDto {
-  currentPassword: string;
-  newPassword: string;
+  @IsString() currentPassword: string;
+  @IsString() @MinLength(6) newPassword: string;
 }
 
 @Controller('api/users')
