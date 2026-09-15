@@ -216,12 +216,26 @@ Design (rispecchia il resto della piattaforma: una feature, configurata dall'adm
   Gli eventi sconosciuti vengono ignorati.
 - Guardie: frame max 16 MB, audio max ~5 min per trascrizione, timeout idle
   120 s per socket, errori del provider riportati come evento Wyoming `error`.
-- Fuori scope (per ora): eventi `handle` (agente di conversazione Wyoming →
-  chiamerebbe direttamente `AgentService` con utente/agente scelti dall'admin),
-  `synthesize-*` in streaming, wake-word.
+- **Agente di conversazione** (programma "handle", migration 085): se l'admin
+  sceglie un utente (`wyomingHandleUserId`) e facoltativamente un suo agente
+  (`wyomingHandleAgentId`), l'`info` pubblica anche un programma `handle` e
+  l'hub può usare Arkimede come *agente di conversazione* — l'intera pipeline
+  Assist (STT → conversazione → TTS) gira su questo unico endpoint Wyoming,
+  senza componenti HACS né API key sull'hub. L'hub manda un evento `transcript`
+  (`text`, `language`, `context.conversation_id`); il server esegue
+  `AgentService.streamResponse` come quell'utente con gli override dell'agente
+  (`agentRunOptions`, condiviso con lo shim OpenAI), mantiene una finestra per
+  `conversation_id` (20 messaggi, TTL 10 min) per il contesto multi-turno —
+  l'hub manda solo il testo corrente — e risponde `handled` (o `not-handled`
+  con il testo dell'errore). Ogni turno è loggato in `agent_invocations`
+  (origin `voice`, model `wyoming:<slug-agente>`). Un utente eliminato/disabilitato
+  o un agente scomparso disattivano il programma handle (loggato) senza toccare
+  STT/TTS; il PATCH valida entrambi.
+- Fuori scope: `synthesize-*` in streaming, wake-word, riconoscimento intent.
 
 Configurazione in Home Assistant: Impostazioni → Dispositivi e servizi →
 Aggiungi integrazione → *Wyoming Protocol* → host = IP di Arkimede, porta =
-10300 → compaiono le entità STT e TTS; selezionale nella pipeline di Assist.
-I satelliti (Voice PE, app Companion) usano così i modelli di Arkimede
+10300 → compaiono le entità STT, TTS (e, con un utente di conversazione
+configurato, l'agente di conversazione); selezionale nella pipeline di Assist.
+I satelliti (Voice PE, app Companion) usano così Arkimede end-to-end
 attraverso l'hub.

@@ -2,10 +2,10 @@
 // Copyright © 2026 Andrea Genovese
 
 import {
-  Controller, Get, Patch, Post, Body, UseGuards, Inject, forwardRef,
+  Controller, Get, Patch, Post, Body, Query, UseGuards, Inject, forwardRef, BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { IsString, IsOptional, IsIn, IsInt, Min, Max, IsPositive, IsBoolean, IsArray } from 'class-validator';
+import { IsString, IsOptional, IsIn, IsInt, Min, Max, IsPositive, IsBoolean, IsArray, IsUUID } from 'class-validator';
 import { Type } from 'class-transformer';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
@@ -159,6 +159,14 @@ class UpdateWyomingConfigDto {
   /** Comma-separated IPs / IPv4 CIDRs; empty or null = any client. */
   @IsOptional() @IsString()
   wyomingAllowedCidrs?: string | null;
+
+  /** User the voice hub acts as for conversation (null = STT/TTS only). */
+  @IsOptional() @IsUUID()
+  wyomingHandleUserId?: string | null;
+
+  /** Agent of that user to run (null = standard pipeline). */
+  @IsOptional() @IsUUID()
+  wyomingHandleAgentId?: string | null;
 }
 
 @ApiTags('admin')
@@ -514,11 +522,28 @@ export class AppConfigController {
   @Patch('wyoming')
   @ApiOperation({ summary: 'Update the Wyoming voice server configuration' })
   async updateWyomingConfig(@Body() dto: UpdateWyomingConfigDto, @CurrentUser() user: any) {
+    const handleUserId  = dto.wyomingHandleUserId  ?? null;
+    const handleAgentId = handleUserId ? (dto.wyomingHandleAgentId ?? null) : null;
+    try {
+      await this.wyoming.validateHandleConfig(handleUserId, handleAgentId);
+    } catch (err: any) {
+      throw new BadRequestException(err?.message ?? 'wyoming.handleUserInvalid');
+    }
     const cfg = await this.service.updateWyomingConfig({
-      wyomingEnabled:      dto.wyomingEnabled,
-      wyomingAllowedCidrs: dto.wyomingAllowedCidrs ?? null,
+      wyomingEnabled:       dto.wyomingEnabled,
+      wyomingAllowedCidrs:  dto.wyomingAllowedCidrs ?? null,
+      wyomingHandleUserId:  handleUserId,
+      wyomingHandleAgentId: handleAgentId,
     }, user?.id);
     await this.wyoming.applyConfig();
     return { ...cfg, ...this.wyoming.getStatus() };
+  }
+
+  /** GET /api/admin/config/wyoming/agents?userId= — agents a user can run as conversation agent */
+  @Get('wyoming/agents')
+  @ApiOperation({ summary: 'Agents available to a user for the Wyoming conversation program' })
+  async listWyomingAgents(@Query('userId') userId: string) {
+    if (!userId) return [];
+    return this.wyoming.listHandleAgents(userId);
   }
 }

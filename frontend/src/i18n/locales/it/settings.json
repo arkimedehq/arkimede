@@ -398,14 +398,21 @@
     "allowlistLabel": "Client consentiti (IP o CIDR IPv4, separati da virgola)",
     "allowlistHint": "Vuoto = qualsiasi client. Esempio: 192.168.1.0/24 per tutta la LAN, oppure l'IP del server Home Assistant.",
     "howToTitle": "Come collegare Home Assistant",
-    "howToDesc": "Impostazioni → Dispositivi e servizi → Aggiungi integrazione → \"Wyoming Protocol\" → inserisci host e porta di questo server. Poi nella pipeline di Assist scegli i nuovi STT/TTS.",
+    "howToDesc": "Impostazioni → Dispositivi e servizi → Aggiungi integrazione → \"Wyoming Protocol\" → inserisci host e porta di questo server. Poi nella pipeline di Assist scegli i nuovi STT/TTS e, se hai impostato un utente qui sotto, anche l'agente di conversazione.",
     "portHint": "La porta è definita dal deployment (WYOMING_PORT nel .env, default 10300) e deve corrispondere alla porta pubblicata del container.",
     "statusRunning": "in ascolto sulla porta {{port}}",
     "statusStopped": "spento",
     "lastError": "Ultimo errore",
     "savedOk": "Configurazione Wyoming salvata",
     "startFailed": "Configurazione salvata ma il server non è partito",
-    "saveBtn": "Salva"
+    "saveBtn": "Salva",
+    "handleTitle": "Agente di conversazione",
+    "handleHint": "Se scegli un utente, l'hub vede Arkimede anche come agente di conversazione (nella stessa integrazione Wyoming): la pipeline vocale gira tutta qui, senza componenti aggiuntivi sull'hub. Le richieste girano come quell'utente (suoi tool, MCP, memoria, costi).",
+    "handleUserLabel": "Utente",
+    "handleUserNone": "— Nessuno (solo STT/TTS) —",
+    "handleAgentLabel": "Agente",
+    "handleAgentNone": "Pipeline standard (nessun agente)",
+    "handleActive": "Attivo come {{user}} — modello Wyoming \"{{model}}\""
   },
   "vectordb": {
     "title": "Vector Database",

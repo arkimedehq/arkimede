@@ -1400,6 +1400,9 @@ Arkimede can expose the configured STT/TTS providers over the Wyoming protocol
   → pick the new STT/TTS in the Assist pipeline.
 
 Works with any provider chosen in the panel (internal Whisper/Piper or cloud).
+Pick a **conversation user** (and optionally one of their agents) in the same
+card and the hub also gets Arkimede as its conversation agent: the whole voice
+pipeline runs on Arkimede with no extra component on the hub.
 The protocol has no authentication: enable it on trusted networks only.
 
 ### Chat and messages

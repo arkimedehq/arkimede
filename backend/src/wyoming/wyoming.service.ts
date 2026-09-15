@@ -16,21 +16,36 @@
  * client allowlist (IPs / IPv4 CIDRs) checked on every connection.
  *
  * Supported events (one request per connection, as Home Assistant does):
- *   describe → info                       (capabilities: asr + tts programs)
+ *   describe → info                       (capabilities: asr + tts + handle programs)
  *   transcribe, audio-start/chunk/stop → transcript
  *   synthesize → audio-start/chunk/stop
+ *   transcript → handled | not-handled   (conversation: the hub sends the text
+ *                                         to handle, the configured user's agent answers)
  *   ping → pong
+ *
+ * Conversation ("handle" program): exposed only when an admin picked the user
+ * the hub acts as (`wyomingHandleUserId`) and optionally an agent of theirs.
+ * The hub sends one text per turn; multi-turn context is kept here per
+ * `context.conversation_id` (the hub's conversation), with a short TTL.
  *
  * The listening port is deployment-level (env WYOMING_PORT, default 10300)
  * because it must match the container port mapping.
  */
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Inject, forwardRef } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import * as net from 'node:net';
 import { AppConfigService } from '../app-config/app-config.service';
 import { TranscriptionService } from '../transcription/transcription.service';
 import { TtsService } from '../tts/tts.service';
 import { matchesHostAllowlist } from '../common/ssrf-guard';
+import { AgentService } from '../agent/agent.service';
+import { AgentsService } from '../agents/agents.service';
+import { agentRunOptions } from '../agents/agent-run-options';
+import { agentSlug } from '../openai-compat/openai-mapper';
+import { UsersService } from '../users/users.service';
+import { InvocationsService } from '../invocations/invocations.service';
+import { makeToolCollector } from '../invocations/tool-collector';
 import { APP_NAME, APP_NAME_SLUG } from '../config/app.config';
 import {
   WyomingDecoder, WyomingEvent, encodeEvent, pcmToWav, parseWav, chunkPcm, PcmFormat,
@@ -55,11 +70,22 @@ const MAX_ASR_BYTES = 16000 * 2 * 300;
 /** Idle timeout per connection. */
 const SOCKET_TIMEOUT_MS = 120_000;
 
+/** Conversation window kept per hub conversation: max turns and inactivity TTL. */
+const CONVERSATION_MAX_MESSAGES = 20;
+const CONVERSATION_TTL_MS = 10 * 60 * 1000;
+
+/** Model id advertised for the standard pipeline (no agent) — same as the OpenAI shim. */
+const DEFAULT_HANDLE_MODEL = APP_NAME_SLUG;
+
+interface ConversationWindow { messages: { role: 'user' | 'assistant'; content: string }[]; updatedAt: number }
+
 export interface WyomingStatus {
   running:   boolean;
   port:      number;
   clients:   number;
   lastError: string | null;
+  /** Resolved conversation agent (null = STT/TTS only). */
+  handle:    { userEmail: string; agentName: string | null; model: string } | null;
 }
 
 @Injectable()
@@ -71,6 +97,9 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
   private lastError: string | null = null;
   private port: number;
   private readonly host: string;
+  /** Conversation agent resolved from the config (null = handle program not exposed). */
+  private handle: { userId: string; userEmail: string; agentId: string | null; agentName: string | null; model: string } | null = null;
+  private readonly conversations = new Map<string, ConversationWindow>();
 
   constructor(
     @Inject(forwardRef(() => AppConfigService))
@@ -80,11 +109,21 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
     @Inject(forwardRef(() => TtsService))
     private readonly tts: TtsService,
     private readonly env: ConfigService,
+    // The conversation program needs the agent pipeline, agent/user lookups and the
+    // invocation log. They are resolved lazily through ModuleRef instead of module
+    // imports: AgentModule's import graph reaches AppConfigModule (which imports this
+    // module), and a static import would leave AppConfigModule undefined mid-cycle.
+    private readonly moduleRef: ModuleRef,
   ) {
     const port = Number(this.env.get<string>('WYOMING_PORT', '10300'));
     this.port = Number.isInteger(port) && port >= 0 && port <= 65535 ? port : 10300;  // 0 = ephemeral (tests)
     this.host = this.env.get<string>('WYOMING_BIND', '0.0.0.0');
   }
+
+  private get agentService(): AgentService   { return this.moduleRef.get(AgentService,   { strict: false }); }
+  private get agentsService(): AgentsService { return this.moduleRef.get(AgentsService,  { strict: false }); }
+  private get usersService(): UsersService   { return this.moduleRef.get(UsersService,   { strict: false }); }
+  private get invocations(): InvocationsService { return this.moduleRef.get(InvocationsService, { strict: false }); }
 
   async onModuleInit(): Promise<void> {
     await this.applyConfig();
@@ -96,18 +135,85 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
 
   /** Live status for the admin card. */
   getStatus(): WyomingStatus {
-    return { running: !!this.server, port: this.port, clients: this.clients.size, lastError: this.lastError };
+    return {
+      running: !!this.server, port: this.port, clients: this.clients.size, lastError: this.lastError,
+      handle: this.handle ? { userEmail: this.handle.userEmail, agentName: this.handle.agentName, model: this.handle.model } : null,
+    };
   }
 
   /** Re-reads the DB configuration and starts/stops the listener accordingly. */
   async applyConfig(): Promise<void> {
     const cfg = await this.appConfig.getWyomingConfig();
     this.allowlist = (cfg.wyomingAllowedCidrs ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+    this.handle = await this.resolveHandle(cfg.wyomingHandleUserId, cfg.wyomingHandleAgentId);
     if (cfg.wyomingEnabled) {
       if (!this.server) await this.start();
     } else if (this.server) {
       await this.stop();
     }
+  }
+
+  /**
+   * Resolves the conversation identity from the config. Tolerant: a deleted or
+   * disabled user (or a vanished agent) silently disables the handle program
+   * instead of breaking STT/TTS, and is logged for the admin.
+   */
+  private async resolveHandle(userId: string | null, agentId: string | null) {
+    if (!userId) return null;
+    try {
+      const user = await this.usersService.getById(userId);
+      if (user.status !== 'active') {
+        this.logger.warn(`Wyoming: conversation user ${user.email} is not active — handle program disabled`);
+        return null;
+      }
+      let agentName: string | null = null;
+      if (agentId) {
+        const agents = await this.agentsService.findAll(userId);
+        const agent = agents.find((a) => a.id === agentId);
+        if (!agent) {
+          this.logger.warn(`Wyoming: agent ${agentId} not accessible by ${user.email} — falling back to the standard pipeline`);
+          agentId = null;
+        } else {
+          agentName = agent.name;
+        }
+      }
+      return { userId, userEmail: user.email, agentId, agentName, model: agentName ? agentSlug(agentName) : DEFAULT_HANDLE_MODEL };
+    } catch (err: any) {
+      this.logger.warn(`Wyoming: conversation user ${userId} not found — handle program disabled (${err?.message ?? err})`);
+      return null;
+    }
+  }
+
+  /**
+   * Validates a conversation identity before it is saved (admin PATCH):
+   * the user must exist and be active, the agent must be visible to that user.
+   * Throws a plain Error with an i18n key the controller maps to a 400.
+   */
+  async validateHandleConfig(userId: string | null, agentId: string | null): Promise<void> {
+    if (!userId) return;
+    const user = await this.usersService.getById(userId).catch(() => null);
+    if (!user || user.status !== 'active') throw new Error('wyoming.handleUserInvalid');
+    if (agentId) {
+      const agents = await this.agentsService.findAll(userId);
+      if (!agents.some((a) => a.id === agentId)) throw new Error('wyoming.handleAgentInvalid');
+    }
+  }
+
+  /** Agents the given user can run as a conversation agent (admin picker). */
+  async listHandleAgents(userId: string): Promise<{ id: string; name: string }[]> {
+    const agents = await this.agentsService.findAll(userId);
+    return agents.map((a) => ({ id: a.id, name: a.name }));
+  }
+
+  /** Returns the conversation window for a key, evicting expired ones on the way. */
+  private conversationWindow(key: string): ConversationWindow {
+    const now = Date.now();
+    for (const [k, w] of this.conversations) {
+      if (now - w.updatedAt > CONVERSATION_TTL_MS) this.conversations.delete(k);
+    }
+    let w = this.conversations.get(key);
+    if (!w) { w = { messages: [], updatedAt: now }; this.conversations.set(key, w); }
+    return w;
   }
 
   // ── Listener lifecycle ─────────────────────────────────────────────────────
@@ -236,6 +342,57 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
+      case 'transcript': {
+        // Conversation turn from the hub (handle program): text → agent → handled.
+        if (!this.handle) {
+          this.send(socket, { type: 'not-handled', data: { text: 'No conversation agent configured' } });
+          return;
+        }
+        const text = String(ev.data?.text ?? '').trim();
+        if (!text) { this.send(socket, { type: 'not-handled', data: { text: '' } }); return; }
+        const context = ev.data?.context && typeof ev.data.context === 'object' ? ev.data.context : {};
+        const key = typeof context.conversation_id === 'string' && context.conversation_id ? context.conversation_id : `ip:${ip}`;
+        const window = this.conversationWindow(key);
+        const history = window.messages.map((m) => ({ role: m.role, content: m.content })) as any[];
+        const t0 = Date.now();
+        const tools = makeToolCollector();
+        const abort = new AbortController();
+        socket.once('close', () => abort.abort());
+        let answer = '';
+        try {
+          const usage = await this.agentService.streamResponse(
+            text, this.handle.userId, undefined, undefined, history,
+            [], [], [],
+            (chunk) => { answer += chunk; },
+            tools.onToolCall,
+            abort.signal,
+            tools.onToolResult,
+            agentRunOptions(this.handle.agentId ? await this.agentsService.findById(this.handle.agentId).catch(() => null) : null, 'voice'),
+          );
+          window.messages.push({ role: 'user', content: text }, { role: 'assistant', content: answer });
+          if (window.messages.length > CONVERSATION_MAX_MESSAGES) window.messages.splice(0, window.messages.length - CONVERSATION_MAX_MESSAGES);
+          window.updatedAt = Date.now();
+          this.logger.log(`Wyoming: handled turn for ${ip} [${this.handle.model}] (${text.length} → ${answer.length} chars, ${history.length} history) in ${Date.now() - t0}ms`);
+          void this.invocations.record({
+            userId: this.handle.userId, origin: 'voice', route: 'chat', model: `wyoming:${this.handle.model}`,
+            inputPreview: text, outputPreview: answer || null, toolCalls: tools.records,
+            inputTokens: usage?.inputTokens ?? null, outputTokens: usage?.outputTokens ?? null,
+            durationMs: Date.now() - t0, status: 'ok',
+          });
+          this.send(socket, { type: 'handled', data: { text: answer, ...(context.conversation_id ? { context } : {}) } });
+        } catch (err: any) {
+          const message = err?.message ?? 'Internal error';
+          this.logger.warn(`Wyoming: handle failed for ${ip} in ${Date.now() - t0}ms: ${message}`);
+          void this.invocations.record({
+            userId: this.handle.userId, origin: 'voice', route: 'chat', model: `wyoming:${this.handle.model}`,
+            inputPreview: text, outputPreview: answer || null, toolCalls: tools.records,
+            durationMs: Date.now() - t0, status: 'error', error: abort.signal.aborted ? 'client aborted' : message,
+          });
+          this.send(socket, { type: 'not-handled', data: { text: message } });
+        }
+        return;
+      }
+
       case 'synthesize': {
         const text  = String(ev.data?.text ?? '');
         const voice = typeof ev.data?.voice?.name === 'string' ? ev.data.voice.name : undefined;
@@ -270,8 +427,8 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
   // ── Capabilities (`info`) ──────────────────────────────────────────────────
 
   /**
-   * Builds the `info` event from the providers currently configured, so the
-   * hub sees the real model/voice names. Everything is `installed: true`: the
+   * Builds the `info` event from the providers currently configured (and the
+   * conversation agent, if any), so the hub sees the real model/voice names. Everything is `installed: true`: the
    * providers are already reachable from this backend (or the test button
    * in the admin card tells otherwise).
    */
@@ -317,7 +474,23 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
       voices,
     }] : [];
 
-    return { asr: asrPrograms, tts: ttsPrograms, handle: [], intent: [], wake: [], mic: [], snd: [], satellite: null };
+    const handlePrograms = this.handle ? [{
+      name: `${APP_NAME_SLUG}-agent`,
+      description: `${APP_NAME} conversation agent (${this.handle.agentName ?? 'standard pipeline'})`,
+      attribution,
+      installed: true,
+      version: '1',
+      models: [{
+        name: this.handle.model,
+        description: this.handle.agentName ? `Agent "${this.handle.agentName}" of ${this.handle.userEmail}` : `Standard pipeline as ${this.handle.userEmail}`,
+        attribution,
+        installed: true,
+        version: '1',
+        languages: ASR_LANGUAGES,
+      }],
+    }] : [];
+
+    return { asr: asrPrograms, tts: ttsPrograms, handle: handlePrograms, intent: [], wake: [], mic: [], snd: [], satellite: null };
   }
 
   /** `it_IT-paola-medium` → ['it', 'it-IT']; unknown/cloud voices → multilingual list. */

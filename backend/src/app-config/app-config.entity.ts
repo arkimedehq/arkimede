@@ -255,6 +255,18 @@ export class AppConfigEntity {
   @Column({ type: 'varchar', length: 1000, nullable: true })
   wyomingAllowedCidrs: string | null;
 
+  /**
+   * Wyoming conversation agent: the user the voice hub acts as when it sends a
+   * text to handle (its tools, MCP servers, memory, cost attribution). Null =
+   * the server exposes STT/TTS only.
+   */
+  @Column({ type: 'uuid', nullable: true })
+  wyomingHandleUserId: string | null;
+
+  /** Agent of that user whose instructions/tool filter/model apply (null = standard pipeline). */
+  @Column({ type: 'uuid', nullable: true })
+  wyomingHandleAgentId: string | null;
+
   // ── Tool loading configuration ──────────────────────────────────────────────
 
   /**

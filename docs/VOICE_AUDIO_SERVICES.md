@@ -202,11 +202,25 @@ Design (mirrors the rest of the platform: one feature, admin-configured):
   PCM in its native format), `ping → pong`. Unknown events are ignored.
 - Guards: 16 MB max frame, ~5 min max audio per transcription, 120 s idle
   timeout per socket, provider failures reported as a Wyoming `error` event.
-- Not in scope (yet): `handle` events (Wyoming conversation agent → would call
-  `AgentService` directly with an admin-chosen user/agent), streaming
-  `synthesize-*`, wake-word.
+- **Conversation agent** ("handle" program, migration 085): when the admin picks
+  a user (`wyomingHandleUserId`) and optionally one of their agents
+  (`wyomingHandleAgentId`), the `info` also advertises a `handle` program and
+  the hub can use Arkimede as its *conversation agent* — the whole Assist
+  pipeline (STT → conversation → TTS) then runs on this single Wyoming
+  endpoint, with no HACS component and no API key on the hub. The hub sends a
+  `transcript` event (`text`, `language`, `context.conversation_id`); the
+  server runs `AgentService.streamResponse` as that user with the agent's
+  overrides (`agentRunOptions`, shared with the OpenAI shim), keeps a
+  per-`conversation_id` window (20 messages, 10 min TTL) for multi-turn
+  context — the hub only sends the current text — and answers `handled`
+  (or `not-handled` with the error text). Every turn is logged in
+  `agent_invocations` (origin `voice`, model `wyoming:<agent-slug>`).
+  A deleted/disabled user or a vanished agent disables the handle program
+  (logged) without affecting STT/TTS; the PATCH validates both.
+- Not in scope: streaming `synthesize-*`, wake-word, intent recognition.
 
 Home Assistant setup: Settings → Devices & services → Add integration →
-*Wyoming Protocol* → host = Arkimede's IP, port = 10300 → the STT and TTS
-entities appear; select them in the Assist pipeline. Satellites (Voice PE,
-Companion app) then use Arkimede's models through the hub.
+*Wyoming Protocol* → host = Arkimede's IP, port = 10300 → the STT, TTS (and,
+with a conversation user configured, the conversation agent) entities appear;
+select them in the Assist pipeline. Satellites (Voice PE, Companion app) then
+use Arkimede end-to-end through the hub.

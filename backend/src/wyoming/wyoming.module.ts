@@ -9,7 +9,8 @@ import { TtsModule } from '../tts/tts.module';
 
 /**
  * Wyoming voice server module: a TCP listener (opt-in, admin-toggled) that
- * exposes the configured STT/TTS providers to voice hubs (Home Assistant).
+ * exposes the configured STT/TTS providers — and optionally a conversation
+ * agent — to voice hubs (Home Assistant).
  *
  * No controller: the admin endpoints live in AppConfigController
  * (GET/PATCH /api/admin/config/wyoming). forwardRef on AppConfigModule for
@@ -20,6 +21,8 @@ import { TtsModule } from '../tts/tts.module';
     forwardRef(() => AppConfigModule),
     forwardRef(() => TranscriptionModule),
     forwardRef(() => TtsModule),
+    // The conversation program's dependencies (AgentService, AgentsService, UsersService,
+    // InvocationsService) are resolved at runtime via ModuleRef — see WyomingService.
   ],
   providers: [WyomingService],
   exports: [WyomingService],

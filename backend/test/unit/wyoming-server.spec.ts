@@ -13,10 +13,34 @@ import * as net from 'node:net';
 import { WyomingService } from '../../src/wyoming/wyoming.service';
 import { WyomingDecoder, WyomingEvent, encodeEvent, parseWav, pcmToWav } from '../../src/wyoming/wyoming.protocol';
 
-function makeService(opts: { enabled?: boolean; cidrs?: string | null; sttEnabled?: boolean } = {}) {
+const VOICE_USER = 'a1a1a1a1-0000-4000-8000-000000000001';
+const VOICE_AGENT = 'b2b2b2b2-0000-4000-8000-000000000002';
+
+function makeService(opts: { enabled?: boolean; cidrs?: string | null; sttEnabled?: boolean; handleUser?: string | null; handleAgent?: string | null } = {}) {
   const appConfig = {
-    getWyomingConfig: vi.fn(async () => ({ wyomingEnabled: opts.enabled ?? true, wyomingAllowedCidrs: opts.cidrs ?? null })),
+    getWyomingConfig: vi.fn(async () => ({
+      wyomingEnabled: opts.enabled ?? true, wyomingAllowedCidrs: opts.cidrs ?? null,
+      wyomingHandleUserId: opts.handleUser ?? null, wyomingHandleAgentId: opts.handleAgent ?? null,
+    })),
   };
+  const agent = { id: VOICE_AGENT, name: 'Voce Casa', systemPrompt: 'Rispondi in una frase.', toolFilter: { mode: 'names', names: ['mcp_home_assistant_*'] }, maxIterations: 3, llmConfigId: null };
+  const agentService = {
+    // Echoes the input plus how many history messages it received; emits one tool event.
+    streamResponse: vi.fn(async (input: string, _userId: string, _p: any, _c: any, history: any[], _a: any, _i: any, _b: any, onChunk: (s: string) => void, onToolCall: any, _signal: any, onToolResult: any) => {
+      onToolCall({ name: 'mcp_home_assistant_GetLiveContext', input: {} });
+      onToolResult('mcp_home_assistant_GetLiveContext', 'ok', 'success', {});
+      onChunk(`risposta a "${input}" (history=${history.length})`);
+      return { inputTokens: 10, outputTokens: 5 };
+    }),
+  };
+  const agentsService = {
+    findAll:  vi.fn(async (userId: string) => (userId === VOICE_USER ? [agent] : [])),
+    findById: vi.fn(async (id: string) => { if (id !== VOICE_AGENT) throw new Error('not found'); return agent; }),
+  };
+  const usersService = {
+    getById: vi.fn(async (id: string) => { if (id !== VOICE_USER) throw new Error("not found"); return { id, email: "voice@internal.com", status: "active" }; }),
+  };
+  const invocations = { record: vi.fn(async () => undefined) };
   const transcription = {
     describe:   vi.fn(async () => ({ provider: 'internal', model: 'faster-whisper-base', enabled: opts.sttEnabled ?? true })),
     transcribe: vi.fn(async (wav: Buffer) => `heard ${parseWav(wav).pcm.length} bytes`),
@@ -26,8 +50,10 @@ function makeService(opts: { enabled?: boolean; cidrs?: string | null; sttEnable
     synthesize: vi.fn(async (text: string) => pcmToWav(Buffer.alloc(text.length * 100, 3), { rate: 22050, width: 2, channels: 1 })),
   };
   const env = { get: (k: string, d?: string) => (k === 'WYOMING_PORT' ? '0' : k === 'WYOMING_BIND' ? '127.0.0.1' : d) };
-  const svc = new WyomingService(appConfig as any, transcription as any, tts as any, env as any);
-  return { svc, appConfig, transcription, tts };
+  // ModuleRef stand-in: the service resolves the conversation dependencies lazily by class token.
+  const moduleRef = { get: (token: any) => ({ AgentService: agentService, AgentsService: agentsService, UsersService: usersService, InvocationsService: invocations } as any)[token.name] };
+  const svc = new WyomingService(appConfig as any, transcription as any, tts as any, env as any, moduleRef as any);
+  return { svc, appConfig, transcription, tts, agentService, agentsService, usersService, invocations };
 }
 
 /** Sends events on a fresh connection and collects the replies until the socket idles. */
@@ -64,7 +90,8 @@ describe('WyomingService', () => {
     const voices = info.data.tts[0].voices.map((v: any) => v.name);
     expect(voices).toEqual(['it_IT-paola-medium', 'en_US-amy-low']);
     expect(info.data.tts[0].voices[0].languages).toEqual(['it', 'it-IT']);
-    expect(info.data.handle).toEqual([]);
+    expect(info.data.handle).toEqual([]);   // no conversation user configured → STT/TTS only
+    expect(ctx.svc.getStatus().handle).toBeNull();
   });
 
   it('transcribes the buffered PCM stream and returns a transcript', async () => {
@@ -141,5 +168,88 @@ describe('WyomingService — access control and toggle', () => {
     appConfig.getWyomingConfig.mockResolvedValueOnce({ wyomingEnabled: false, wyomingAllowedCidrs: null });
     await svc.applyConfig();
     expect(svc.getStatus().running).toBe(false);
+  });
+});
+
+describe('WyomingService — conversation (handle program)', () => {
+  it('advertises the handle program with the agent slug when a user + agent are configured', async () => {
+    const { svc } = makeService({ handleUser: VOICE_USER, handleAgent: VOICE_AGENT });
+    await svc.applyConfig();
+    const [info] = await exchange(svc.getStatus().port, [{ type: 'describe', data: {} }]);
+    expect(info.data.handle[0].models[0].name).toBe('voce-casa');
+    expect(info.data.handle[0].models[0].languages).toContain('it');
+    expect(svc.getStatus().handle).toEqual({ userEmail: 'voice@internal.com', agentName: 'Voce Casa', model: 'voce-casa' });
+    await svc.onModuleDestroy();
+  });
+
+  it('runs the agent as the configured user with its overrides and answers with handled', async () => {
+    const ctx = makeService({ handleUser: VOICE_USER, handleAgent: VOICE_AGENT });
+    await ctx.svc.applyConfig();
+    const context = { conversation_id: 'conv-1', device_id: 'dev-1' };
+    const [handled] = await exchange(ctx.svc.getStatus().port, [{ type: 'transcript', data: { text: 'accendi la luce', language: 'it', context } }]);
+    expect(handled.type).toBe('handled');
+    expect(handled.data.text).toBe('risposta a "accendi la luce" (history=0)');
+    expect(handled.data.context).toEqual(context);
+    const call = ctx.agentService.streamResponse.mock.calls[0];
+    expect(call[1]).toBe(VOICE_USER);
+    expect(call[12]).toMatchObject({ origin: 'voice', agentPromptOverride: 'Rispondi in una frase.', toolOverride: { mode: 'names' }, maxIterations: 7 });
+    expect(ctx.invocations.record).toHaveBeenCalledWith(expect.objectContaining({
+      userId: VOICE_USER, origin: 'voice', route: 'chat', model: 'wyoming:voce-casa', status: 'ok', inputTokens: 10,
+      toolCalls: [expect.objectContaining({ name: 'mcp_home_assistant_GetLiveContext', ok: true })],
+    }));
+    await ctx.svc.onModuleDestroy();
+  });
+
+  it('keeps multi-turn context per conversation_id and isolates other conversations', async () => {
+    const ctx = makeService({ handleUser: VOICE_USER });
+    await ctx.svc.applyConfig();
+    const port = ctx.svc.getStatus().port;
+    await exchange(port, [{ type: 'transcript', data: { text: 'primo', context: { conversation_id: 'A' } } }]);
+    const [second] = await exchange(port, [{ type: 'transcript', data: { text: 'secondo', context: { conversation_id: 'A' } } }]);
+    const [other]  = await exchange(port, [{ type: 'transcript', data: { text: 'altro', context: { conversation_id: 'B' } } }]);
+    expect(second.data.text).toContain('history=2');
+    expect(other.data.text).toContain('history=0');
+    // Standard pipeline (no agent): only the origin override is passed
+    expect(ctx.agentService.streamResponse.mock.calls[0][12]).toEqual({ origin: 'voice' });
+    await ctx.svc.onModuleDestroy();
+  });
+
+  it('answers not-handled when no conversation user is configured or the agent fails', async () => {
+    const none = makeService();
+    await none.svc.applyConfig();
+    const [nh] = await exchange(none.svc.getStatus().port, [{ type: 'transcript', data: { text: 'ciao' } }]);
+    expect(nh.type).toBe('not-handled');
+    await none.svc.onModuleDestroy();
+
+    const ctx = makeService({ handleUser: VOICE_USER });
+    await ctx.svc.applyConfig();
+    ctx.agentService.streamResponse.mockRejectedValueOnce(new Error('llm down'));
+    const [err] = await exchange(ctx.svc.getStatus().port, [{ type: 'transcript', data: { text: 'ciao' } }]);
+    expect(err).toMatchObject({ type: 'not-handled', data: { text: 'llm down' } });
+    expect(ctx.invocations.record).toHaveBeenCalledWith(expect.objectContaining({ status: 'error', error: 'llm down' }));
+    await ctx.svc.onModuleDestroy();
+  });
+
+  it('disables the handle program (but keeps STT/TTS) when the configured user or agent is gone', async () => {
+    const ctx = makeService({ handleUser: 'c3c3c3c3-0000-4000-8000-000000000003', handleAgent: VOICE_AGENT });
+    await ctx.svc.applyConfig();
+    const [info] = await exchange(ctx.svc.getStatus().port, [{ type: 'describe', data: {} }]);
+    expect(info.data.handle).toEqual([]);
+    expect(info.data.asr.length).toBe(1);
+    await ctx.svc.onModuleDestroy();
+
+    const fallback = makeService({ handleUser: VOICE_USER, handleAgent: 'd4d4d4d4-0000-4000-8000-000000000004' });
+    await fallback.svc.applyConfig();
+    expect(fallback.svc.getStatus().handle).toEqual({ userEmail: 'voice@internal.com', agentName: null, model: 'arkimede' });
+    await fallback.svc.onModuleDestroy();
+  });
+
+  it('validateHandleConfig rejects unknown users and agents not visible to the user', async () => {
+    const { svc } = makeService();
+    await expect(svc.validateHandleConfig('c3c3c3c3-0000-4000-8000-000000000003', null)).rejects.toThrow('wyoming.handleUserInvalid');
+    await expect(svc.validateHandleConfig(VOICE_USER, 'd4d4d4d4-0000-4000-8000-000000000004')).rejects.toThrow('wyoming.handleAgentInvalid');
+    await expect(svc.validateHandleConfig(VOICE_USER, VOICE_AGENT)).resolves.toBeUndefined();
+    await expect(svc.validateHandleConfig(null, VOICE_AGENT)).resolves.toBeUndefined();
+    expect(await svc.listHandleAgents(VOICE_USER)).toEqual([{ id: VOICE_AGENT, name: 'Voce Casa' }]);
   });
 });

@@ -75,8 +75,10 @@ export interface TranscriptionConfigDto {
 }
 
 export interface WyomingConfigDto {
-  wyomingEnabled:      boolean;
-  wyomingAllowedCidrs: string | null;
+  wyomingEnabled:       boolean;
+  wyomingAllowedCidrs:  string | null;
+  wyomingHandleUserId:  string | null;
+  wyomingHandleAgentId: string | null;
 }
 
 export interface TtsConfigDto {
@@ -343,11 +345,18 @@ export class AppConfigService implements OnModuleInit {
   // ── Wyoming voice server ────────────────────────────────────────────────────
 
   /** Returns the Wyoming server configuration (enabled flag + client allowlist). */
-  async getWyomingConfig(): Promise<{ wyomingEnabled: boolean; wyomingAllowedCidrs: string | null }> {
+  async getWyomingConfig(): Promise<{
+    wyomingEnabled:       boolean;
+    wyomingAllowedCidrs:  string | null;
+    wyomingHandleUserId:  string | null;
+    wyomingHandleAgentId: string | null;
+  }> {
     const config = await this.repo.findOne({ where: { id: CONFIG_ID } });
     return {
-      wyomingEnabled:      config?.wyomingEnabled      ?? false,
-      wyomingAllowedCidrs: config?.wyomingAllowedCidrs ?? null,
+      wyomingEnabled:       config?.wyomingEnabled       ?? false,
+      wyomingAllowedCidrs:  config?.wyomingAllowedCidrs  ?? null,
+      wyomingHandleUserId:  config?.wyomingHandleUserId  ?? null,
+      wyomingHandleAgentId: config?.wyomingHandleAgentId ?? null,
     };
   }
 
@@ -364,16 +373,19 @@ export class AppConfigService implements OnModuleInit {
       ...current,
       id: CONFIG_ID,
       systemPrompt: current?.systemPrompt ?? SYSTEM_PROMPT,
-      wyomingEnabled:      dto.wyomingEnabled,
-      wyomingAllowedCidrs: cidrs || null,
+      wyomingEnabled:       dto.wyomingEnabled,
+      wyomingAllowedCidrs:  cidrs || null,
+      wyomingHandleUserId:  dto.wyomingHandleUserId  || null,
+      // An agent without a user makes no sense: the agent is resolved in that user's scope.
+      wyomingHandleAgentId: dto.wyomingHandleUserId ? (dto.wyomingHandleAgentId || null) : null,
     });
-    this.logger.log(`WyomingConfig: updated — enabled=${dto.wyomingEnabled} allowlist=${cidrs || '(any)'}`);
+    this.logger.log(`WyomingConfig: updated — enabled=${dto.wyomingEnabled} allowlist=${cidrs || '(any)'} handleUser=${dto.wyomingHandleUserId ?? '-'} agent=${dto.wyomingHandleAgentId ?? '-'}`);
     await this.audit?.record({
       actorId: actorId ?? null,
       action: 'appconfig.update',
       resource: 'wyoming',
       outcome: 'ok',
-      ctx: { section: 'wyoming', enabled: dto.wyomingEnabled, allowlist: cidrs || null },
+      ctx: { section: 'wyoming', enabled: dto.wyomingEnabled, allowlist: cidrs || null, handleUserId: dto.wyomingHandleUserId ?? null, handleAgentId: dto.wyomingHandleAgentId ?? null },
     });
     return this.getWyomingConfig();
   }

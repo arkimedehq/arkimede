@@ -1,0 +1,4 @@
+{
+  "handleUserInvalid": "Invalid conversation user: it must exist and be active",
+  "handleAgentInvalid": "Invalid agent: it must be visible to the selected user"
+}

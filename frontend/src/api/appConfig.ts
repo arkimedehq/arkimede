@@ -58,17 +58,24 @@ export interface TtsConfig {
 
 /** Wyoming voice server (Home Assistant & co.): config + live status. */
 export interface WyomingConfig {
-  wyomingEnabled:      boolean;
-  wyomingAllowedCidrs: string | null;
+  wyomingEnabled:       boolean;
+  wyomingAllowedCidrs:  string | null;
+  /** Conversation identity (null = STT/TTS only). */
+  wyomingHandleUserId:  string | null;
+  wyomingHandleAgentId: string | null;
   running:   boolean;
   port:      number;
   clients:   number;
   lastError: string | null;
+  /** Conversation agent as resolved by the server (null = not exposed). */
+  handle:    { userEmail: string; agentName: string | null; model: string } | null;
 }
 
 export interface UpdateWyomingConfigPayload {
-  wyomingEnabled:       boolean;
-  wyomingAllowedCidrs?: string | null;
+  wyomingEnabled:        boolean;
+  wyomingAllowedCidrs?:  string | null;
+  wyomingHandleUserId?:  string | null;
+  wyomingHandleAgentId?: string | null;
 }
 
 export interface UpdateTtsConfigPayload {
@@ -170,6 +177,10 @@ export const appConfigApi = {
   /** PATCH /api/admin/config/wyoming — update the configuration (listener restarted at once) */
   updateWyomingConfig: (payload: UpdateWyomingConfigPayload): Promise<WyomingConfig> =>
     api.patch('/admin/config/wyoming', payload).then((r) => r.data),
+
+  /** GET /api/admin/config/wyoming/agents?userId= — agents a user can run as conversation agent */
+  listWyomingAgents: (userId: string): Promise<{ id: string; name: string }[]> =>
+    api.get('/admin/config/wyoming/agents', { params: { userId } }).then((r) => r.data),
 
   // ── Tool Loading Config ─────────────────────────────────────────────────────
 

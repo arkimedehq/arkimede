@@ -1402,7 +1402,11 @@ Arkimede può esporre i provider STT/TTS configurati con il protocollo Wyoming
   `<host-arkimede>:10300` → scegli i nuovi STT/TTS nella pipeline di Assist.
 
 Funziona con qualsiasi provider scelto nel pannello (Whisper/Piper interni o
-cloud). Il protocollo non ha autenticazione: abilitalo solo su reti fidate.
+cloud). Scegliendo nella stessa card un **utente di conversazione** (e
+facoltativamente un suo agente) l'hub ottiene anche Arkimede come agente di
+conversazione: l'intera pipeline vocale gira su Arkimede senza componenti
+aggiuntivi sull'hub. Il protocollo non ha autenticazione: abilitalo solo su
+reti fidate.
 
 ### Chat e messaggi
 

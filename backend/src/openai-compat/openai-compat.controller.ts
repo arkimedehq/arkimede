@@ -29,13 +29,14 @@ import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nes
 import { Response } from 'express';
 import { randomUUID } from 'node:crypto';
 import { AgentService, StreamResponseOptions } from '../agent/agent.service';
+import { agentRunOptions } from '../agents/agent-run-options';
+import { makeToolCollector } from '../invocations/tool-collector';
 import { AgentsService } from '../agents/agents.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { TranscriptionService } from '../transcription/transcription.service';
 import { TtsService } from '../tts/tts.service';
 import { InvocationsService } from '../invocations/invocations.service';
-import { InvocationToolCall } from '../invocations/invocation.entity';
 import { SpeechRequestDto } from './openai-audio.dto';
 import {
   agentSlug, chunkFrame, completionBody, errorBody, mapOpenAiMessages,
@@ -47,31 +48,6 @@ const DEFAULT_MODEL_ID = 'arkimede';
 
 /** Audio size limit: 25 MB (aligned with the OpenAI/Whisper limit). */
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
-
-/**
- * Collects the pipeline's tool events into InvocationToolCall records for the
- * invocation log (same onToolCall/onToolResult pairing as the chat SSE flow in
- * messages.controller.ts; truncation happens in InvocationsService at write time).
- */
-function makeToolCollector() {
-  const records: (InvocationToolCall & { startedAt: number })[] = [];
-  return {
-    records,
-    onToolCall: (toolCall: any) => {
-      records.push({ name: toolCall?.name ?? '', input: toolCall?.input, startedAt: Date.now() });
-    },
-    onToolResult: (toolName: string, result: any, status?: 'success' | 'error', input?: any) => {
-      const record = records.find((r) => r.name === toolName && r.output === undefined);
-      if (record) {
-        record.output = result;
-        record.ok = status !== 'error';
-        record.durationMs = Date.now() - record.startedAt;
-        // The complete input is only known when the call ends (args arrive as deltas).
-        if (input !== undefined) record.input = input;
-      }
-    },
-  };
-}
 
 @ApiTags('openai-compat')
 @ApiBearerAuth()
@@ -344,20 +320,11 @@ export class OpenAiCompatController {
    * Throws when the slug matches none of the user's agents.
    */
   private async resolveModelOptions(modelId: string, userId: string): Promise<StreamResponseOptions> {
-    const base: StreamResponseOptions = { origin: 'voice' };
-    if (!modelId || modelId === DEFAULT_MODEL_ID) return base;
+    if (!modelId || modelId === DEFAULT_MODEL_ID) return agentRunOptions(null, 'voice');
     const agents = await this.agentsService.findAll(userId);
     const agent = agents.find((a) => agentSlug(a.name) === modelId);
     if (!agent) throw new Error('model not found');
-    return {
-      ...base,
-      ...(agent.systemPrompt?.trim() ? { agentPromptOverride: agent.systemPrompt } : {}),
-      ...(agent.toolFilter ? { toolOverride: agent.toolFilter } : {}),
-      ...(agent.llmConfigId ? { llmConfigId: agent.llmConfigId } : {}),
-      // Agent.maxIterations counts ReAct TOOL ROUNDS (user-facing semantics);
-      // the LangGraph recursion limit counts graph super-steps — each round is
-      // agent + tool (2 steps) plus the final agent step.
-      ...(agent.maxIterations ? { maxIterations: agent.maxIterations * 2 + 1 } : {}),
-    };
+    return agentRunOptions(agent, 'voice');
   }
+
 }

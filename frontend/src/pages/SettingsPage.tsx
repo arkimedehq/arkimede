@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import type { LlmProvider, EmbeddingProvider, EmbeddingConfig, ToolLoadingConfig, ToolLoadingStrategy, ToolSchemaFormat, TranscriptionProvider, TtsProvider, SandboxNetwork, SandboxExecMode } from '../api/appConfig';
 import { apiKeysApi } from '../api/apiKeys';
+import { adminUsersApi } from '../api/adminUsers';
 import { filesApi, type FileRecord, type DocScope, type FileScope } from '../api/files';
 import { profileApi } from '../api/profile';
 import { appConfigApi } from '../api/appConfig';
@@ -5250,18 +5251,37 @@ function WyomingConfigCard() {
 
   const [enabled, setEnabled] = useState(false);
   const [cidrs,   setCidrs]   = useState('');
+  const [handleUserId,  setHandleUserId]  = useState('');
+  const [handleAgentId, setHandleAgentId] = useState('');
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
     if (!data) return;
     setEnabled(data.wyomingEnabled);
     setCidrs(data.wyomingAllowedCidrs ?? '');
+    setHandleUserId(data.wyomingHandleUserId ?? '');
+    setHandleAgentId(data.wyomingHandleAgentId ?? '');
   }, [data]);
+
+  // Conversation identity pickers: active users, then the agents visible to the chosen user.
+  const { data: usersPage } = useQuery({
+    queryKey: ['wyoming-users'],
+    queryFn:  () => adminUsersApi.list({ status: 'active', pageSize: 100 }),
+    staleTime: 60_000,
+  });
+  const { data: handleAgents } = useQuery({
+    queryKey: ['wyoming-agents', handleUserId],
+    queryFn:  () => appConfigApi.listWyomingAgents(handleUserId),
+    enabled:  !!handleUserId,
+    staleTime: 60_000,
+  });
 
   const saveMutation = useMutation({
     mutationFn: () => appConfigApi.updateWyomingConfig({
-      wyomingEnabled:      enabled,
-      wyomingAllowedCidrs: cidrs.trim() || null,
+      wyomingEnabled:       enabled,
+      wyomingAllowedCidrs:  cidrs.trim() || null,
+      wyomingHandleUserId:  handleUserId || null,
+      wyomingHandleAgentId: handleUserId ? (handleAgentId || null) : null,
     }),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['wyoming-config'] });
@@ -5273,7 +5293,12 @@ function WyomingConfigCard() {
     onError: (e: any) => setMsg({ ok: false, text: e?.response?.data?.message ?? t('vectordb.errorGeneric') }),
   });
 
-  const dirty = !!data && (enabled !== data.wyomingEnabled || cidrs.trim() !== (data.wyomingAllowedCidrs ?? ''));
+  const dirty = !!data && (
+    enabled !== data.wyomingEnabled
+    || cidrs.trim() !== (data.wyomingAllowedCidrs ?? '')
+    || handleUserId !== (data.wyomingHandleUserId ?? '')
+    || (handleUserId ? handleAgentId : '') !== (data.wyomingHandleAgentId ?? '')
+  );
   const hostHint = window.location.hostname;
 
   return (
@@ -5326,6 +5351,50 @@ function WyomingConfigCard() {
             transition-colors font-mono"
         />
         <p className="text-[11px] text-gray-600 mt-1">{t('wyoming.allowlistHint')}</p>
+      </div>
+
+      {/* ── Conversation agent (handle program) ── */}
+      <div className="border-t border-gray-800 pt-4 space-y-3">
+        <div>
+          <p className="text-sm text-gray-200">{t('wyoming.handleTitle')}</p>
+          <p className="text-xs text-gray-500 mt-0.5">{t('wyoming.handleHint')}</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-400 mb-1">{t('wyoming.handleUserLabel')}</label>
+            <select
+              value={handleUserId}
+              onChange={(e) => { setHandleUserId(e.target.value); setHandleAgentId(''); }}
+              className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm
+                text-gray-100 focus:outline-none focus:border-blue-500 transition-colors"
+            >
+              <option value="">{t('wyoming.handleUserNone')}</option>
+              {(usersPage?.items ?? []).map((u) => (
+                <option key={u.id} value={u.id}>{u.name ? `${u.name} — ${u.email}` : u.email}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-400 mb-1">{t('wyoming.handleAgentLabel')}</label>
+            <select
+              value={handleAgentId}
+              disabled={!handleUserId}
+              onChange={(e) => setHandleAgentId(e.target.value)}
+              className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm
+                text-gray-100 focus:outline-none focus:border-blue-500 transition-colors disabled:opacity-50"
+            >
+              <option value="">{t('wyoming.handleAgentNone')}</option>
+              {(handleAgents ?? []).map((a) => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        {data?.handle && (
+          <p className="text-xs text-gray-500">
+            {t('wyoming.handleActive', { user: data.handle.userEmail, model: data.handle.model })}
+          </p>
+        )}
       </div>
 
       {/* ── How to connect ── */}

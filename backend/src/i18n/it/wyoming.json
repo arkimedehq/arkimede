@@ -1,0 +1,4 @@
+{
+  "handleUserInvalid": "Utente per la conversazione non valido: deve esistere ed essere attivo",
+  "handleAgentInvalid": "Agente non valido: deve essere visibile all'utente scelto"
+}
