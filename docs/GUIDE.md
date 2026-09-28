@@ -184,6 +184,7 @@ Overlays are **added** to the base file with `-f`. Summary of the 4 Compose file
 | `docker-compose.override.yml` | auto with `docker compose up` | Dev: re-exposes host ports |
 | `docker-compose.egress.yml` | opt-in `-f` | **C1** — egress allowlist (executor on internal network + squid proxy) |
 | `docker-compose.broker.yml` | opt-in `-f` | **D2** — hardened container-per-job via broker |
+| `docker-compose.novoice.yml` | opt-in `-f` (last) | Small hosts: drops the Whisper/Piper voice services (~1 GB RAM) |
 
 ```bash
 # Base prod

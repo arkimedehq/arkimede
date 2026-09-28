@@ -276,6 +276,17 @@ else
   fi
 fi
 
+# ── Voice services (optional) ─────────────────────────────────────────────────
+# Whisper (STT) + Piper (TTS) are on-demand services: small hosts can drop them.
+# The novoice overlay must stay LAST in the chain (it overrides backend depends_on).
+echo
+if yesno "Enable the internal voice services (Whisper STT + Piper TTS, ~1 GB RAM)?" "Y"; then
+  ok "voice services enabled"
+else
+  COMPOSE_FILES+=("-f" "docker-compose.novoice.yml")
+  ok "voice services disabled (docker-compose.novoice.yml) — re-enable by dropping it from scripts/.compose-profile"
+fi
+
 # ── 4. Build required images ──────────────────────────────────────────────────
 step "4/6 · Build images"
 if (( NEED_RUNNER )); then

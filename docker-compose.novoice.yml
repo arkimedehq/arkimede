@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright © 2026 Andrea Genovese
+
+# Overlay — WITHOUT the internal voice services (OPT-IN, not auto-merge).
+#
+#   docker compose -f docker-compose.yml [-f docker-compose.broker.yml ...] \
+#                  -f docker-compose.novoice.yml up -d
+#
+# For small hosts (≈4 GB RAM) that don't need speech: the `whisper` (STT) and
+# `piper` (TTS) containers are moved to the `voice` profile, so they are neither
+# built nor started (~0.7–1 GB RAM saved). The backend only calls them on demand,
+# so it boots fine without them: microphone input / read-aloud / Wyoming simply
+# fail per request — or point them to an external provider from the admin UI.
+#
+# To bring the voice services back: drop this file from the chain, or add
+# `--profile voice` to the compose command.
+#
+# Keep this file LAST in the `-f` chain: `!override` replaces the backend's whole
+# depends_on map (requires Docker Compose ≥ 2.24.4).
+
+services:
+  whisper:
+    profiles: ["voice"]
+
+  piper:
+    profiles: ["voice"]
+
+  backend:
+    depends_on: !override
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      embedding:
+        condition: service_healthy
+      skill-executor:
+        condition: service_healthy

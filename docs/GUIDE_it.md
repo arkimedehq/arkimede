@@ -183,6 +183,7 @@ Gli overlay si **sommano** al file base con `-f`. Riepilogo dei 4 file Compose:
 | `docker-compose.override.yml` | auto con `docker compose up` | Dev: riespone le porte host |
 | `docker-compose.egress.yml` | opt-in `-f` | **C1** — egress allowlist (executor su rete interna + proxy squid) |
 | `docker-compose.broker.yml` | opt-in `-f` | **D2** — container-per-job blindato via broker |
+| `docker-compose.novoice.yml` | opt-in `-f` (ultimo) | Host piccoli: esclude i servizi voce Whisper/Piper (~1 GB RAM) |
 
 ```bash
 # Base prod
