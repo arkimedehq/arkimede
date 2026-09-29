@@ -23,7 +23,7 @@ FROM node:20-slim
 # already in the node base). The EXTERNALLY-MANAGED marker (PEP 668 on Debian) is
 # removed so `pip install --user`/`--target` works without --break-system-packages.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 python3-pip ca-certificates libgomp1 \
+    python3 python3-pip ca-certificates \
     && ln -sf /usr/bin/python3 /usr/bin/python \
     && rm -f /usr/lib/python3*/EXTERNALLY-MANAGED \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
