@@ -21,7 +21,12 @@
     "hide": "Hide",
     "jwtNote": "Each user has their own token. The bridge using this token will only receive commands related to your account. The token expires every 7 days — come back here to copy a fresh one.",
     "macGatekeeperTitle": "macOS: first launch",
-    "macGatekeeperBody": "The bridge is ad-hoc signed but not notarized by Apple, so macOS blocks the first launch. Unblock it once with right-click on the app → Open, or run in Terminal (adjust the path if not in Applications):"
+    "macGatekeeperBody": "The bridge is ad-hoc signed but not notarized by Apple, so macOS blocks the first launch. Unblock it once with right-click on the app → Open, or run in Terminal (adjust the path if not in Applications):",
+    "status": {
+      "checking": "Checking…",
+      "connected": "Connected",
+      "disconnected": "Not connected"
+    }
   },
   "banner": {
     "connected_one": "Bridge connected — {{count}} active remote server",

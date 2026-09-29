@@ -230,6 +230,31 @@ function CopyButton({ value, label }: { value: string; label?: string }) {
 
 // ── Bridge configuration panel ───────────────────────────────────────────────
 
+// ── Bridge status (shared by the setup panel and the banner) ─────────────────
+
+/**
+ * The caller's bridge connection status, as a query (not one-shot state) so it
+ * re-checks on refresh, window focus and a light interval. Shared query key: the
+ * panel and the banner read the same result and a refresh updates both.
+ */
+function useBridgeStatus() {
+  const statusQ = useQuery({
+    queryKey: ['bridge-status'],
+    queryFn: async (): Promise<'connected' | 'disconnected'> => {
+      try {
+        const { connected } = await mcpServersApi.getBridgeStatus();
+        return connected ? 'connected' : 'disconnected';
+      } catch {
+        return 'disconnected';
+      }
+    },
+    refetchInterval: 20_000,
+  });
+  const bridgeStatus: 'checking' | 'connected' | 'disconnected' =
+    statusQ.isLoading ? 'checking' : (statusQ.data ?? 'disconnected');
+  return { statusQ, bridgeStatus };
+}
+
 function BridgeSetupPanel() {
   const { t } = useTranslation('mcp');
   const token = useStore((s) => s.token);
@@ -274,12 +299,25 @@ function BridgeSetupPanel() {
   });
   const downloadUrl = releaseQ.data ?? bridgeReleasesUrl();
   const osLabel = bridgeOSLabel(detectBridgeOS());
+  const { bridgeStatus } = useBridgeStatus();
 
   return (
     <div className="mb-5 rounded-xl border border-gray-800 bg-gray-900/60 p-4">
       <div className="flex items-center gap-2 mb-1">
         <Link2 size={14} className="text-blue-400" />
-        <h3 className="flex-1 min-w-0 text-sm font-semibold text-gray-200">{t('bridge.title')}</h3>
+        <h3 className="text-sm font-semibold text-gray-200">{t('bridge.title')}</h3>
+        <span
+          className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium
+            ${bridgeStatus === 'connected'
+              ? 'bg-emerald-500/15 text-emerald-400'
+              : bridgeStatus === 'checking'
+                ? 'bg-gray-500/15 text-gray-400'
+                : 'bg-amber-500/15 text-amber-400'}`}
+        >
+          <span className={`h-1.5 w-1.5 rounded-full ${bridgeStatus === 'connected' ? 'bg-emerald-400' : bridgeStatus === 'checking' ? 'bg-gray-400' : 'bg-amber-400'}`} />
+          {t(`bridge.status.${bridgeStatus}`)}
+        </span>
+        <span className="flex-1" />
         <a
           href={downloadUrl}
           target="_blank"
@@ -459,25 +497,7 @@ function BridgeBanner({
   const { t } = useTranslation('mcp');
   const qc = useQueryClient();
 
-  // Bridge status as a query (not one-shot state) so it re-checks on refresh,
-  // window focus and a light interval — instead of only on a full page reload.
-  const statusQ = useQuery({
-    queryKey: ['bridge-status'],
-    queryFn: async (): Promise<'connected' | 'disconnected'> => {
-      // The first enabled 'remote' server is the reference for the bridge status.
-      const servers = await mcpServersApi.list();
-      const remote = servers.find((s) => s.transport === 'remote' && s.enabled);
-      if (!remote) return 'disconnected';
-      try {
-        const { connected } = await mcpServersApi.getBridgeStatus(remote.id);
-        return connected ? 'connected' : 'disconnected';
-      } catch {
-        return 'disconnected';
-      }
-    },
-    refetchInterval: 20_000,
-  });
-  const bridgeStatus = statusQ.isLoading ? 'checking' : (statusQ.data ?? 'disconnected');
+  const { statusQ, bridgeStatus } = useBridgeStatus();
 
   // Ask the backend to re-probe the bridge, then re-read the status.
   const refreshMutation = useMutation({

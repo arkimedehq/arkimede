@@ -89,8 +89,8 @@ export const mcpServersApi = {
     api.post<McpTestResult>(`/mcp-servers/${id}/test`).then((r) => r.data),
 
   // Bridge
-  getBridgeStatus: (id: string) =>
-    api.get<{ connected: boolean }>(`/mcp-servers/${id}/status`).then((r) => r.data),
+  getBridgeStatus: () =>
+    api.get<{ connected: boolean }>('/mcp-servers/bridge/status').then((r) => r.data),
 
   refreshBridge: () =>
     api.post('/mcp-servers/bridge/refresh'),

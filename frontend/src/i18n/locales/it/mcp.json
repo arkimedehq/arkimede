@@ -21,7 +21,12 @@
     "hide": "Nascondi",
     "jwtNote": "Ogni utente ha il proprio token. Il bridge che usa questo token riceverà solo i comandi relativi al tuo account. Il token scade ogni 7 giorni — torna qui per copiarne uno fresco.",
     "macGatekeeperTitle": "macOS: primo avvio",
-    "macGatekeeperBody": "Il bridge è firmato ad-hoc ma non notarizzato da Apple, quindi al primo avvio macOS lo blocca. Sblocca una tantum con click destro sull’app → Apri, oppure esegui nel Terminale (adatta il percorso se non è in Applicazioni):"
+    "macGatekeeperBody": "Il bridge è firmato ad-hoc ma non notarizzato da Apple, quindi al primo avvio macOS lo blocca. Sblocca una tantum con click destro sull’app → Apri, oppure esegui nel Terminale (adatta il percorso se non è in Applicazioni):",
+    "status": {
+      "checking": "Verifica…",
+      "connected": "Connesso",
+      "disconnected": "Non connesso"
+    }
   },
   "banner": {
     "connected_one": "Bridge connesso — {{count}} server remote attivo",

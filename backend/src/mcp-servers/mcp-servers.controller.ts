@@ -17,8 +17,8 @@
  *   PUT    /api/mcp-servers/:id/secrets  — upsert secrets
  *   DELETE /api/mcp-servers/:id/secrets/:key — delete a secret
  *
- *   GET    /api/mcp-servers/:id/status   — bridge status (connected/disconnected)
- *   POST   /api/mcp-servers/:id/refresh  — send updated config to the bridge
+ *   GET    /api/mcp-servers/bridge/status  — the caller's bridge status (connected/disconnected)
+ *   POST   /api/mcp-servers/bridge/refresh — send updated config to the bridge
  */
 import {
   Controller, Get, Post, Patch, Delete, Put, Param,
@@ -185,8 +185,10 @@ export class McpServersController {
 
   // ── Bridge status ─────────────────────────────────────────────────────────
 
-  @Get(':id/status')
-  getBridgeStatus(@Param('id') _id: string, @CurrentUser() user: any) {
+  // Per-user: the bridge authenticates with the user's token, so its status does not
+  // depend on any specific server (and is meaningful before any 'remote' one exists).
+  @Get('bridge/status')
+  getBridgeStatus(@CurrentUser() user: any) {
     const connected = this.gateway.isBridgeConnected(user.id);
     return { connected };
   }
