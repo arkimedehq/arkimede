@@ -35,6 +35,7 @@ import { appConfigApi } from '../api/appConfig';
 import { vectorDbApi, type VectorCollection } from '../api/vectorDb';
 import { useStore } from '../store/useStore';
 import type { Project } from '../store/useStore';
+import { copyText } from '../utils/clipboard';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -445,8 +446,8 @@ function SkillDrawer({
               </p>
             </div>
             <button
-              onClick={() => {
-                navigator.clipboard.writeText(current.id);
+              onClick={async () => {
+                if (!(await copyText(current.id))) return;
                 setCopied(true);
                 setTimeout(() => setCopied(false), 2000);
               }}

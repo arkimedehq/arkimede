@@ -12,6 +12,7 @@ import {
   adminUsersApi, type AdminUser, type UserRole, type UserStatus,
 } from '../api/adminUsers';
 import { useStore } from '../store/useStore';
+import { copyText } from '../utils/clipboard';
 
 /**
  * Admin section: user management.
@@ -297,11 +298,9 @@ function ApiKeyEditor({ user, onClose }: { user: AdminUser; onClose: () => void 
 
   const copyKey = async () => {
     if (!createdKey) return;
-    try {
-      await navigator.clipboard.writeText(createdKey);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch { /* clipboard unavailable */ }
+    if (!(await copyText(createdKey))) return;
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString() : '—');

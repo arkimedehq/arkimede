@@ -39,6 +39,7 @@ import { AutomationsSection } from './AutomationsPage';
 import { ActivitySection } from './ActivityPage';
 import { AuditSection } from './AuditPage';
 import { BackupSection } from './BackupPage';
+import { copyText } from '../utils/clipboard';
 
 // ── Settings sections ──────────────────────────────────────────────────────────
 // `id` also acts as the i18n key: t(`settings:nav.${id}`)
@@ -1765,11 +1766,9 @@ function ApiKeysCard() {
 
   const copyKey = async () => {
     if (!createdKey) return;
-    try {
-      await navigator.clipboard.writeText(createdKey);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch { /* clipboard unavailable */ }
+    if (!(await copyText(createdKey))) return;
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString() : '—');

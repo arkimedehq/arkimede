@@ -25,6 +25,7 @@ import { mcpServersApi, type McpServer, type CreateMcpServerPayload } from '../a
 import { ScopeSelector } from '../components/ScopeSelector';
 import { useStore } from '../store/useStore';
 import { detectBridgeOS, bridgeOSLabel, bridgeReleasesUrl, fetchLatestBridgeReleaseUrl } from '../utils/bridgeDownload';
+import { copyText } from '../utils/clipboard';
 
 // ── Form types ─────────────────────────────────────────────────────────────────
 
@@ -210,13 +211,9 @@ function CopyButton({ value, label }: { value: string; label?: string }) {
   const [copied, setCopied] = useState(false);
 
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // fallback
-    }
+    if (!(await copyText(value))) return;
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   return (
@@ -318,7 +315,8 @@ function BridgeSetupPanel() {
             <span className="ml-1.5 text-gray-600 font-normal">{t('bridge.jwtHint')}</span>
           </p>
           <div className="flex items-center gap-2 bg-gray-800 rounded-lg px-3 py-2">
-            <code className="flex-1 text-xs text-amber-300 font-mono truncate">
+            {/* Revealed token wraps in full (a JWT overflows any single line); masked stays one line */}
+            <code className={`flex-1 min-w-0 text-xs text-amber-300 font-mono ${showToken ? 'break-all select-all' : 'truncate'}`}>
               {showToken ? token : maskedToken}
             </code>
             <button
