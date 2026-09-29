@@ -41,6 +41,8 @@ function safeEqual(a, b) {
 
 const PORT = parseInt(process.env.PORT || '4100', 10);
 const API_KEY = process.env.SERVICE_API_KEY || '';
+// Max /run-job body (job input piped to stdin). Same env var as the executor's limit.
+const MAX_INPUT_BYTES = (Number(process.env.SKILL_MAX_INPUT_MB) || 20) * 1024 * 1024;
 const SKILLS_ROOT = path.resolve(process.env.BROKER_SKILLS_ROOT || '');
 // Host root for per-skill persistent state (writable /skill-state mount).
 const STATE_ROOT = process.env.BROKER_STATE_ROOT ? path.resolve(process.env.BROKER_STATE_ROOT) : '';
@@ -446,11 +448,14 @@ const server = http.createServer((req, res) => {
     if (!API_KEY || !safeEqual(req.headers['x-service-key'], API_KEY)) return send(401, {error: 'unauthorized'});
 
     let raw = '';
+    let tooLarge = false;
     req.on('data', (c) => {
+        if (tooLarge) return;
         raw += c;
-        if (raw.length > 4 * 1024 * 1024) req.destroy();
+        if (raw.length > MAX_INPUT_BYTES) { tooLarge = true; raw = ''; }
     });
     req.on('end', async () => {
+        if (tooLarge) return send(413, {error: `job input larger than ${MAX_INPUT_BYTES} bytes (SKILL_MAX_INPUT_MB)`});
         let body;
         try {
             body = JSON.parse(raw || '{}');

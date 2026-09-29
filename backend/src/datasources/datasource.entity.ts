@@ -69,7 +69,7 @@ export class DataSourceEntity {
   /**
    * Schema relations and notes — free text read by the LLM before prefetch.
    * Use for legacy DBs without declared FKs:
-   *   "fornitore.COD_FOR → ordini.COD_FOR_ORD\nFLAGSTORICO=1 = storicizzato"
+   *   "supplier.SUPPLIER_ID → orders.SUPPLIER_ID\nARCHIVED=1 = archived record"
    */
   @Column({ type: 'text', nullable: true })
   schemaHints: string | null;

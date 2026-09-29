@@ -1689,7 +1689,7 @@ export function buildDynamicTool(
         describe_tables: z.array(z.string()).optional()
           .describe(
             'List of tables to get the columns for (types, comments, foreign keys) ' +
-            'BEFORE writing the query. E.g.: ["cliente","progettohead"]. Use it after seeing the table list.',
+            'BEFORE writing the query. E.g.: ["customers","orders"]. Use it after seeing the table list.',
           ),
       });
     }
@@ -1712,7 +1712,7 @@ export function buildDynamicTool(
         describe_collections: z.array(z.string()).optional()
           .describe(
             'List of collections to get the fields for (path, types, frequency) BEFORE writing ' +
-            'the query. E.g.: ["ordini","clienti"]. Use it after seeing the collection list.',
+            'the query. E.g.: ["orders","customers"]. Use it after seeing the collection list.',
           ),
       });
     }

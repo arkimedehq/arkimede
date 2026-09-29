@@ -20,6 +20,11 @@ server {
     proxy_buffering off;
     proxy_cache off;
     chunked_transfer_encoding on;
+    # Long synchronous calls: POST /api/skills/:id/execute accepts up to 600s
+    # (timeout_ms cap), plus long SSE turns. The nginx default (60s) cut them
+    # with a 504 while the backend kept working.
+    proxy_read_timeout 660s;
+    proxy_send_timeout 660s;
   }
 
   # Socket.IO — real-time notifications (toast + bell).

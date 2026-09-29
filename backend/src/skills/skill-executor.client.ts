@@ -14,7 +14,7 @@
  * In local development (outside Docker) the service may be unavailable:
  * the methods throw SkillExecutorUnavailableError in that case.
  */
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, PayloadTooLargeException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { NetworkMode } from './skill-networks';
 
@@ -298,6 +298,11 @@ export class SkillExecutorClient {
     if (!res.ok && res.status !== 422) {
       const text = await res.text().catch(() => '');
       this.logger.error(`skill-executor POST ${path} → HTTP ${res.status}: ${text.slice(0, 300)}`);
+      if (res.status === 413) {
+        throw new PayloadTooLargeException(
+          'Skill input too large for the skill executor (limit: SKILL_MAX_INPUT_MB).',
+        );
+      }
       throw new Error(`skill-executor error ${res.status}: ${text.slice(0, 200)}`);
     }
 

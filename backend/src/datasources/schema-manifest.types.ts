@@ -205,7 +205,7 @@ export function renderManifestCompact(manifest: SchemaManifest): string {
   parts.push(
     'Columns are not listed here. Before writing the query, call the tool ' +
     'with the "describe_tables" parameter set to the tables you need ' +
-    '(e.g. describe_tables: ["cliente","progettohead"]) to receive their fields, ' +
+    '(e.g. describe_tables: ["customers","orders"]) to receive their fields, ' +
     'types, comments and foreign keys.',
   );
 

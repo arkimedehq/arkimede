@@ -29,7 +29,13 @@ let activeConcurrent = 0;
 // In dev: colorized, readable output (pino-pretty).
 // In production: structured JSON (compatible with log aggregators).
 
+// Max request body (script input). Fastify's default is 1 MB, too small for skills
+// that pass whole datasets to another skill (e.g. training rows). Kept in sync with
+// the broker's limit via the same env var; the backend accepts 20 MB.
+const MAX_INPUT_BYTES = (Number(process.env.SKILL_MAX_INPUT_MB) || 20) * 1024 * 1024;
+
 const app = Fastify({
+  bodyLimit: MAX_INPUT_BYTES,
   logger: IS_DEV
     ? {
         transport: {

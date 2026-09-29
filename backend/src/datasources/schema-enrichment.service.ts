@@ -51,6 +51,53 @@ const RELATIONS_MAX_TOKENS = 16384;
 /** Candidate FK columns (heuristic to reduce the relations prompt payload). */
 const FK_PATTERN = /(^|_)(id|cod|code|fk)/i;
 
+/**
+ * Output budget for the single-table retry of a comment batch whose response was
+ * unusable. Reasoning models spend part of the budget on thinking, so a table
+ * with many columns may not fit in COMMENT_MAX_TOKENS.
+ */
+const COMMENT_RETRY_MAX_TOKENS = COMMENT_MAX_TOKENS * 2;
+
+/**
+ * Source tables per call when relation inference falls back to chunked mode
+ * (the single call over the whole schema produced no usable output).
+ */
+const RELATIONS_CHUNK_SIZE = 15;
+
+/** Max key-like columns per table listed in the chunked relations catalog. */
+const RELATIONS_CATALOG_MAX_COLUMNS = 12;
+
+/**
+ * The model answered, but the output is unusable: empty, cut off by the
+ * output-token budget, or not valid JSON. Typical of reasoning models that spend
+ * the budget on thinking. Retryable with smaller batches / a larger budget,
+ * unlike provider/API errors (auth, quota, network), which are never retried.
+ */
+class LlmOutputError extends Error {}
+
+/** True for errors worth retrying with a smaller batch or a larger budget. */
+function isOutputError(err: unknown): boolean {
+  return err instanceof LlmOutputError || err instanceof SyntaxError;
+}
+
+/**
+ * True when the provider reports that generation stopped at the output-token
+ * limit. Covers the finish-reason field of each provider family: OpenAI-compatible
+ * (`finish_reason: length`), Anthropic (`stop_reason: max_tokens`), Gemini
+ * (`finishReason: MAX_TOKENS`) and Ollama (`done_reason: length`).
+ */
+function isOutputTruncated(res: { response_metadata?: Record<string, unknown> }): boolean {
+  const meta = res.response_metadata ?? {};
+  const reason = String(meta.finish_reason ?? meta.stop_reason ?? meta.finishReason ?? meta.done_reason ?? '').toLowerCase();
+  return reason === 'length' || reason === 'max_tokens';
+}
+
+/** Base model + lazily built larger-budget model for the single-item retry. */
+interface CommentModels {
+  base: BaseChatModel;
+  large: () => Promise<BaseChatModel>;
+}
+
 @Injectable()
 export class SchemaEnrichmentService {
   private readonly logger = new Logger(SchemaEnrichmentService.name);
@@ -130,7 +177,7 @@ export class SchemaEnrichmentService {
     // Separate models: comments go in small batches; relations are a single
     // call that requires a much larger output budget.
     const comments = await this.fillComments(
-      await this.buildModel(llmEntity, COMMENT_MAX_TOKENS), manifest, domain,
+      await this.commentModels(llmEntity), manifest, domain,
     );
     const relations = await this.inferRelations(
       await this.buildModel(llmEntity, RELATIONS_MAX_TOKENS), manifest, domain,
@@ -169,9 +216,9 @@ export class SchemaEnrichmentService {
 
     const llmEntity = await this.resolveLlmEntity(llmConfigId);
     this.logger.log(`Enrich Mongo: model "${llmEntity.name}" (${llmEntity.provider}/${llmEntity.model})`);
-    const model = await this.buildModel(llmEntity, COMMENT_MAX_TOKENS);
+    const models = await this.commentModels(llmEntity);
 
-    const { filled, errors } = await this.fillDocumentComments(model, manifest, domain);
+    const { filled, errors } = await this.fillDocumentComments(models, manifest, domain);
     if (filled === 0 && errors.length > 0) {
       throw new BadGatewayException(
         `Enrichment failed: no result from model "${llmEntity.name}". Last error: ${errors[errors.length - 1]}`,
@@ -184,7 +231,7 @@ export class SchemaEnrichmentService {
   }
 
   private async fillDocumentComments(
-    model: BaseChatModel,
+    models: CommentModels,
     manifest: DocumentManifest,
     domain: string,
   ): Promise<{ filled: number; errors: string[] }> {
@@ -198,15 +245,15 @@ export class SchemaEnrichmentService {
 
     for (let i = 0; i < todo.length; i += COMMENT_BATCH_SIZE) {
       const batch = todo.slice(i, i + COMMENT_BATCH_SIZE);
-      try {
-        const results = this.parseJsonArray(
-          await this.invokeText(model, this.documentCommentPrompt(batch, domain)),
-        );
-        filled += this.applyDocumentComments(collMap, results);
-      } catch (err: any) {
-        this.logger.warn(`Mongo comment batch ${i / COMMENT_BATCH_SIZE + 1} failed: ${err.message}`);
-        errors.push(err.message);
-      }
+      const res = await this.runBatch(
+        batch, models,
+        async (b, m) => this.applyDocumentComments(
+          collMap, this.parseJsonArray(await this.invokeText(m, this.documentCommentPrompt(b, domain))),
+        ),
+        `Mongo comment batch ${i / COMMENT_BATCH_SIZE + 1}`,
+      );
+      filled += res.filled;
+      errors.push(...res.errors);
     }
     return { filled, errors };
   }
@@ -333,24 +380,81 @@ Response format:
     return this.llmConfigs.buildModelForConfig(entity, { maxTokens });
   }
 
+  /** Comment models: the configured budget, plus a larger one built only if needed. */
+  private async commentModels(entity: LlmConfigEntity): Promise<CommentModels> {
+    let large: Promise<BaseChatModel> | null = null;
+    return {
+      base: await this.buildModel(entity, COMMENT_MAX_TOKENS),
+      large: () => (large ??= this.buildModel(entity, COMMENT_RETRY_MAX_TOKENS)),
+    };
+  }
+
+  /**
+   * Runs one LLM batch. If the output is unusable (see LlmOutputError) the batch is
+   * split in halves down to single items, and a single item is retried once with the
+   * larger budget. Provider/API errors are reported as-is, without retries.
+   * `call` returns how many comments it applied.
+   */
+  private async runBatch<T>(
+    items: T[],
+    models: CommentModels,
+    call: (batch: T[], model: BaseChatModel) => Promise<number>,
+    label: string,
+  ): Promise<{ filled: number; errors: string[] }> {
+    try {
+      return { filled: await call(items, models.base), errors: [] };
+    } catch (err: any) {
+      if (!isOutputError(err)) {
+        this.logger.warn(`${label} failed: ${err.message}`);
+        return { filled: 0, errors: [err.message] };
+      }
+      if (items.length > 1) {
+        this.logger.warn(`${label} (${items.length} items): ${err.message} → retrying in smaller batches`);
+        const mid = Math.ceil(items.length / 2);
+        const a = await this.runBatch(items.slice(0, mid), models, call, label);
+        const b = await this.runBatch(items.slice(mid), models, call, label);
+        return { filled: a.filled + b.filled, errors: [...a.errors, ...b.errors] };
+      }
+      this.logger.warn(`${label}: ${err.message} → retrying with a larger output budget`);
+      try {
+        return { filled: await call(items, await models.large()), errors: [] };
+      } catch (retryErr: any) {
+        this.logger.warn(`${label} failed: ${retryErr.message}`);
+        return { filled: 0, errors: [retryErr.message] };
+      }
+    }
+  }
+
   private async invokeText(model: BaseChatModel, prompt: string): Promise<string> {
     const res = await model.invoke([new HumanMessage(prompt)]);
     const content = res.content;
-    if (typeof content === 'string') return content;
-    const textBlock = (content as any[]).find((b: any) => b.type === 'text');
-    return textBlock?.text ?? '';
+    const text = typeof content === 'string'
+      ? content
+      : ((content as any[]).find((b: any) => b.type === 'text')?.text ?? '');
+    if (isOutputTruncated(res)) {
+      throw new LlmOutputError(text.trim()
+        ? 'LLM response truncated at the output-token limit.'
+        : 'Empty LLM response: the output-token limit was reached before any text ' +
+          '(reasoning models spend it on thinking).');
+    }
+    if (!text.trim()) throw new LlmOutputError('Empty LLM response (no text returned).');
+    return text;
   }
 
   private parseJsonArray(text: string): any[] {
     const match = text.match(/\[[\s\S]*\]/);
-    if (!match) throw new Error(`Non-JSON LLM response: ${text.slice(0, 200)}`);
-    return JSON.parse(match[0]);
+    if (!match) throw new LlmOutputError(`Non-JSON LLM response: ${text.slice(0, 200)}`);
+    try {
+      return JSON.parse(match[0]);
+    } catch (err: any) {
+      throw new LlmOutputError(`Invalid JSON in LLM response (possibly truncated): ${err.message}`);
+    }
   }
 
   // ── Comments (porting of generate-comments.mjs) ────────────────────────────────────
 
   private async fillComments(
-    model: BaseChatModel,
+    models: CommentModels,
     manifest: SchemaManifest,
     domain: string,
   ): Promise<{ filled: number; errors: string[] }> {
@@ -364,15 +468,15 @@ Response format:
 
     for (let i = 0; i < todo.length; i += COMMENT_BATCH_SIZE) {
       const batch = todo.slice(i, i + COMMENT_BATCH_SIZE);
-      try {
-        const results = this.parseJsonArray(
-          await this.invokeText(model, this.commentPrompt(batch, domain)),
-        );
-        filled += this.applyComments(tableMap, results);
-      } catch (err: any) {
-        this.logger.warn(`Comment batch ${i / COMMENT_BATCH_SIZE + 1} failed: ${err.message}`);
-        errors.push(err.message);
-      }
+      const res = await this.runBatch(
+        batch, models,
+        async (b, m) => this.applyComments(
+          tableMap, this.parseJsonArray(await this.invokeText(m, this.commentPrompt(b, domain))),
+        ),
+        `Comment batch ${i / COMMENT_BATCH_SIZE + 1}`,
+      );
+      filled += res.filled;
+      errors.push(...res.errors);
     }
     return { filled, errors };
   }
@@ -454,8 +558,30 @@ Response format:
         await this.invokeText(model, this.relationsPrompt(visible, manifest, domain)),
       );
     } catch (err: any) {
-      this.logger.warn(`Relation inference failed: ${err.message}`);
-      return { added: 0, error: err.message };
+      if (!isOutputError(err)) {
+        this.logger.warn(`Relation inference failed: ${err.message}`);
+        return { added: 0, error: err.message };
+      }
+      // Unusable output on the whole schema: retry in chunks of source tables,
+      // each call carrying a compact catalog of the possible target keys.
+      this.logger.warn(
+        `Relation inference: ${err.message} → retrying in chunks of ${RELATIONS_CHUNK_SIZE} tables`,
+      );
+      const catalog = this.relationsCatalog(manifest);
+      let lastError: string = err.message;
+      inferred = [];
+      for (let i = 0; i < visible.length; i += RELATIONS_CHUNK_SIZE) {
+        const chunk = visible.slice(i, i + RELATIONS_CHUNK_SIZE);
+        try {
+          inferred.push(...this.parseJsonArray(
+            await this.invokeText(model, this.relationsPrompt(chunk, manifest, domain, catalog)),
+          ));
+        } catch (chunkErr: any) {
+          this.logger.warn(`Relation chunk ${i / RELATIONS_CHUNK_SIZE + 1} failed: ${chunkErr.message}`);
+          lastError = chunkErr.message;
+        }
+      }
+      if (!inferred.length) return { added: 0, error: lastError };
     }
 
     const existing = new Set(manifest.relations.map((r) => `${r.from}→${r.to}`));
@@ -472,12 +598,29 @@ Response format:
     return { added };
   }
 
+  /** Compact list of every visible table with its key-like columns (chunked relations mode). */
+  private relationsCatalog(manifest: SchemaManifest): Array<{ table: string; keyColumns: string[] }> {
+    return manifest.tables
+      .filter((t) => !t.deny)
+      .map((t) => ({
+        table: t.name,
+        keyColumns: t.columns
+          .filter((c, i) => i === 0 || FK_PATTERN.test(c.name))
+          .map((c) => c.name)
+          .slice(0, RELATIONS_CATALOG_MAX_COLUMNS),
+      }));
+  }
+
   private relationsPrompt(
     visible: Array<{ table: string; columns: string[]; potentialFKs: string[] }>,
     manifest: SchemaManifest,
     domain: string,
+    catalog?: Array<{ table: string; keyColumns: string[] }>,
   ): string {
     const allTables = manifest.tables.filter((t) => !t.deny).map((t) => t.name).join(', ');
+    const targets = catalog
+      ? `\nPossible target tables with their key-like columns:\n${JSON.stringify(catalog)}\n`
+      : '';
     return `You are a relational database expert. Database context: ${domain}.
 
 You must identify the IMPLICIT relations between tables (foreign keys not formally declared in the DB).
@@ -490,7 +633,7 @@ reasonably sure of: do NOT make them up. For composite keys use two separate ent
 
 Schema with candidate FK columns:
 ${JSON.stringify(visible, null, 2)}
-
+${targets}
 Respond ONLY with a JSON array, without markdown. Each element:
 { "from": "table.column", "to": "table.column", "label": "short description" }`;
   }

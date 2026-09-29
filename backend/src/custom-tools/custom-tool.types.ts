@@ -144,7 +144,7 @@ export interface SqlExecutorConfig {
   /**
    * SELECT query with named params :paramName, safely bound.
    * Compatible with PostgreSQL and MySQL (mysql2 namedPlaceholders).
-   * E.g.: "SELECT nome, email FROM clienti WHERE regione = :regione"
+   * E.g.: "SELECT name, email FROM customers WHERE region = :region"
    * Mutually exclusive with queryParam.
    */
   queryTemplate?: string;
