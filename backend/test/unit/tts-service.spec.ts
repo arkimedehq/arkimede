@@ -7,11 +7,12 @@
  * The OpenAI client is never used against the network here — only its
  * construction parameters and identity are asserted.
  */
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
 import { TtsService } from '../../src/tts/tts.service';
 
 const DB_DEFAULTS = {
+  ttsEnabled: true,
   ttsProvider: null,
   ttsModel: null,
   hasTtsApiKey: false,
@@ -111,5 +112,28 @@ describe('TtsService client caching', () => {
 describe('TtsService input validation', () => {
   it('rejects empty input with a 400 before touching the provider', async () => {
     await expect(makeService().synthesize('   ')).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects synthesis with a 503 when TTS is disabled by the admin', async () => {
+    const svc = makeService({ db: { ttsEnabled: false } });
+    await expect(svc.synthesize('ciao')).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+});
+
+describe('TtsService availability', () => {
+  it('is not enabled when the admin disabled it', async () => {
+    expect(await makeService({ db: { ttsEnabled: false } }).isEnabled()).toBe(false);
+  });
+
+  it('is enabled for a cloud provider without probing the internal service', async () => {
+    const svc = makeService({ db: { ttsProvider: 'openai' }, env: { TTS_BASE_URL: 'http://127.0.0.1:1/v1' } });
+    expect(await svc.isEnabled()).toBe(true);
+  });
+
+  it('is not enabled when the internal piper-service is not deployed', async () => {
+    // Port 1 on loopback: connection refused → service treated as absent.
+    const svc = makeService({ env: { TTS_BASE_URL: 'http://127.0.0.1:1/v1' } });
+    expect(await svc.isInternalAvailable()).toBe(false);
+    expect(await svc.isEnabled()).toBe(false);
   });
 });

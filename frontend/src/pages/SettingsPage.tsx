@@ -11,7 +11,7 @@ import {
   FolderOpen, Brain, Download, Trash2, Search, Wrench, Plug, UserCircle,
   Save, Eye, EyeOff, KeyRound, Cpu, Wifi, WifiOff, Boxes, Pencil, Plus,
   Star, Server, FileStack, X, Sparkles, Eraser, Zap, Filter, Package, ThumbsUp, BarChart3,
-  Users, UsersRound, Workflow, Network, CalendarClock, Activity, ShieldAlert, Mic, Terminal, Check, Copy, DatabaseBackup, Volume2, Radio,
+  Users, UsersRound, Workflow, Network, CalendarClock, Activity, ShieldAlert, Mic, Terminal, Check, Copy, DatabaseBackup, Volume2, Radio, AlertTriangle,
 } from 'lucide-react';
 import type { LlmProvider, EmbeddingProvider, EmbeddingConfig, ToolLoadingConfig, ToolLoadingStrategy, ToolSchemaFormat, TranscriptionProvider, TtsProvider, SandboxNetwork, SandboxExecMode } from '../api/appConfig';
 import { apiKeysApi } from '../api/apiKeys';
@@ -4612,6 +4612,48 @@ function EmbeddingConfigCard() {
   );
 }
 
+// ── Voice cards: shared provider option + missing-internal-service notice ─────
+
+/** Provider choice button; `unavailable` greys it out (bundled service not deployed). */
+function VoiceProviderOption({ label, desc, selected, unavailable, onSelect }: {
+  label: string; desc: string; selected: boolean; unavailable: boolean; onSelect: () => void;
+}) {
+  const { t } = useTranslation('settings');
+  return (
+    <button
+      type="button"
+      disabled={unavailable}
+      onClick={onSelect}
+      title={unavailable ? t('voice.internalNotInstalledHint') : undefined}
+      className={`flex flex-col items-start px-3 py-2.5 rounded-lg border text-left transition-colors
+        ${unavailable
+          ? `cursor-not-allowed opacity-50 ${selected ? 'border-amber-500/40 bg-amber-500/10 text-gray-400' : 'border-gray-800 bg-gray-800/30 text-gray-500'}`
+          : selected
+            ? 'border-indigo-500 bg-indigo-900/30 text-white'
+            : 'border-gray-700 bg-gray-800/50 text-gray-400 hover:border-gray-600 hover:text-gray-300'}`}
+    >
+      <span className="text-sm font-medium">{label}</span>
+      <span className="text-xs mt-0.5 opacity-70">{desc}</span>
+      {unavailable && (
+        <span className="text-[11px] mt-1 text-amber-400">{t('voice.internalNotInstalled')}</span>
+      )}
+    </button>
+  );
+}
+
+/** Warning shown when the selected provider is the bundled service but it is not deployed. */
+function InternalServiceMissing({ title, desc }: { title: string; desc: string }) {
+  return (
+    <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/15 px-3.5 py-3">
+      <AlertTriangle size={15} className="text-amber-400 flex-shrink-0 mt-0.5" />
+      <div className="text-xs text-gray-400 leading-relaxed">
+        <p className="text-amber-300 font-medium mb-0.5">{title}</p>
+        <p>{desc}</p>
+      </div>
+    </div>
+  );
+}
+
 // ── Transcription provider metadata (Whisper) ──────────────────────────────────
 const TRANSCRIPTION_PROVIDERS: {
   value:         TranscriptionProvider;
@@ -4687,6 +4729,8 @@ function TranscriptionConfigCard() {
   }, [provider]);
 
   const providerMeta = TRANSCRIPTION_PROVIDERS.find((p) => p.value === provider)!;
+  // The bundled whisper-service may be left out of the deployment: 'internal' is then unusable.
+  const internalMissing = data?.internalAvailable === false;
 
   const saveMutation = useMutation({
     mutationFn: () => appConfigApi.updateTranscriptionConfig({
@@ -4698,6 +4742,7 @@ function TranscriptionConfigCard() {
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['transcription-config'] });
+      qc.invalidateQueries({ queryKey: ['transcription-status'] });
       setApiKey('');
       setMsg({ ok: true, text: t('transcription.savedOk') });
       setTimeout(() => setMsg(null), 3000);
@@ -4756,23 +4801,24 @@ function TranscriptionConfigCard() {
         <label className="block text-xs font-medium text-gray-400 mb-1.5">{t('transcription.providerLabel')}</label>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
           {TRANSCRIPTION_PROVIDERS.map((p) => (
-            <button
+            <VoiceProviderOption
               key={p.value}
-              onClick={() => setProvider(p.value)}
-              className={`flex flex-col items-start px-3 py-2.5 rounded-lg border text-left transition-colors
-                ${provider === p.value
-                  ? 'border-indigo-500 bg-indigo-900/30 text-white'
-                  : 'border-gray-700 bg-gray-800/50 text-gray-400 hover:border-gray-600 hover:text-gray-300'}`}
-            >
-              <span className="text-sm font-medium">{p.label}</span>
-              <span className="text-xs mt-0.5 opacity-70">{t(p.descKey)}</span>
-            </button>
+              label={p.label}
+              desc={t(p.descKey)}
+              selected={provider === p.value}
+              unavailable={!!p.internal && internalMissing}
+              onSelect={() => setProvider(p.value)}
+            />
           ))}
         </div>
       </div>
 
+      {providerMeta.internal && internalMissing && (
+        <InternalServiceMissing title={t('transcription.internalMissingTitle')} desc={t('transcription.internalMissingDesc')} />
+      )}
+
       {/* ── Internal service info box (auto-configured) ── */}
-      {providerMeta.internal && (
+      {providerMeta.internal && !internalMissing && (
         <div className="flex items-start gap-2.5 bg-indigo-900/40 border border-indigo-800/50 rounded-lg px-3.5 py-3">
           <Mic size={15} className="text-indigo-400 flex-shrink-0 mt-0.5" />
           <div className="text-xs text-gray-400 leading-relaxed">
@@ -4994,6 +5040,7 @@ function TtsConfigCard() {
     staleTime: 60_000,
   });
 
+  const [enabled,  setEnabled]  = useState(true);
   const [provider, setProvider] = useState<TtsProvider>('internal');
   const [model,    setModel]    = useState('');
   const [voice,    setVoice]    = useState('');
@@ -5006,6 +5053,7 @@ function TtsConfigCard() {
 
   useEffect(() => {
     if (!data) return;
+    setEnabled(data.ttsEnabled);
     // ttsProvider null = never saved → the backend uses its env fallback (internal by default)
     setProvider(data.ttsProvider ?? 'internal');
     setModel(data.ttsModel ?? '');
@@ -5020,9 +5068,12 @@ function TtsConfigCard() {
   }, [provider]);
 
   const providerMeta = TTS_PROVIDERS.find((p) => p.value === provider)!;
+  // The bundled piper-service may be left out of the deployment: 'internal' is then unusable.
+  const internalMissing = data?.internalAvailable === false;
 
   const saveMutation = useMutation({
     mutationFn: () => appConfigApi.updateTtsConfig({
+      ttsEnabled:  enabled,
       ttsProvider: provider,
       ttsModel:    model || null,
       ttsVoice:    voice || null,
@@ -5031,6 +5082,7 @@ function TtsConfigCard() {
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tts-config'] });
+      qc.invalidateQueries({ queryKey: ['tts-status'] });
       setApiKey('');
       setMsg({ ok: true, text: t('tts.savedOk') });
       setTimeout(() => setMsg(null), 3000);
@@ -5066,28 +5118,46 @@ function TtsConfigCard() {
         </div>
       )}
 
+      {/* ── Enable toggle ── */}
+      <label className="flex items-center justify-between gap-3 cursor-pointer">
+        <div>
+          <span className="text-sm font-medium text-gray-200">{t('tts.enableLabel')}</span>
+          <p className="text-xs text-gray-500 mt-0.5">{t('tts.enableDesc')}</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setEnabled((v) => !v)}
+          className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors
+            ${enabled ? 'bg-indigo-600' : 'bg-gray-700'}`}
+        >
+          <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform mt-0.5
+            ${enabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+        </button>
+      </label>
+
       {/* ── Provider ── */}
       <div>
         <label className="block text-xs font-medium text-gray-400 mb-1.5">{t('tts.providerLabel')}</label>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
           {TTS_PROVIDERS.map((p) => (
-            <button
+            <VoiceProviderOption
               key={p.value}
-              onClick={() => setProvider(p.value)}
-              className={`flex flex-col items-start px-3 py-2.5 rounded-lg border text-left transition-colors
-                ${provider === p.value
-                  ? 'border-indigo-500 bg-indigo-900/30 text-white'
-                  : 'border-gray-700 bg-gray-800/50 text-gray-400 hover:border-gray-600 hover:text-gray-300'}`}
-            >
-              <span className="text-sm font-medium">{p.label}</span>
-              <span className="text-xs mt-0.5 opacity-70">{t(p.descKey)}</span>
-            </button>
+              label={p.label}
+              desc={t(p.descKey)}
+              selected={provider === p.value}
+              unavailable={!!p.internal && internalMissing}
+              onSelect={() => setProvider(p.value)}
+            />
           ))}
         </div>
       </div>
 
+      {providerMeta.internal && internalMissing && (
+        <InternalServiceMissing title={t('tts.internalMissingTitle')} desc={t('tts.internalMissingDesc')} />
+      )}
+
       {/* ── Internal service info box (auto-configured) ── */}
-      {providerMeta.internal && (
+      {providerMeta.internal && !internalMissing && (
         <div className="flex items-start gap-2.5 bg-indigo-900/40 border border-indigo-800/50 rounded-lg px-3.5 py-3">
           <Volume2 size={15} className="text-indigo-400 flex-shrink-0 mt-0.5" />
           <div className="text-xs text-gray-400 leading-relaxed">

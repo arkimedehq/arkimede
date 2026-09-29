@@ -180,6 +180,20 @@ flags. `TranscriptionService` sends the admin-chosen `transcriptionModel` for
 the internal provider (empty = the service's current model); the admin card
 shows the sizes as chips with the RAM guide, and "Test" triggers the download.
 
+## Part 2c — TTS toggle and internal-service detection (2026-09-29)
+
+- `app_config.ttsEnabled` (migration 086, default true) gates speech synthesis
+  like `transcriptionEnabled` gates the microphone: the read-aloud button in
+  chat (`GET /api/tts/status`), the speech route (503 `tts.disabled`) and the
+  Wyoming TTS program. The admin "Test" still works while disabled.
+- The internal whisper/piper containers may be left out of the deployment
+  (`docker-compose.novoice.yml`). The backend probes `<base-url origin>/health`
+  (any HTTP answer = deployed, 30 s cache) and returns `internalAvailable` from
+  `GET /api/admin/config/{transcription,tts}`: the admin cards disable the
+  "Internal" option and warn when it is still selected. The status endpoints
+  and the Wyoming `info` treat an internal provider that is not deployed as
+  disabled, so the microphone/read-aloud buttons stay hidden.
+
 ## Part 3 — Wyoming voice server (Home Assistant & co.)
 
 Status: IMPLEMENTED (2026-09-15) — `backend/src/wyoming/`, migration 084,

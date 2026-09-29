@@ -3,6 +3,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useQuery } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { format } from 'date-fns';
@@ -13,6 +14,7 @@ import { useStore } from '../../store/useStore';
 import { downloadWithAuth } from '../../utils/downloadWithAuth';
 import { openInlineWithAuth } from '../../utils/openInlineWithAuth';
 import api from '../../api/client';
+import { ttsApi } from '../../api/tts';
 import { feedbackApi } from '../../api/feedback';
 import type { Feedback, FeedbackRating } from '../../api/feedback';
 
@@ -639,6 +641,9 @@ export default function MessageBubble({ message, isStreaming, feedbackEnabled, f
   const isUser        = message.role === 'user';
   const time          = format(new Date(message.createdAt), 'HH:mm', { locale: it });
   const showTokenCount = useStore((s) => (s.user as any)?.showTokenCount ?? false);
+  // Read-aloud button only when TTS is enabled and its provider is available (shared query cache).
+  const { data: ttsStatus } = useQuery({ queryKey: ['tts-status'], queryFn: ttsApi.status, staleTime: 5 * 60_000 });
+  const ttsEnabled    = ttsStatus?.enabled ?? false;
   // The "rewind" button only makes sense on already-persisted messages (no streaming/optimistic).
   const canTruncate   = !!onTruncate && !isStreaming && message.id !== 'streaming' && !message.id.startsWith('temp-');
 
@@ -695,7 +700,7 @@ export default function MessageBubble({ message, isStreaming, feedbackEnabled, f
         {/* Bottom row: time + token badge (assistant only, only if showTokenCount) */}
         <div className={`flex items-center gap-2 px-1 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
           <span className="text-xs text-gray-600">{time}</span>
-          {!isUser && !isStreaming && message.id !== 'streaming' && message.content.trim() && (
+          {!isUser && !isStreaming && ttsEnabled && message.id !== 'streaming' && message.content.trim() && (
             <SpeakButton text={message.content} />
           )}
           {!isUser && !isStreaming && showTokenCount && (

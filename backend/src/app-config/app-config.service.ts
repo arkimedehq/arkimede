@@ -82,6 +82,8 @@ export interface WyomingConfigDto {
 }
 
 export interface TtsConfigDto {
+  /** Undefined = leave the current value untouched (older clients omit it). */
+  ttsEnabled?: boolean;
   ttsProvider: TtsProvider;
   ttsModel:    string | null;
   /** Plaintext key — encrypted before saving. Null = remove. Undefined = leave untouched. */
@@ -398,6 +400,7 @@ export class AppConfigService implements OnModuleInit {
    * ttsApiKey is masked: only `hasTtsApiKey` (boolean).
    */
   async getTtsConfig(): Promise<{
+    ttsEnabled:   boolean;
     ttsProvider:  TtsProvider | null;
     ttsModel:     string | null;
     hasTtsApiKey: boolean;
@@ -406,6 +409,7 @@ export class AppConfigService implements OnModuleInit {
   }> {
     const config = await this.repo.findOne({ where: { id: CONFIG_ID } });
     return {
+      ttsEnabled:   config?.ttsEnabled  ?? true,
       ttsProvider:  config?.ttsProvider ?? null,
       ttsModel:     config?.ttsModel    ?? null,
       hasTtsApiKey: !!config?.ttsApiKey,
@@ -439,6 +443,7 @@ export class AppConfigService implements OnModuleInit {
       ...current,
       id: CONFIG_ID,
       systemPrompt: current?.systemPrompt ?? SYSTEM_PROMPT,
+      ttsEnabled:  dto.ttsEnabled ?? current?.ttsEnabled ?? true,
       ttsProvider: dto.ttsProvider,
       ttsModel:    dto.ttsModel   || null,
       ttsApiKey:   encryptedKey,
@@ -446,7 +451,7 @@ export class AppConfigService implements OnModuleInit {
       ttsVoice:    dto.ttsVoice   || null,
     });
 
-    this.logger.log(`TtsConfig: updated — provider=${dto.ttsProvider}`);
+    this.logger.log(`TtsConfig: updated — provider=${dto.ttsProvider} enabled=${dto.ttsEnabled ?? '(unchanged)'}`);
     await this.audit?.record({
       actorId: actorId ?? null,
       action: 'appconfig.update',
@@ -455,6 +460,7 @@ export class AppConfigService implements OnModuleInit {
       ctx: {
         section: 'tts',
         provider: dto.ttsProvider,
+        enabled: dto.ttsEnabled ?? null,
         apiKeyChanged: dto.ttsApiKey !== undefined,
       },
     });

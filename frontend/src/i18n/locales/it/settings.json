@@ -367,11 +367,15 @@
     "testPending": "Verifica in corso…",
     "testOk": "Endpoint raggiungibile",
     "internalModelAuto": "auto (modello del servizio)",
-    "internalModelHint": "Il servizio carica un solo modello alla volta e scarica quello nuovo alla prima richiesta (Testa). RAM indicativa su CPU (int8): tiny 0.3 GB · base 0.5 GB · small 1 GB · medium 2.5 GB · large-v3 4 GB · large-v3-turbo 2.5 GB (quasi la qualità di large-v3, molto più veloce)."
+    "internalModelHint": "Il servizio carica un solo modello alla volta e scarica quello nuovo alla prima richiesta (Testa). RAM indicativa su CPU (int8): tiny 0.3 GB · base 0.5 GB · small 1 GB · medium 2.5 GB · large-v3 4 GB · large-v3-turbo 2.5 GB (quasi la qualità di large-v3, molto più veloce).",
+    "internalMissingTitle": "Servizio Whisper interno non installato",
+    "internalMissingDesc": "Questo deployment non include il servizio di trascrizione interno (es. installato senza servizi vocali): il microfono resta nascosto finché non scegli un provider esterno oppure installi il servizio."
   },
   "tts": {
     "title": "Sintesi vocale (Piper)",
     "subtitle": "Permette all'assistente di leggere le risposte ad alta voce (pulsante altoparlante sui messaggi) e alimenta la rotta OpenAI-compatible /audio/speech. L'audio viene generato al volo e non viene salvato su disco.",
+    "enableLabel": "Abilita la sintesi vocale",
+    "enableDesc": "Mostra il pulsante di lettura sui messaggi, abilita la rotta /audio/speech e la voce del server Wyoming.",
     "providerLabel": "Provider",
     "providerInternalDesc": "Servizio Piper incluso nell'app — pronto all'uso",
     "providerOpenAiDesc": "API OpenAI cloud (gpt-4o-mini-tts, tts-1)",
@@ -390,7 +394,9 @@
     "connectionFailed": "Connessione all'endpoint di sintesi vocale fallita",
     "testBtn": "Testa",
     "testPending": "Verifica in corso…",
-    "testOk": "Endpoint raggiungibile"
+    "testOk": "Endpoint raggiungibile",
+    "internalMissingTitle": "Servizio Piper interno non installato",
+    "internalMissingDesc": "Questo deployment non include il servizio di sintesi vocale interno (es. installato senza servizi vocali): la lettura ad alta voce resta nascosta finché non scegli un provider esterno oppure installi il servizio."
   },
   "wyoming": {
     "title": "Server vocale Wyoming (Home Assistant)",
@@ -503,7 +509,9 @@
   },
   "voice": {
     "title": "Voce e audio",
-    "subtitle": "Trascrizione vocale (Whisper), sintesi vocale (Piper) e server Wyoming per gli hub vocali come Home Assistant."
+    "subtitle": "Trascrizione vocale (Whisper), sintesi vocale (Piper) e server Wyoming per gli hub vocali come Home Assistant.",
+    "internalNotInstalled": "Non installato",
+    "internalNotInstalledHint": "Il servizio interno non è presente in questo deployment"
   },
   "mcpSecurity": {
     "title": "Sicurezza MCP (anti-SSRF)",

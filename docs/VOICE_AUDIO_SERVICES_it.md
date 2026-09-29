@@ -194,6 +194,20 @@ scelto dall'admin per il provider interno (vuoto = modello corrente del
 servizio); la card mostra le taglie come chip con la guida RAM e "Testa" avvia
 il download.
 
+## Parte 2c — Toggle TTS e rilevamento servizi interni (2026-09-29)
+
+- `app_config.ttsEnabled` (migration 086, default true) abilita la sintesi
+  vocale come `transcriptionEnabled` abilita il microfono: pulsante di lettura
+  in chat (`GET /api/tts/status`), rotta speech (503 `tts.disabled`) e
+  programma TTS di Wyoming. Il "Testa" admin funziona anche da disabilitata.
+- I container whisper/piper interni possono essere esclusi dal deployment
+  (`docker-compose.novoice.yml`). Il backend sonda `<origin base-url>/health`
+  (qualsiasi risposta HTTP = installato, cache 30 s) e restituisce
+  `internalAvailable` da `GET /api/admin/config/{transcription,tts}`: le card
+  admin disattivano l'opzione "Interno" e avvisano se è ancora selezionata. Gli
+  endpoint di stato e l'`info` Wyoming trattano un provider interno non
+  installato come disabilitato, quindi microfono/lettura restano nascosti.
+
 ## Parte 3 — Server vocale Wyoming (Home Assistant & co.)
 
 Stato: IMPLEMENTATO (2026-09-15) — `backend/src/wyoming/`, migration 084,

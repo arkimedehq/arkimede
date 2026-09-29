@@ -34,6 +34,8 @@ export interface TranscriptionConfig {
   transcriptionModel:     string | null;
   hasTranscriptionApiKey: boolean;
   transcriptionBaseUrl:   string | null;
+  /** Whether the bundled whisper-service is deployed (GET only). */
+  internalAvailable?:     boolean;
 }
 
 export interface UpdateTranscriptionConfigPayload {
@@ -48,12 +50,15 @@ export interface UpdateTranscriptionConfigPayload {
 export type TtsProvider = 'internal' | 'openai' | 'openai-compatible';
 
 export interface TtsConfig {
+  ttsEnabled:   boolean;
   /** Null = unset (the backend applies the env fallback, default internal). */
   ttsProvider:  TtsProvider | null;
   ttsModel:     string | null;
   hasTtsApiKey: boolean;
   ttsBaseUrl:   string | null;
   ttsVoice:     string | null;
+  /** Whether the bundled piper-service is deployed (GET only). */
+  internalAvailable?: boolean;
 }
 
 /** Wyoming voice server (Home Assistant & co.): config + live status. */
@@ -79,6 +84,7 @@ export interface UpdateWyomingConfigPayload {
 }
 
 export interface UpdateTtsConfigPayload {
+  ttsEnabled:  boolean;
   ttsProvider: TtsProvider;
   ttsModel?:   string | null;
   /** Non-empty string → save, null → clear, undefined → leave untouched */

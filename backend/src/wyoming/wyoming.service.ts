@@ -465,7 +465,7 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
       version: '1',
       languages: this.languagesOfVoice(name, tts.provider === 'internal'),
     }));
-    const ttsPrograms = voices.length ? [{
+    const ttsPrograms = tts.enabled && voices.length ? [{
       name: `${APP_NAME_SLUG}-tts`,
       description: `${APP_NAME} text-to-speech (${tts.provider})`,
       attribution,

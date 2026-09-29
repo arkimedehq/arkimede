@@ -7,8 +7,8 @@
  * Text-to-speech via the OpenAI-compatible endpoint `/v1/audio/speech`.
  * The same code serves OpenAI cloud and any self-hosted TTS (the bundled
  * piper-service): only provider/baseUrl/apiKey/model/voice change, configured
- * in app_config (env fallback TTS_PROVIDER/TTS_BASE_URL/TTS_API_KEY until an
- * admin UI exists).
+ * in app_config by the admin (env fallback TTS_PROVIDER/TTS_BASE_URL/TTS_API_KEY
+ * while unset). The `ttsEnabled` toggle gates every synthesis.
  *
  * The audio is transient: it is synthesized on demand, returned to the caller
  * and discarded — it is never persisted to disk.
@@ -21,11 +21,13 @@ import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { AppConfigService } from '../app-config/app-config.service';
 import { TtsProvider } from '../app-config/app-config.entity';
+import { isInternalServiceAvailable } from '../common/internal-service-probe.util';
 
 /** Output formats accepted by the route (v1: piper only produces wav). */
 export type TtsFormat = 'wav' | 'mp3';
 
 interface TtsRuntimeConfig {
+  enabled:  boolean;
   provider: TtsProvider;
   model:    string;
   voice:    string | null;
@@ -74,7 +76,7 @@ export class TtsService {
   /** Reads the runtime configuration (DB + env fallback), with the key decrypted. */
   private async loadConfig(): Promise<TtsRuntimeConfig> {
     const cfg = await this.appConfig.getTtsConfig();
-    // DB null = unset → env fallback (v1 has no admin UI for TTS yet).
+    // DB null = never saved from the admin UI → env fallback.
     const envProvider = this.env.get<string>('TTS_PROVIDER');
     const provider: TtsProvider =
       cfg.ttsProvider ??
@@ -84,6 +86,7 @@ export class TtsService {
     // URL from the deployment (env), voice defaulted by the service. Zero config.
     if (provider === 'internal') {
       return {
+        enabled: cfg.ttsEnabled,
         provider,
         model:   cfg.ttsModel ?? MODEL_DEFAULTS.internal,
         voice:   cfg.ttsVoice ?? null,
@@ -98,6 +101,7 @@ export class TtsService {
       (provider === 'openai' ? this.env.get<string>('OPENAI_API_KEY') ?? null : null);
 
     return {
+      enabled: cfg.ttsEnabled,
       provider,
       model:   cfg.ttsModel || MODEL_DEFAULTS[provider],
       voice:   cfg.ttsVoice || VOICE_DEFAULTS[provider],
@@ -112,7 +116,7 @@ export class TtsService {
    * known to the backend (PIPER_VOICE lives in the service): it is probed from
    * `/v1/models`, which lists the voices already downloaded. Never throws.
    */
-  async describe(): Promise<{ provider: TtsProvider; model: string; voice: string | null; voices: string[] }> {
+  async describe(): Promise<{ provider: TtsProvider; model: string; voice: string | null; voices: string[]; enabled: boolean }> {
     try {
       const cfg = await this.loadConfig();
       let voices: string[] = [];
@@ -120,10 +124,32 @@ export class TtsService {
         voices = await this.probeInternalVoices(cfg.baseUrl);
       }
       const voice = cfg.voice || voices[0] || (cfg.provider === 'internal' ? null : VOICE_DEFAULTS[cfg.provider]);
-      return { provider: cfg.provider, model: cfg.model, voice, voices };
+      const enabled = await this.isUsable(cfg.enabled, cfg.provider);
+      return { provider: cfg.provider, model: cfg.model, voice, voices, enabled };
     } catch {
-      return { provider: 'internal', model: MODEL_DEFAULTS.internal, voice: null, voices: [] };
+      return { provider: 'internal', model: MODEL_DEFAULTS.internal, voice: null, voices: [], enabled: false };
     }
+  }
+
+  /**
+   * True if read-aloud should be offered: enabled by the admin and, for the
+   * internal provider, the bundled piper-service is deployed.
+   */
+  async isEnabled(): Promise<boolean> {
+    const cfg = await this.loadConfig();
+    return this.isUsable(cfg.enabled, cfg.provider);
+  }
+
+  /** True if the bundled piper-service is deployed (reachable). */
+  isInternalAvailable(): Promise<boolean> {
+    return isInternalServiceAvailable(
+      this.env.get<string>('TTS_BASE_URL', DEFAULT_BASE_URLS.internal!),
+    );
+  }
+
+  private async isUsable(enabled: boolean, provider: TtsProvider): Promise<boolean> {
+    if (!enabled) return false;
+    return provider !== 'internal' || this.isInternalAvailable();
   }
 
   /** Lists the voices of the internal piper-service (best-effort, 3s timeout). */
@@ -162,6 +188,14 @@ export class TtsService {
    * @param format  output format (default 'wav'; the internal Piper only does wav)
    */
   async synthesize(text: string, voice?: string, format: TtsFormat = 'wav'): Promise<Buffer> {
+    if (!(await this.appConfig.getTtsConfig()).ttsEnabled) {
+      throw new ServiceUnavailableException('tts.disabled');
+    }
+    return this.doSynthesize(text, voice, format);
+  }
+
+  /** Synthesis without the enabled gate (the admin test works before enabling). */
+  private async doSynthesize(text: string, voice?: string, format: TtsFormat = 'wav'): Promise<Buffer> {
     if (!text?.trim()) {
       throw new BadRequestException('tts.emptyInput');
     }
@@ -190,12 +224,12 @@ export class TtsService {
 
   /**
    * Checks reachability of the configured endpoint by doing a micro-synthesis
-   * of a short string. Used by a future admin "Test" button.
+   * of a short string. Used by the admin "Test" button.
    */
   async testConnection(): Promise<{ ok: boolean; error?: string; model?: string }> {
     try {
       const { model } = await this.getClient();
-      await this.synthesize('ok');
+      await this.doSynthesize('ok');
       return { ok: true, model };
     } catch (err: any) {
       const detail = err?.response?.data?.error?.message ?? err?.message ?? 'unknown error';

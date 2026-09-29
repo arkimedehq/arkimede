@@ -202,6 +202,13 @@ export class AppConfigEntity {
   // ── Text-to-speech configuration (Piper) ────────────────────────────────────
 
   /**
+   * Global TTS toggle: read-aloud button in chat, the speech route and the
+   * Wyoming TTS program. Default true (TTS was always on before the toggle).
+   */
+  @Column({ type: 'boolean', default: true })
+  ttsEnabled: boolean;
+
+  /**
    * Active TTS provider (OpenAI-compatible `/v1/audio/speech` endpoint).
    * Null = unset: the env fallback TTS_PROVIDER applies (default 'internal',
    * the bundled piper-service). No admin UI yet — env-only config in v1.

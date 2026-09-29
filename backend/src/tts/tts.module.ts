@@ -3,14 +3,15 @@
 
 import { Module, forwardRef } from '@nestjs/common';
 import { TtsService } from './tts.service';
+import { TtsController } from './tts.controller';
 import { AppConfigModule } from '../app-config/app-config.module';
 
 /**
  * Text-to-speech module (Piper / OpenAI-compatible providers).
  *
- * No controller of its own: the public surface is the OpenAI-compatible
- * `POST /api/openai/v1/audio/speech` route (openai-compat module); the admin
- * config endpoints live in AppConfigController.
+ * Own controller only for `GET /api/tts/status` (read-aloud button visibility):
+ * the synthesis surface is the OpenAI-compatible `POST /api/openai/v1/audio/speech`
+ * route (openai-compat module); the admin config endpoints live in AppConfigController.
  *
  * forwardRef on AppConfigModule: TtsService reads the config from
  * AppConfigService, and AppConfigController injects TtsService for the
@@ -20,6 +21,7 @@ import { AppConfigModule } from '../app-config/app-config.module';
 @Module({
   imports: [forwardRef(() => AppConfigModule)],
   providers: [TtsService],
+  controllers: [TtsController],
   exports: [TtsService],
 })
 export class TtsModule {}

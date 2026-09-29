@@ -367,11 +367,15 @@
     "testPending": "Testing…",
     "testOk": "Endpoint reachable",
     "internalModelAuto": "auto (service model)",
-    "internalModelHint": "The service keeps one model loaded at a time and downloads a new one on first use (Test). Indicative RAM on CPU (int8): tiny 0.3 GB · base 0.5 GB · small 1 GB · medium 2.5 GB · large-v3 4 GB · large-v3-turbo 2.5 GB (near large-v3 quality, much faster)."
+    "internalModelHint": "The service keeps one model loaded at a time and downloads a new one on first use (Test). Indicative RAM on CPU (int8): tiny 0.3 GB · base 0.5 GB · small 1 GB · medium 2.5 GB · large-v3 4 GB · large-v3-turbo 2.5 GB (near large-v3 quality, much faster).",
+    "internalMissingTitle": "Internal Whisper service not installed",
+    "internalMissingDesc": "This deployment does not include the internal transcription service (e.g. installed without voice services): the microphone stays hidden until you pick an external provider or install the service."
   },
   "tts": {
     "title": "Speech synthesis (Piper)",
     "subtitle": "Lets the assistant read replies aloud (speaker button on messages) and powers the OpenAI-compatible /audio/speech route. Audio is generated on the fly and is never saved to disk.",
+    "enableLabel": "Enable speech synthesis",
+    "enableDesc": "Shows the read-aloud button on messages and enables the /audio/speech route and the Wyoming server voice.",
     "providerLabel": "Provider",
     "providerInternalDesc": "Piper service bundled with the app — ready to use",
     "providerOpenAiDesc": "OpenAI cloud API (gpt-4o-mini-tts, tts-1)",
@@ -390,7 +394,9 @@
     "connectionFailed": "Connection to the speech synthesis endpoint failed",
     "testBtn": "Test",
     "testPending": "Testing…",
-    "testOk": "Endpoint reachable"
+    "testOk": "Endpoint reachable",
+    "internalMissingTitle": "Internal Piper service not installed",
+    "internalMissingDesc": "This deployment does not include the internal speech synthesis service (e.g. installed without voice services): read-aloud stays hidden until you pick an external provider or install the service."
   },
   "wyoming": {
     "title": "Wyoming voice server (Home Assistant)",
@@ -503,7 +509,9 @@
   },
   "voice": {
     "title": "Voice & audio",
-    "subtitle": "Voice transcription (Whisper), speech synthesis (Piper) and the Wyoming server for voice hubs such as Home Assistant."
+    "subtitle": "Voice transcription (Whisper), speech synthesis (Piper) and the Wyoming server for voice hubs such as Home Assistant.",
+    "internalNotInstalled": "Not installed",
+    "internalNotInstalledHint": "The internal service is not present in this deployment"
   },
   "mcpSecurity": {
     "title": "MCP security (anti-SSRF)",

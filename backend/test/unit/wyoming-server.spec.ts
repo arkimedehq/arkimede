@@ -16,7 +16,7 @@ import { WyomingDecoder, WyomingEvent, encodeEvent, parseWav, pcmToWav } from '.
 const VOICE_USER = 'a1a1a1a1-0000-4000-8000-000000000001';
 const VOICE_AGENT = 'b2b2b2b2-0000-4000-8000-000000000002';
 
-function makeService(opts: { enabled?: boolean; cidrs?: string | null; sttEnabled?: boolean; handleUser?: string | null; handleAgent?: string | null } = {}) {
+function makeService(opts: { enabled?: boolean; cidrs?: string | null; sttEnabled?: boolean; ttsEnabled?: boolean; handleUser?: string | null; handleAgent?: string | null } = {}) {
   const appConfig = {
     getWyomingConfig: vi.fn(async () => ({
       wyomingEnabled: opts.enabled ?? true, wyomingAllowedCidrs: opts.cidrs ?? null,
@@ -46,7 +46,7 @@ function makeService(opts: { enabled?: boolean; cidrs?: string | null; sttEnable
     transcribe: vi.fn(async (wav: Buffer) => `heard ${parseWav(wav).pcm.length} bytes`),
   };
   const tts = {
-    describe:   vi.fn(async () => ({ provider: 'internal', model: 'piper', voice: 'it_IT-paola-medium', voices: ['it_IT-paola-medium', 'en_US-amy-low'] })),
+    describe:   vi.fn(async () => ({ provider: 'internal', model: 'piper', voice: 'it_IT-paola-medium', voices: ['it_IT-paola-medium', 'en_US-amy-low'], enabled: opts.ttsEnabled ?? true })),
     synthesize: vi.fn(async (text: string) => pcmToWav(Buffer.alloc(text.length * 100, 3), { rate: 22050, width: 2, channels: 1 })),
   };
   const env = { get: (k: string, d?: string) => (k === 'WYOMING_PORT' ? '0' : k === 'WYOMING_BIND' ? '127.0.0.1' : d) };
@@ -155,6 +155,15 @@ describe('WyomingService — access control and toggle', () => {
     const [info] = await exchange(svc.getStatus().port, [{ type: 'describe', data: {} }]);
     expect(info.data.asr).toEqual([]);
     expect(info.data.tts.length).toBe(1);
+    await svc.onModuleDestroy();
+  });
+
+  it('omits the tts program when speech synthesis is disabled or unavailable', async () => {
+    const { svc } = makeService({ ttsEnabled: false });
+    await svc.applyConfig();
+    const [info] = await exchange(svc.getStatus().port, [{ type: 'describe', data: {} }]);
+    expect(info.data.tts).toEqual([]);
+    expect(info.data.asr.length).toBe(1);
     await svc.onModuleDestroy();
   });
 

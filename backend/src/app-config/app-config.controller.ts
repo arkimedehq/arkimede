@@ -135,6 +135,10 @@ class UpdateTranscriptionConfigDto {
 }
 
 class UpdateTtsConfigDto {
+  /** Optional: omitted = leave the current toggle untouched. */
+  @IsOptional() @IsBoolean()
+  ttsEnabled?: boolean;
+
   @IsIn(TTS_PROVIDERS)
   ttsProvider: TtsProvider;
 
@@ -449,8 +453,14 @@ export class AppConfigController {
   /** GET /api/admin/config/transcription — current transcription configuration */
   @Get('transcription')
   @ApiOperation({ summary: 'Current voice transcription configuration' })
-  getTranscriptionConfig() {
-    return this.service.getTranscriptionConfig();
+  async getTranscriptionConfig() {
+    // internalAvailable: whether the bundled whisper-service is deployed (the
+    // admin UI disables the 'internal' provider when it is not).
+    const [cfg, internalAvailable] = await Promise.all([
+      this.service.getTranscriptionConfig(),
+      this.transcription.isInternalAvailable(),
+    ]);
+    return { ...cfg, internalAvailable };
   }
 
   /** PATCH /api/admin/config/transcription — updates the transcription configuration */
@@ -481,8 +491,13 @@ export class AppConfigController {
   /** GET /api/admin/config/tts — current text-to-speech configuration */
   @Get('tts')
   @ApiOperation({ summary: 'Current text-to-speech configuration' })
-  getTtsConfig() {
-    return this.service.getTtsConfig();
+  async getTtsConfig() {
+    // internalAvailable: whether the bundled piper-service is deployed.
+    const [cfg, internalAvailable] = await Promise.all([
+      this.service.getTtsConfig(),
+      this.tts.isInternalAvailable(),
+    ]);
+    return { ...cfg, internalAvailable };
   }
 
   /** PATCH /api/admin/config/tts — updates the text-to-speech configuration */
@@ -490,6 +505,7 @@ export class AppConfigController {
   @ApiOperation({ summary: 'Update text-to-speech configuration' })
   async updateTtsConfig(@Body() dto: UpdateTtsConfigDto, @CurrentUser() user: any) {
     const result = await this.service.updateTtsConfig({
+      ttsEnabled:  dto.ttsEnabled,   // undefined = leave the toggle untouched
       ttsProvider: dto.ttsProvider,
       ttsModel:    dto.ttsModel ?? null,
       ttsApiKey:   dto.ttsApiKey,   // undefined = leave the key untouched

@@ -21,6 +21,7 @@ import { ConfigService } from '@nestjs/config';
 import OpenAI, { toFile } from 'openai';
 import { AppConfigService } from '../app-config/app-config.service';
 import { TranscriptionProvider } from '../app-config/app-config.entity';
+import { isInternalServiceAvailable } from '../common/internal-service-probe.util';
 
 interface TranscriptionRuntimeConfig {
   enabled:  boolean;
@@ -135,15 +136,31 @@ export class TranscriptionService {
   async describe(): Promise<{ provider: TranscriptionProvider; model: string; enabled: boolean }> {
     try {
       const cfg = await this.loadConfig();
-      return { provider: cfg.provider, model: cfg.model, enabled: cfg.enabled };
+      return { provider: cfg.provider, model: cfg.model, enabled: await this.isUsable(cfg.enabled, cfg.provider) };
     } catch {
       return { provider: 'internal', model: MODEL_DEFAULTS.internal, enabled: false };
     }
   }
 
-  /** True if the microphone button is enabled by the admin. */
+  /**
+   * True if the microphone button should be shown: enabled by the admin and,
+   * for the internal provider, the bundled whisper-service is deployed.
+   */
   async isEnabled(): Promise<boolean> {
-    return (await this.appConfig.getTranscriptionConfig()).transcriptionEnabled;
+    const cfg = await this.appConfig.getTranscriptionConfig();
+    return this.isUsable(cfg.transcriptionEnabled, cfg.transcriptionProvider);
+  }
+
+  /** True if the bundled whisper-service is deployed (reachable). */
+  isInternalAvailable(): Promise<boolean> {
+    return isInternalServiceAvailable(
+      this.env.get<string>('TRANSCRIPTION_BASE_URL', DEFAULT_BASE_URLS.internal!),
+    );
+  }
+
+  private async isUsable(enabled: boolean, provider: TranscriptionProvider): Promise<boolean> {
+    if (!enabled) return false;
+    return provider !== 'internal' || this.isInternalAvailable();
   }
 
   /**
