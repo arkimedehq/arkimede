@@ -24,7 +24,7 @@ import {
 import { mcpServersApi, type McpServer, type CreateMcpServerPayload } from '../api/mcpServers';
 import { ScopeSelector } from '../components/ScopeSelector';
 import { useStore } from '../store/useStore';
-import { detectBridgeOS, bridgeOSLabel, bridgeReleasesUrl } from '../utils/bridgeDownload';
+import { detectBridgeOS, bridgeOSLabel, bridgeReleasesUrl, fetchLatestBridgeReleaseUrl } from '../utils/bridgeDownload';
 
 // ── Form types ─────────────────────────────────────────────────────────────────
 
@@ -267,11 +267,31 @@ function BridgeSetupPanel() {
     ? token.slice(0, 20) + '…' + token.slice(-8)
     : '—';
 
+  // Direct link to the newest bridge release; the filtered releases page is the
+  // fallback while loading or if the GitHub API is unreachable/rate-limited.
+  const releaseQ = useQuery({
+    queryKey: ['bridge-release-url'],
+    queryFn: fetchLatestBridgeReleaseUrl,
+    staleTime: 60 * 60_000,
+    retry: false,
+  });
+  const downloadUrl = releaseQ.data ?? bridgeReleasesUrl();
+  const osLabel = bridgeOSLabel(detectBridgeOS());
+
   return (
     <div className="mb-5 rounded-xl border border-gray-800 bg-gray-900/60 p-4">
       <div className="flex items-center gap-2 mb-1">
         <Link2 size={14} className="text-blue-400" />
-        <h3 className="text-sm font-semibold text-gray-200">{t('bridge.title')}</h3>
+        <h3 className="flex-1 min-w-0 text-sm font-semibold text-gray-200">{t('bridge.title')}</h3>
+        <a
+          href={downloadUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="flex items-center gap-1 flex-shrink-0 text-xs text-blue-400 hover:text-blue-300 transition-colors"
+        >
+          <Download size={12} />{' '}
+          {osLabel ? t('banner.downloadFor', { os: osLabel }) : t('banner.download')}
+        </a>
       </div>
       <p className="text-xs text-gray-500 mb-3">
         {t('bridge.intro')}
@@ -396,10 +416,11 @@ export function McpSection() {
         </button>
       </div>
 
-      {/* Bridge configuration panel — visible only if there are 'remote' servers */}
-      {hasRemoteServers && <BridgeSetupPanel />}
+      {/* Bridge configuration panel — always visible, so the bridge (download + pairing)
+          is discoverable before any 'remote' server exists */}
+      <BridgeSetupPanel />
 
-      {/* Bridge banner (only if there are remote servers) */}
+      {/* Bridge connection status (only if there are remote servers to route through it) */}
       {hasRemoteServers && (
         <BridgeBanner remoteCount={remoteEnabledCount} />
       )}
@@ -494,20 +515,6 @@ function BridgeBanner({
         </p>
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
-        {bridgeStatus !== 'connected' && (() => {
-          const osLabel = bridgeOSLabel(detectBridgeOS());
-          return (
-            <a
-              href={bridgeReleasesUrl()}
-              target="_blank"
-              rel="noreferrer"
-              className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors"
-            >
-              <Download size={12} />{' '}
-              {osLabel ? t('banner.downloadFor', { os: osLabel }) : t('banner.download')}
-            </a>
-          );
-        })()}
         <button
           onClick={onRefresh}
           disabled={refreshing}
