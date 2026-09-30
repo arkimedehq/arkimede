@@ -13,7 +13,7 @@ import { InternalFilesController } from './internal-files.controller';
 import { FileStreamAccessGuard } from './raw-file-access.guard';
 import { ProjectsModule } from '../projects/projects.module';
 import { TeamsModule } from '../teams/teams.module';
-import { LlmConfigsModule } from '../llm-configs/llm-configs.module';
+import { OcrModule } from '../ocr/ocr.module';
 import { DataSourcesModule } from '../datasources/datasources.module';
 
 @Module({
@@ -21,7 +21,7 @@ import { DataSourcesModule } from '../datasources/datasources.module';
     TypeOrmModule.forFeature([File, Message]),
     ProjectsModule,
     TeamsModule,
-    LlmConfigsModule,
+    OcrModule,           // PDF/image OCR levels for text extraction
     DataSourcesModule,   // file-share streaming (SMB/SFTP/WebDAV + 'local')
     // Same key as login: signs/verifies file streaming tokens (?token=).
     JwtModule.registerAsync({

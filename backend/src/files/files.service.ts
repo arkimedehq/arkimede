@@ -13,11 +13,12 @@
  *   - Physical + logical deletion of files
  *
  * Text extraction pipeline (extractText):
- *   PDF         → pdf-parse (digital text) + fixPdfText (normalization)
+ *   PDF         → OcrService at the requested/default OCR level (native text +
+ *                 OCR of scans and images), else pdf-parse (digital text) + fixPdfText
  *   DOCX        → mammoth (raw text extraction)
  *   XLSX/XLS    → xlsx (each sheet converted to CSV with a header)
  *   text/*      → direct UTF-8 buffer
- *   Images      → OCR via vision model (llm_configs.isVision ?? default, cross-provider)
+ *   Images      → OcrService (ocr-service engines, vision model as fallback)
  *   Others      → empty string (non-parsable file)
  *
  * The extracted text is then used by EmbedService.ingestFile() for
@@ -35,16 +36,21 @@ import { TeamsService } from '../teams/teams.service';
 const pdfParse = require('pdf-parse');
 import * as mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
-import { HumanMessage } from '@langchain/core/messages';
-import { LlmConfigsService } from '../llm-configs/llm-configs.service';
+import { OcrService } from '../ocr/ocr.service';
+import type { OcrLevel } from '../ocr/ocr.types';
 import { File } from './files.entity';
 import { Message } from '../messages/messages.entity';
 import { ProjectsService } from '../projects/projects.service';
 import { AuditService } from '../audit/audit.service';
 
-/** MIME types of images supported for OCR via Claude. */
+/** MIME types of images whose text is extracted by OCR. */
 const IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'] as const;
 type ImageMimeType = typeof IMAGE_MIME_TYPES[number];
+
+export interface ExtractTextOptions {
+  /** OCR level for PDFs/images; omitted = admin default (see OcrService). */
+  ocrLevel?: OcrLevel | null;
+}
 
 @Injectable()
 export class FilesService {
@@ -58,9 +64,9 @@ export class FilesService {
     @Inject(ConfigService)     private readonly cfg:         ConfigService,
     private readonly projects: ProjectsService,
     private readonly teams:    TeamsService,
-    // For image OCR: vision model from llm_configs (isVision ?? default).
-    // Optional so contexts without the LLM module (tests) stay valid.
-    @Optional() @Inject(LlmConfigsService) private readonly llmConfigs: LlmConfigsService | null = null,
+    // PDF/image OCR. Optional so contexts without the OCR module (tests) stay
+    // valid: PDFs then use the native text layer only, images yield ''.
+    @Optional() @Inject(OcrService) private readonly ocr: OcrService | null = null,
     @Optional() private readonly audit?: AuditService,
   ) {
     this.uploadDir = cfg.get('UPLOAD_DIR', './uploads');
@@ -423,9 +429,9 @@ export class FilesService {
    * @param file - File entity with storagePath and mimeType
    * @returns Extracted text (may be empty if the format is not supported)
    */
-  async extractText(file: File): Promise<string> {
+  async extractText(file: File, opts?: ExtractTextOptions): Promise<string> {
     const buf = fs.readFileSync(file.storagePath);
-    return this.extractTextFromBuffer(buf, file.mimeType, file.originalName);
+    return this.extractTextFromBuffer(buf, file.mimeType, file.originalName, opts);
   }
 
   /**
@@ -434,8 +440,13 @@ export class FilesService {
    * files that are not tracked uploads but live on a DataSource (e.g. network
    * share). Supports PDF, DOCX, XLSX, text and images (OCR); '' if not supported.
    */
-  async extractTextFromBuffer(buf: Buffer, mimeType: string, name = 'file'): Promise<string> {
+  async extractTextFromBuffer(
+    buf: Buffer, mimeType: string, name = 'file', opts?: ExtractTextOptions,
+  ): Promise<string> {
     if (mimeType === 'application/pdf') {
+      // OCR level text (native layer + scans/images); null = no OCR or it failed.
+      const ocrText = await this.ocr?.extractPdf(buf, name, opts?.ocrLevel);
+      if (ocrText?.trim()) return ocrText;
       const data = await pdfParse(buf);
       // pdf-parse often merges adjacent words without a space → normalize
       return this.fixPdfText(data.text);
@@ -463,8 +474,7 @@ export class FilesService {
     }
 
     if (IMAGE_MIME_TYPES.includes(mimeType as ImageMimeType)) {
-      // OCR via Claude Haiku: optimal for images with text (price lists, datasheets)
-      return this.extractTextFromImage(buf, mimeType as ImageMimeType, name);
+      return this.ocr ? this.ocr.extractImage(buf, mimeType, name, opts?.ocrLevel) : '';
     }
 
     return ''; // unsupported format
@@ -492,56 +502,6 @@ export class FilesService {
       // Reduces 3+ consecutive newlines to 2
       .replace(/\n{3,}/g, '\n\n')
       .trim();
-  }
-
-  /**
-   * Extracts the text from an image using the vision model configured as OCR.
-   *
-   * Cross-provider via LangChain (multimodal `image_url` format with data-URL,
-   * converted by the adapters for Anthropic/OpenAI/Gemini/Ollama). The model is
-   * the `isVision` config of llm_configs, falling back to the default; if the default does
-   * not support images the invocation fails and OCR is skipped with a warn.
-   *
-   * If the image contains no text, the model returns a description of the
-   * content (useful anyway for semantic embedding).
-   *
-   * @param buf      - Buffer of the image file
-   * @param mimeType - MIME type of the image (jpeg/png/webp/gif)
-   * @param name     - Original file name (for the log in case of error)
-   */
-  private async extractTextFromImage(buf: Buffer, mimeType: ImageMimeType, name: string): Promise<string> {
-    try {
-      const entity = await this.llmConfigs?.getVision();
-      if (!entity) {
-        this.logger.warn(`Image OCR skipped for ${name}: no LLM config (Settings → AI System)`);
-        return '';
-      }
-      const model = await this.llmConfigs!.buildModelForConfig(entity, { maxTokens: 1024 });
-      const response = await model.invoke([
-        new HumanMessage({
-          content: [
-            {
-              type:      'image_url',
-              image_url: { url: `data:${mimeType};base64,${buf.toString('base64')}` },
-            },
-            {
-              type: 'text',
-              text: 'Extract all the visible text in this image. ' +
-                    'If there is no text, briefly describe the content. ' +
-                    'Respond only with the extracted text or the description, without preamble.',
-            },
-          ],
-        }),
-      ]);
-
-      const content: any = response.content;
-      if (typeof content === 'string') return content;
-      const textBlock = (content as any[]).find((b: any) => b.type === 'text');
-      return textBlock?.text ?? '';
-    } catch (err) {
-      this.logger.warn(`Image OCR failed for ${name} (vision model not multimodal?): ${err.message}`);
-      return '';
-    }
   }
 
   /**

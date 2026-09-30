@@ -19,5 +19,28 @@
     "defaultHintPost": "per usare quella configurata dall'admin.",
     "download": "Scarica",
     "delete": "Elimina"
+  },
+  "ocr": {
+    "label": "Livello OCR",
+    "defaultOption": "OCR: predefinito ({{level}})",
+    "levels": {
+      "none": "Nessun OCR (solo testo digitale)",
+      "fast": "Veloce (Tesseract)",
+      "structured": "Strutturato (tabelle e layout)",
+      "vision": "Massimo (modello AI di visione)"
+    },
+    "hints": {
+      "none": "Solo il testo digitale dei PDF: le pagine scansionate e il testo nelle immagini vengono ignorati.",
+      "fast": "OCR locale delle scansioni e delle immagini nei PDF. Rapido, senza costi AI; meno preciso sulle tabelle complesse.",
+      "structured": "Analisi locale del layout: ricostruisce tabelle e titoli in markdown. Più lento (secondi per pagina).",
+      "vision": "Ogni pagina viene letta dal modello AI di visione: il migliore su foto, scrittura a mano e layout difficili. Una chiamata AI per pagina."
+    },
+    "reasons": {
+      "service_missing": "servizio OCR non installato",
+      "engine_missing": "motore non installato",
+      "no_vision_model": "nessun modello di visione configurato",
+      "null": ""
+    },
+    "queued": "Indicizzazione avviata: riceverai una notifica al termine."
   }
 }

@@ -69,13 +69,15 @@ services:
       - sandboxnet
 
   # The infrastructure services stay on the network with internet (appnet).
-  # embedding and whisper are internal services the backend calls (embeddings and
-  # transcription): both MUST share a network with the backend, which here is appnet.
+  # embedding, whisper, piper and ocr are internal services the backend calls (embeddings,
+  # transcription, speech, document OCR): all MUST share a network with the backend (appnet).
   postgres:   { networks: [appnet] }
   qdrant:     { networks: [appnet] }
   redis:      { networks: [appnet] }
   embedding:  { networks: [appnet] }
   whisper:    { networks: [appnet] }
+  piper:      { networks: [appnet] }
+  ocr:        { networks: [appnet] }
   frontend:   { networks: [appnet] }
 
 networks:

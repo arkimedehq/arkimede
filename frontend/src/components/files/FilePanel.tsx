@@ -5,7 +5,9 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { filesApi, type FileRecord, type DocScope } from '../../api/files';
+import { isOcrCandidate, type OcrLevel } from '../../api/ocr';
 import { Download, Trash2, Brain, CheckCircle, Loader2, FileX, X } from 'lucide-react';
+import OcrLevelSelect from './OcrLevelSelect';
 
 interface Props { chatId: string; projectId?: string | null; }
 
@@ -25,6 +27,9 @@ export default function FilePanel({ chatId, projectId }: Props) {
   const [ingestFileId, setIngestFileId] = useState<string | null>(null);
   const [selectValue,  setSelectValue]  = useState('');
   const [scopeValue,   setScopeValue]   = useState<DocScope>('personal');
+  const [ocrValue,     setOcrValue]     = useState<OcrLevel | ''>('');
+  /** File whose indexing was just queued (shows the "you will be notified" note). */
+  const [queuedFileId, setQueuedFileId] = useState<string | null>(null);
 
   const { data: files = [], isLoading } = useQuery({
     queryKey: ['files', 'chat', chatId],
@@ -40,10 +45,12 @@ export default function FilePanel({ chatId, projectId }: Props) {
   });
 
   const ingest = useMutation({
-    mutationFn: ({ fileId, collection, scope }: { fileId: string; collection?: string; scope: DocScope }) =>
-      filesApi.ingest(fileId, { scope, collection: collection || undefined, projectId: projectId || undefined }),
-    onSuccess: () => {
+    mutationFn: ({ fileId, collection, scope, ocrLevel }: { fileId: string; collection?: string; scope: DocScope; ocrLevel?: OcrLevel }) =>
+      filesApi.ingest(fileId, { scope, collection: collection || undefined, projectId: projectId || undefined, ocrLevel }),
+    onSuccess: (_data, vars) => {
+      // Indexing runs in the background: the list refreshes on its notification.
       qc.invalidateQueries({ queryKey: ['files'] });
+      setQueuedFileId(vars.fileId);
       closeIngest();
     },
   });
@@ -56,6 +63,8 @@ export default function FilePanel({ chatId, projectId }: Props) {
   function openIngest(fileId: string) {
     setIngestFileId(fileId);
     setSelectValue('');
+    setOcrValue('');
+    setQueuedFileId(null);
     // Sensible default: if the chat is in a project → project scope, otherwise personal.
     setScopeValue(projectId ? 'project' : 'personal');
   }
@@ -67,7 +76,10 @@ export default function FilePanel({ chatId, projectId }: Props) {
 
   function confirmIngest() {
     if (!ingestFileId) return;
-    ingest.mutate({ fileId: ingestFileId, collection: selectValue.trim() || undefined, scope: scopeValue });
+    ingest.mutate({
+      fileId: ingestFileId, collection: selectValue.trim() || undefined, scope: scopeValue,
+      ocrLevel: ocrValue || undefined,
+    });
   }
 
   if (isLoading) {
@@ -156,6 +168,15 @@ export default function FilePanel({ chatId, projectId }: Props) {
                       </select>
                     )}
 
+                    {isOcrCandidate(file.mimeType) && (
+                      <OcrLevelSelect
+                        value={ocrValue}
+                        onChange={setOcrValue}
+                        className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1.5
+                          text-xs text-gray-200 focus:outline-none focus:border-teal-500 transition-colors"
+                      />
+                    )}
+
                     <div className="flex gap-1.5">
                       <button
                         onClick={confirmIngest}
@@ -182,6 +203,10 @@ export default function FilePanel({ chatId, projectId }: Props) {
                       {t('panel.defaultHintPre')} <em>{t('panel.defaultHintEm')}</em> {t('panel.defaultHintPost')}
                     </p>
                   </div>
+                )}
+
+                {queuedFileId === file.id && !isSelectingThis && (
+                  <p className="mt-1.5 text-xs text-teal-400 leading-tight">{t('ocr.queued')}</p>
                 )}
 
                 {/* ── Hover actions ─── */}

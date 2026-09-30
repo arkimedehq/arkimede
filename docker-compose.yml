@@ -118,6 +118,28 @@ services:
       start_period: 60s          # loading the Piper voice may take a while
     # No port exposed to the host: reachable only by the backend (internal network)
 
+  ocr:
+    build:
+      context: ./ocr-service
+      dockerfile: Dockerfile
+      args:
+        # 1 = full image with the "structured" level (Docling + RapidOCR, ~4 GB);
+        # 0 = light image, "fast" level only (Tesseract, ~0.5 GB). Rebuild after changing it.
+        OCR_STRUCTURED: ${OCR_STRUCTURED:-1}
+        TESSERACT_LANGS: ${OCR_TESSERACT_LANGS:-eng ita}
+    restart: unless-stopped
+    environment:
+      OCR_LANGUAGES: ${OCR_LANGUAGES:-ita+eng}
+      OCR_CONCURRENCY: ${OCR_CONCURRENCY:-1}
+      OCR_MAX_PAGES: ${OCR_MAX_PAGES:-500}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:9200/health').status==200 else 1)"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    # No port exposed to the host: reachable only by the backend (internal network)
+
   skill-executor:
     build:
       context: ./executor
@@ -199,6 +221,7 @@ services:
       EMBEDDING_BASE_URL: http://embedding:8000/v1
       TRANSCRIPTION_BASE_URL: http://whisper:9000/v1
       TTS_BASE_URL: http://piper:9100/v1
+      OCR_BASE_URL: http://ocr:9200
       WYOMING_PORT: ${WYOMING_PORT:-10300}
       SKILL_EXECUTOR_URL: http://skill-executor:4000
       REDIS_URL: redis://redis:6379
@@ -219,6 +242,8 @@ services:
         condition: service_started   # on-demand transcription: does not block boot on model loading
       piper:
         condition: service_started   # on-demand TTS: does not block boot on voice loading
+      ocr:
+        condition: service_started   # on-demand OCR: missing/unhealthy only degrades the OCR levels
       skill-executor:
         condition: service_healthy
     ports:

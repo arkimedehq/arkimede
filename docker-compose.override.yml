@@ -37,3 +37,7 @@ services:
   piper:
     ports:
       - "9100:9100"
+
+  ocr:
+    ports:
+      - "9200:9200"

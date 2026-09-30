@@ -11,7 +11,7 @@ import {
   FolderOpen, Brain, Download, Trash2, Search, Wrench, Plug, UserCircle,
   Save, Eye, EyeOff, KeyRound, Cpu, Wifi, WifiOff, Boxes, Pencil, Plus,
   Star, Server, FileStack, X, Sparkles, Eraser, Zap, Filter, Package, ThumbsUp, BarChart3,
-  Users, UsersRound, Workflow, Network, CalendarClock, Activity, ShieldAlert, Mic, Terminal, Check, Copy, DatabaseBackup, Volume2, Radio, AlertTriangle,
+  Users, UsersRound, Workflow, Network, CalendarClock, Activity, ShieldAlert, Mic, Terminal, Check, Copy, DatabaseBackup, Volume2, Radio, AlertTriangle, ScanText,
 } from 'lucide-react';
 import type { LlmProvider, EmbeddingProvider, EmbeddingConfig, ToolLoadingConfig, ToolLoadingStrategy, ToolSchemaFormat, TranscriptionProvider, TtsProvider, SandboxNetwork, SandboxExecMode } from '../api/appConfig';
 import { apiKeysApi } from '../api/apiKeys';
@@ -23,6 +23,7 @@ import { userMemoryApi, type UserMemoryItem } from '../api/userMemory';
 import { usageApi, type TokenGroup, type AdminUsageSummary } from '../api/usage';
 import { llmConfigsApi, type LlmConfigDto } from '../api/llmConfigs';
 import { vectorDbApi, type VectorCollection, type VectorDbProvider } from '../api/vectorDb';
+import { ocrApi, OCR_LEVELS, type OcrLevel } from '../api/ocr';
 import { teamsApi } from '../api/teams';
 import { projectsApi } from '../api/projects';
 import { useStore } from '../store/useStore';
@@ -3469,6 +3470,125 @@ function VectorDbSection() {
       <VectorCollectionsCard />
       <ActiveCollectionCard />
       <EmbeddingConfigCard />
+      <OcrConfigCard />
+    </div>
+  );
+}
+
+/** Document OCR: default and maximum level users may pick, and what this deployment supports. */
+function OcrConfigCard() {
+  const { t } = useTranslation(['settings', 'files']);
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({ queryKey: ['ocr-config'], queryFn: ocrApi.getAdmin, staleTime: 30_000 });
+
+  const [defaultLevel, setDefaultLevel] = useState<OcrLevel>('fast');
+  const [maxLevel,     setMaxLevel]     = useState<OcrLevel>('vision');
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    if (!data) return;
+    setDefaultLevel(data.defaultLevel);
+    setMaxLevel(data.maxLevel);
+  }, [data]);
+
+  const rank = (l: OcrLevel) => OCR_LEVELS.indexOf(l);
+  const invalid = rank(defaultLevel) > rank(maxLevel);
+
+  const saveMutation = useMutation({
+    mutationFn: () => ocrApi.updateAdmin({ defaultLevel, maxLevel }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ocr-config'] });
+      qc.invalidateQueries({ queryKey: ['ocr-levels'] });
+      setMsg({ ok: true, text: t('ocr.savedOk') });
+      setTimeout(() => setMsg(null), 3000);
+    },
+    onError: (e: any) => setMsg({ ok: false, text: e?.response?.data?.message ?? t('vectordb.errorGeneric') }),
+  });
+
+  const selectCls = `w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm
+    text-gray-100 focus:outline-none focus:border-blue-500 transition-colors`;
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-5">
+      <div className="flex items-center gap-2">
+        <ScanText size={15} className="text-teal-400" />
+        <h3 className="text-sm font-semibold text-gray-100">{t('ocr.title')}</h3>
+      </div>
+      <p className="text-sm text-gray-500">{t('ocr.subtitle')}</p>
+
+      {isLoading && (
+        <div className="flex items-center gap-2 text-gray-500 text-sm">
+          <Loader2 size={14} className="animate-spin" /> {t('vectordb.loading')}
+        </div>
+      )}
+
+      {data && (
+        <>
+          {/* ── Levels and their availability on this deployment ── */}
+          <div className="space-y-2">
+            {data.levels.map((l) => (
+              <div key={l.level} className="flex items-start justify-between gap-3 rounded-lg border border-gray-800 px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-sm text-gray-200">{t(`files:ocr.levels.${l.level}`)}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">{t(`files:ocr.hints.${l.level}`)}</p>
+                </div>
+                {l.available ? (
+                  <span className="flex-shrink-0 flex items-center gap-1 text-xs text-emerald-400">
+                    <CheckCircle size={12} /> {t('ocr.available')}
+                  </span>
+                ) : (
+                  <span className="flex-shrink-0 flex items-center gap-1 text-xs text-amber-400">
+                    <AlertTriangle size={12} /> {t(`files:ocr.reasons.${l.reason}`)}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {data.levels.some((l) => l.reason === 'service_missing' || l.reason === 'engine_missing') && (
+            <InternalServiceMissing title={t('ocr.serviceMissingTitle')} desc={t('ocr.serviceMissingDesc')} />
+          )}
+
+          {/* ── Default / maximum ── */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label className="block text-xs font-medium text-gray-400 mb-1">{t('ocr.defaultLabel')}</label>
+              <select value={defaultLevel} onChange={(e) => setDefaultLevel(e.target.value as OcrLevel)} className={selectCls}>
+                {OCR_LEVELS.map((l) => <option key={l} value={l}>{t(`files:ocr.levels.${l}`)}</option>)}
+              </select>
+              <p className="text-[11px] text-gray-600 mt-1">{t('ocr.defaultHint')}</p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-400 mb-1">{t('ocr.maxLabel')}</label>
+              <select value={maxLevel} onChange={(e) => setMaxLevel(e.target.value as OcrLevel)} className={selectCls}>
+                {OCR_LEVELS.map((l) => <option key={l} value={l}>{t(`files:ocr.levels.${l}`)}</option>)}
+              </select>
+              <p className="text-[11px] text-gray-600 mt-1">{t('ocr.maxHint')}</p>
+            </div>
+          </div>
+          {invalid && <p className="text-xs text-red-400">{t('ocr.defaultAboveMax')}</p>}
+
+          <div className="flex items-center justify-between pt-1">
+            <div>
+              {msg && (
+                <span className={`text-xs flex items-center gap-1.5 ${msg.ok ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {msg.ok ? <CheckCircle size={13} /> : <XCircle size={13} />}
+                  {msg.text}
+                </span>
+              )}
+            </div>
+            <button
+              onClick={() => saveMutation.mutate()}
+              disabled={saveMutation.isPending || invalid}
+              className="flex items-center gap-1.5 px-4 py-1.5 bg-blue-600 hover:bg-blue-500
+                disabled:opacity-50 text-white text-sm rounded-lg transition-colors"
+            >
+              {saveMutation.isPending ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+              {t('ocr.save')}
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

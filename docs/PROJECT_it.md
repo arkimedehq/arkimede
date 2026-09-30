@@ -1060,7 +1060,9 @@ POST   /api/files/upload?projectId=     ← in un progetto serve write (collabor
 GET    /api/files?projectId=            ← file del progetto (tutti i membri) | ?chatId= | propri
 GET    /api/files/:id/download          ← scaricabile da proprietario o membro del progetto
 GET    /api/files/raw?rel=<path>        ← download autenticato (whitelist UPLOAD_DIR)
-POST   /api/embed/:fileId               ← body { scope: universal|project|personal, collection?, projectId? }
+POST   /api/embed/:fileId               ← body { scope: universal|project|personal, collection?, projectId?, ocrLevel? } → in coda (asincrono, notifica al termine)
+GET    /api/ocr/levels                  ← livelli OCR: default/massimo admin + disponibilità (vedi docs/OCR_it.md)
+GET|PATCH /api/admin/config/ocr         ← admin: livello OCR predefinito e massimo
 DELETE /api/embed/:fileId
 GET    /api/embed/collections
 

@@ -1,0 +1,6 @@
+# Structured level (layout analysis + table structure → markdown). Heavy: pulls
+# PyTorch (CPU wheels, see Dockerfile) and the layout/table models.
+docling>=2.100.0
+# Runtime of the RapidOCR models (PaddleOCR in ONNX) used by the structured level:
+# far better than Tesseract on scanned tables.
+onnxruntime>=1.18.0

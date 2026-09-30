@@ -118,6 +118,10 @@ export function useNotifications() {
         // If the delivery chat is open, make the new message appear right away.
         qc.invalidateQueries({ queryKey: ['messages', data.chatId] });
       }
+      // Background indexing finished: file lists show the "indexed" state.
+      if (data.eventType.startsWith('embed_ingest_')) {
+        qc.invalidateQueries({ queryKey: ['files'] });
+      }
     });
 
     return () => {

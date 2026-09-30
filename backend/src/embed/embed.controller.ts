@@ -11,6 +11,7 @@ import { EmbedIngestQueueService } from './embed-ingest.queue';
 import { FilesService } from '../files/files.service';
 import { ProjectsService } from '../projects/projects.service';
 import type { DocScope } from '../custom-tools/custom-tool.types';
+import { OCR_LEVELS, OcrLevel } from '../ocr/ocr.types';
 
 export class IngestDto {
   @IsOptional()
@@ -26,6 +27,11 @@ export class IngestDto {
   @IsOptional()
   @IsString()
   projectId?: string;
+
+  /** OCR level for PDFs/images (none|fast|structured|vision); omitted = admin default. */
+  @IsOptional()
+  @IsIn(OCR_LEVELS as unknown as string[])
+  ocrLevel?: OcrLevel;
 }
 
 export class IngestDatasourceDto {
@@ -47,6 +53,11 @@ export class IngestDatasourceDto {
   @IsOptional()
   @IsString()
   projectId?: string;
+
+  /** OCR level for PDFs/images (none|fast|structured|vision); omitted = admin default. */
+  @IsOptional()
+  @IsIn(OCR_LEVELS as unknown as string[])
+  ocrLevel?: OcrLevel;
 }
 
 @ApiTags('embed')
@@ -82,12 +93,15 @@ export class EmbedController {
     // The scope-check on source access is inside ingestDatasourceFile (worker).
     return this.ingestQueue.enqueue({
       userId: user.id, source: body.source, path: body.path,
-      collection: body.collection, scope: body.scope, projectId,
+      collection: body.collection, scope: body.scope, projectId, ocrLevel: body.ocrLevel,
     });
   }
 
   @Post(':fileId')
-  @ApiOperation({ summary: 'Index a file into the Vector DB with a scope (universal|project|personal)' })
+  @ApiOperation({
+    summary: 'Index a file into the Vector DB with a scope (universal|project|personal)',
+    description: 'Queues the indexing (asynchronous: OCR of long scans can take minutes) and returns immediately; the user is notified when done.',
+  })
   @ApiBody({ type: IngestDto })
   async ingest(
     @Param('fileId') fileId: string,
@@ -103,9 +117,13 @@ export class EmbedController {
         throw new ForbiddenException('embed.projectReadOnly');
       }
     }
-    // The file must be readable by the user (own or from an accessible project).
+    // The file must be readable by the user (own or from an accessible project):
+    // checked here so an invalid id fails the request instead of the background job.
     const file = await this.filesService.findOneReadable(fileId, user.id);
-    return this.embedService.ingestFile(file, user.id, body.collection, { scope: body.scope, projectId });
+    return this.ingestQueue.enqueue({
+      userId: user.id, fileId: file.id, filename: file.originalName,
+      collection: body.collection, scope: body.scope, projectId, ocrLevel: body.ocrLevel,
+    });
   }
 
   @Delete(':fileId')

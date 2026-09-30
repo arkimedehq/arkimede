@@ -197,6 +197,24 @@ CONVERSATION:
 Respond EXCLUSIVELY with a JSON array of objects, without any additional text. Example: [{"content":"Develops in TypeScript with NestJS","tags":["stack"],"keywords":["TypeScript","NestJS"],"context":"Useful when suggesting code or libraries.","category":"profile"}]. Empty array if there is nothing: []
 ```
 
+### Document OCR via the vision model — `OCR_IMAGE_PROMPT`, `ocrPagePrompt(nativeText)` (`ocr/ocr.service.ts`)
+Run on the **vision model** (`llm_configs.isVision ?? default`) while indexing documents (see `docs/OCR.md`).
+
+Standalone image (vision fallback for pictures without text, and `vision` level):
+```
+Extract all the visible text in this image. If there is no text, briefly describe the content. Respond only with the extracted text or the description, without preamble.
+```
+Rendered PDF page (`vision` level), once per page:
+```
+Transcribe ALL the text of this document page as markdown, in reading order: body text, headings, tables (as markdown tables), and any text inside pictures, stamps, logos or screenshots. For pictures without text, add a one-line description in square brackets. Do not summarize, translate or add commentary. Respond only with the transcription.
+
+The digital text layer of this page is below. It may be incomplete (text inside images is missing) or badly ordered: use it only to get exact spellings and numbers.
+<text_layer>
+{nativeText}
+</text_layer>
+```
+(The text-layer block appears only when the page has native text.)
+
 ### `METADATA_SPEC` (shared by extraction/annotation) — `prompts.ts`
 ```
 For each fact also produce: "tags" (1-3 lowercase classification labels), "keywords" (2-5 salient search terms, include proper names verbatim), "context" (ONE sentence: when is this note useful to recall), "category" (one of: "preference" | "profile" | "constraint" | "knowledge").

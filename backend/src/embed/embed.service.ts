@@ -23,6 +23,15 @@ import type {DocScope} from '../custom-tools/custom-tool.types';
 import {EmbeddingProviderService} from './embedding.provider.service';
 import {VectorDbService} from '../vector-db/vector-db.service';
 import {VectorStoreProviderService} from '../vector-db/vector-store-provider.service';
+import type {OcrLevel} from '../ocr/ocr.types';
+
+/** Options of the ingest methods. */
+export interface IngestOptions {
+  scope?:     DocScope;
+  projectId?: string | null;
+  /** OCR level for PDFs/images; omitted = admin default. */
+  ocrLevel?:  OcrLevel | null;
+}
 
 @Injectable()
 export class EmbedService {
@@ -84,7 +93,7 @@ export class EmbedService {
     file:        File,
     userId:      string,
     collection?: string,
-    opts?:       { scope?: DocScope; projectId?: string | null },
+    opts?:       IngestOptions,
   ): Promise<{ chunks: number; collection: string }> {
     // Document scope (universal|project|personal). If not specified it is
     // derived from the file: project if uploaded into a project, otherwise personal.
@@ -94,9 +103,12 @@ export class EmbedService {
     const collectionName = collection?.trim() || await this.resolveDefaultCollectionName();
     await this.ensureCollection(collectionName);
 
-    // Extracts the raw text from the file (supports PDF, text, etc.)
-    const text = await this.filesService.extractText(file);
-    if (!text.trim()) return { chunks: 0, collection: collectionName };
+    // Extracts the raw text from the file (PDF/DOCX/XLSX/text, OCR at the chosen level)
+    const text = await this.filesService.extractText(file, { ocrLevel: opts?.ocrLevel });
+    if (!text.trim()) {
+      this.logger.warn(`File ${file.originalName}: no extractable text (mime=${file.mimeType}) → not indexed`);
+      return { chunks: 0, collection: collectionName };
+    }
 
     const count = await this.embedTextIntoCollection(text, collectionName, {
       source:    file.originalName,
@@ -127,7 +139,7 @@ export class EmbedService {
     source:     string,
     filePath:   string,
     collection?: string,
-    opts?:      { scope?: DocScope; projectId?: string | null },
+    opts?:      IngestOptions,
   ): Promise<{ chunks: number; collection: string }> {
     const scope: DocScope = opts?.scope ?? 'personal';
     const docProjectId = scope === 'project' ? (opts?.projectId ?? null) : null;
@@ -140,8 +152,11 @@ export class EmbedService {
       source, userId, filePath, EmbedService.MAX_INGEST_BYTES,
     );
     const mime = (mimeLookup(filename) || 'application/octet-stream') as string;
-    const text = await this.filesService.extractTextFromBuffer(buffer, mime, filename);
-    if (!text.trim()) return { chunks: 0, collection: collectionName };
+    const text = await this.filesService.extractTextFromBuffer(buffer, mime, filename, { ocrLevel: opts?.ocrLevel });
+    if (!text.trim()) {
+      this.logger.warn(`Datasource file "${filename}": no extractable text (mime=${mime}) → not indexed`);
+      return { chunks: 0, collection: collectionName };
+    }
 
     const count = await this.embedTextIntoCollection(text, collectionName, {
       source:         filename,
@@ -172,7 +187,7 @@ export class EmbedService {
     fileId:      string,
     userId:      string,
     collection?: string,
-    opts?:       { scope?: DocScope; projectId?: string | null },
+    opts?:       IngestOptions,
   ): Promise<{ chunks: number; collection: string }> {
     this.logger.log(
       `[ingestFileById] ENTER — fileId="${fileId}" userId="${userId}" collection="${collection ?? 'default'}" scope="${opts?.scope ?? 'auto'}"`,

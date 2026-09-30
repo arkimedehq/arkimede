@@ -7,6 +7,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useDropzone } from 'react-dropzone';
 import { filesApi, type FileRecord, type DocScope } from '../../api/files';
 import { transcriptionApi } from '../../api/transcription';
+import { isOcrCandidate, type OcrLevel } from '../../api/ocr';
+import OcrLevelSelect from '../files/OcrLevelSelect';
 import { Send, Paperclip, X, Loader2, Brain, FileText, ChevronLeft, AlertCircle, Mic, Square } from 'lucide-react';
 
 type AttachmentMode = 'embed' | 'inline' | 'attachment';
@@ -64,6 +66,7 @@ export default function MessageInput({ onSend, disabled, chatId, projectId }: Pr
   const [collectionPickerOpen, setCollectionPickerOpen] = useState(false);
   const [selectedCollection, setSelectedCollection] = useState('');
   const [selectedScope, setSelectedScope] = useState<DocScope>('personal');
+  const [selectedOcr, setSelectedOcr] = useState<OcrLevel | ''>('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const { data: collections = [], isLoading: collectionsLoading } = useQuery<string[]>({
@@ -196,6 +199,7 @@ export default function MessageInput({ onSend, disabled, chatId, projectId }: Pr
         scope,
         collection: collection || undefined,
         projectId: projectId || undefined,
+        ocrLevel: selectedOcr || undefined,
       }).catch(() => {});
 
       const scopeLabel = t(
@@ -216,6 +220,7 @@ export default function MessageInput({ onSend, disabled, chatId, projectId }: Pr
       setPendingFile(null);
       setCollectionPickerOpen(false);
       setSelectedCollection('');
+      setSelectedOcr('');
       return;
     }
 
@@ -230,6 +235,7 @@ export default function MessageInput({ onSend, disabled, chatId, projectId }: Pr
     setPendingFile(null);
     setCollectionPickerOpen(false);
     setSelectedCollection('');
+    setSelectedOcr('');
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -386,6 +392,17 @@ export default function MessageInput({ onSend, disabled, chatId, projectId }: Pr
               <p className="text-xs text-gray-600 mt-1.5 leading-tight">
                 {t('collection.defaultNotePre')} <em>{t('collection.defaultNoteEm')}</em> {t('collection.defaultNotePost')}
               </p>
+
+              {isOcrCandidate(pendingFile.record.mimeType) && (
+                <div className="mt-2">
+                  <OcrLevelSelect
+                    value={selectedOcr}
+                    onChange={setSelectedOcr}
+                    className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1.5
+                      text-xs text-gray-200 focus:outline-none focus:border-blue-500 transition-colors"
+                  />
+                </div>
+              )}
 
               <div className="flex gap-2 mt-3">
                 <button

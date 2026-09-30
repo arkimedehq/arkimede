@@ -5,15 +5,17 @@ Di seguito le attribuzioni e le note di licenza richieste.
 
 > Generato il 2026-06-14. Copre le dipendenze di runtime/build dei componenti
 > Node (`backend`, `frontend`, `bridge`, `executor`), i servizi Python
-> (`embedding-service`, `whisper-service`) e i modelli ML scaricati a runtime.
+> (`embedding-service`, `whisper-service`, `ocr-service` — aggiunto il 2026-09-30) e i modelli ML.
 > Per rigenerare l'elenco Node: `npx license-checker --production` in ciascun workspace.
 
 ## Riepilogo licenze
 
 Tutte le dipendenze distribuite sono sotto licenze **permissive** (MIT, ISC, BSD-2/3-Clause,
-Apache-2.0 e simili). **Nessun copyleft (GPL/AGPL/LGPL/MPL)** è incluso nella
-distribuzione. Le componenti dual-license (es. `jszip`, `oracledb`) sono utilizzate
-sotto l'opzione permissiva (rispettivamente MIT e Apache-2.0).
+Apache-2.0 e simili). L'unica componente di terze parti **AGPL** è **PyMuPDF**
+nell'`ocr-service` (dual AGPL-3.0 / commerciale Artifex, usata sotto **AGPL-3.0** — la
+stessa licenza di Arkimede, vedi sotto). Nessun GPL/LGPL di terze parti è incluso. Le
+componenti dual-license (es. `jszip`, `oracledb`) sono utilizzate sotto l'opzione
+permissiva (rispettivamente MIT e Apache-2.0).
 
 | Famiglia licenza | Obbligo principale |
 |---|---|
@@ -40,6 +42,9 @@ ridistribuzione, e concede un grant brevettuale esplicito:
 - `xlsx` (SheetJS Community Edition) — https://github.com/SheetJS/sheetjs
 - `ssh2-sftp-client` — https://github.com/theophilusx/ssh2-sftp-client
 - `oracledb` — `Apache-2.0 OR UPL-1.0`, usato sotto Apache-2.0 — https://github.com/oracle/node-oracledb
+- `pymupdf` (ocr-service) — `AGPL-3.0 OR commerciale Artifex` → usata sotto **AGPL-3.0**,
+  compatibile con la licenza AGPL-3.0 di Arkimede: il sorgente corrispondente completo del
+  servizio è questo repository (`ocr-service/`). https://github.com/pymupdf/PyMuPDF
 
 Copia integrale della licenza: https://www.apache.org/licenses/LICENSE-2.0
 
@@ -73,22 +78,51 @@ Copia integrale della licenza: https://www.apache.org/licenses/LICENSE-2.0
 
 (CTranslate2, backend di `faster-whisper`, è distribuito sotto MIT.)
 
+### ocr-service (`requirements.txt`, `requirements-structured.txt`)
+
+| Pacchetto | Licenza |
+|---|---|
+| fastapi | MIT |
+| uvicorn | BSD-3-Clause |
+| python-multipart | Apache-2.0 |
+| pymupdf | **AGPL-3.0** (dual-license, vedi sopra) |
+| docling, docling-core, docling-parse, docling-ibm-models | MIT |
+| rapidocr | Apache-2.0 |
+| onnxruntime | MIT |
+| torch / torchvision (PyTorch, CPU) | BSD-3-Clause / Apache-2.0 (da metadati del pacchetto) |
+| transformers | Apache-2.0 |
+| opencv-python | Apache-2.0 |
+
+Pacchetto di sistema: **Tesseract OCR** (Debian `tesseract-ocr` + dati lingua) — Apache-2.0,
+https://github.com/tesseract-ocr/tesseract. I pacchetti transitivi dell'immagine sono stati
+verificati il 2026-09-30 (116 distribuzioni): tutti permissivi tranne `pymupdf` (sopra) e
+`certifi` / `tqdm` (MPL-2.0, copyleft debole a livello di file, usati senza modifiche). Il
+set `requirements-structured.txt` viene installato solo con la build `OCR_STRUCTURED=1`.
+
 ---
 
 ## Modelli di Machine Learning
 
-I modelli sono **scaricati a runtime** dalle rispettive fonti e non sono ridistribuiti
-con questo software. Gli unici modelli utilizzati sono:
+I modelli sono **scaricati** dalle rispettive fonti (a runtime, o in fase di build
+dell'immagine per l'ocr-service) e non sono ridistribuiti con il sorgente di questo
+software. Gli unici modelli utilizzati sono:
 
 | Modello | Uso | Licenza |
 |---|---|---|
 | `mixedbread-ai/mxbai-embed-large-v1` | Embedding testo (embedding-service) | **Apache-2.0** |
 | OpenAI **Whisper** (via faster-whisper / CTranslate2) | Trascrizione audio (whisper-service) | **MIT** |
+| `docling-project/docling-layout-heron` | Analisi layout pagina (ocr-service, livello strutturato) | **Apache-2.0** |
+| `docling-project/docling-models` (TableFormer) | Struttura tabelle (ocr-service, livello strutturato) | **CDLA-Permissive-2.0 / Apache-2.0** |
+| Modelli PaddleOCR PP-OCR (via RapidOCR, ONNX) | Rilevamento/riconoscimento testo (ocr-service, livello strutturato) | **Apache-2.0** |
+| Tesseract `tessdata` (eng, ita, …) | OCR (ocr-service, livello veloce) | **Apache-2.0** |
 
 - mxbai-embed-large-v1: https://huggingface.co/mixedbread-ai/mxbai-embed-large-v1 — Apache-2.0
 - Whisper: https://github.com/openai/whisper — MIT (pesi e codice rilasciati da OpenAI sotto MIT)
 
-Entrambe le licenze sono permissive e consentono uso commerciale.
+- Modelli Docling: https://huggingface.co/docling-project — Apache-2.0 / CDLA-Permissive-2.0
+- PaddleOCR / RapidOCR: https://github.com/PaddlePaddle/PaddleOCR, https://github.com/RapidAI/RapidOCR — Apache-2.0
+
+Tutte queste licenze sono permissive e consentono uso commerciale.
 
 ---
 

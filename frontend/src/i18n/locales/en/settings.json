@@ -541,5 +541,19 @@
     "fieldExpiry": "Expiry",
     "days": "days",
     "create": "Create key"
+  },
+  "ocr": {
+    "title": "Document OCR",
+    "subtitle": "How the text of PDFs and images is read when they are indexed into the RAG. Users choose a level for each document, up to the maximum.",
+    "available": "available",
+    "serviceMissingTitle": "Some OCR levels are not installed",
+    "serviceMissingDesc": "The fast and structured levels need the ocr service container (the structured one only in the full image, OCR_STRUCTURED=1). Unavailable levels fall back to the nearest available one.",
+    "defaultLabel": "Default level",
+    "defaultHint": "Used when the user does not choose one, and for documents indexed by agents and tools.",
+    "maxLabel": "Maximum level",
+    "maxHint": "Highest level users may choose. The vision level costs one AI call per page.",
+    "defaultAboveMax": "The default level cannot be above the maximum level.",
+    "save": "Save",
+    "savedOk": "OCR configuration saved"
   }
 }

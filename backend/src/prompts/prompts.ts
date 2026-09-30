@@ -301,3 +301,33 @@ export function supervisorSynthesisSystem(supPrompt: string): string {
 export function supervisorSynthesisUser(input: string, transcript: string): string {
   return `Objective: ${input}\n\nTeam's work:\n${transcript || '(none)'}\n\nFinal answer:`;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Document OCR via the vision model (ocr/ocr.service.ts)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Standalone image → text (or a short description when there is no text). */
+export const OCR_IMAGE_PROMPT =
+  'Extract all the visible text in this image. ' +
+  'If there is no text, briefly describe the content. ' +
+  'Respond only with the extracted text or the description, without preamble.';
+
+/**
+ * One rendered document page → markdown transcription. `nativeText` is the
+ * page's digital text layer (may be empty or partial): passed as a spelling
+ * hint, the image stays the source of truth (it also shows text inside images).
+ */
+export function ocrPagePrompt(nativeText: string): string {
+  const hint = nativeText.trim()
+    ? '\n\nThe digital text layer of this page is below. It may be incomplete (text inside images ' +
+      'is missing) or badly ordered: use it only to get exact spellings and numbers.\n' +
+      `<text_layer>\n${nativeText.trim()}\n</text_layer>`
+    : '';
+  return (
+    'Transcribe ALL the text of this document page as markdown, in reading order: body text, ' +
+    'headings, tables (as markdown tables), and any text inside pictures, stamps, logos or screenshots. ' +
+    'For pictures without text, add a one-line description in square brackets. ' +
+    'Do not summarize, translate or add commentary. Respond only with the transcription.' +
+    hint
+  );
+}

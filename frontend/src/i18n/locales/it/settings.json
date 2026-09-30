@@ -541,5 +541,19 @@
     "fieldExpiry": "Scadenza",
     "days": "giorni",
     "create": "Crea chiave"
+  },
+  "ocr": {
+    "title": "OCR documenti",
+    "subtitle": "Come viene letto il testo di PDF e immagini quando vengono indicizzati nel RAG. Gli utenti scelgono il livello per ogni documento, fino al massimo consentito.",
+    "available": "disponibile",
+    "serviceMissingTitle": "Alcuni livelli OCR non sono installati",
+    "serviceMissingDesc": "I livelli veloce e strutturato richiedono il container del servizio ocr (lo strutturato solo nell'immagine completa, OCR_STRUCTURED=1). I livelli non disponibili ripiegano sul più vicino disponibile.",
+    "defaultLabel": "Livello predefinito",
+    "defaultHint": "Usato quando l'utente non ne sceglie uno, e per i documenti indicizzati da agenti e tool.",
+    "maxLabel": "Livello massimo",
+    "maxHint": "Il livello più alto che gli utenti possono scegliere. Il livello di visione costa una chiamata AI per pagina.",
+    "defaultAboveMax": "Il livello predefinito non può superare il livello massimo.",
+    "save": "Salva",
+    "savedOk": "Configurazione OCR salvata"
   }
 }

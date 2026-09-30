@@ -2,6 +2,7 @@
 // Copyright © 2026 Andrea Genovese
 
 import api from './client';
+import type { OcrLevel } from './ocr';
 import { downloadWithAuth } from '../utils/downloadWithAuth';
 
 /** Scope of an indexed document: universal (company) | project | personal. */
@@ -53,9 +54,11 @@ export const filesApi = {
   setScope: (id: string, scope: FileScope, teamId?: string | null) =>
     api.patch<FileRecord>(`/files/${id}/scope`, { scope, teamId: teamId ?? null }).then((r) => r.data),
 
-  ingest: (fileId: string, opts: { scope: DocScope; collection?: string; projectId?: string }) =>
+  /** Queues the indexing (async): the user is notified when it completes. */
+  ingest: (fileId: string, opts: { scope: DocScope; collection?: string; projectId?: string; ocrLevel?: OcrLevel }) =>
     api.post(`/embed/${fileId}`, {
       scope: opts.scope,
+      ...(opts.ocrLevel ? { ocrLevel: opts.ocrLevel } : {}),
       ...(opts.collection ? { collection: opts.collection } : {}),
       ...(opts.scope === 'project' && opts.projectId ? { projectId: opts.projectId } : {}),
     }).then((r) => r.data),

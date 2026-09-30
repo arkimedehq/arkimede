@@ -19,5 +19,28 @@
     "defaultHintPost": "to use the one configured by the admin.",
     "download": "Download",
     "delete": "Delete"
+  },
+  "ocr": {
+    "label": "OCR level",
+    "defaultOption": "OCR: default ({{level}})",
+    "levels": {
+      "none": "No OCR (text layer only)",
+      "fast": "Fast (Tesseract)",
+      "structured": "Structured (tables and layout)",
+      "vision": "Maximum (vision AI model)"
+    },
+    "hints": {
+      "none": "Only the digital text of PDFs: scanned pages and text inside images are skipped.",
+      "fast": "Local OCR of scans and of images inside PDFs. Quick, no AI cost; weaker on complex tables.",
+      "structured": "Local layout analysis: rebuilds tables and headings as markdown. Slower (seconds per page).",
+      "vision": "Every page is read by the AI vision model: best on photos, handwriting and difficult layouts. One AI call per page."
+    },
+    "reasons": {
+      "service_missing": "OCR service not installed",
+      "engine_missing": "engine not installed",
+      "no_vision_model": "no vision model configured",
+      "null": ""
+    },
+    "queued": "Indexing started: you will be notified when it completes."
   }
 }

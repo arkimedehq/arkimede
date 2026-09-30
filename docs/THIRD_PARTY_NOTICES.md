@@ -5,7 +5,7 @@ The required attributions and license notices are listed below.
 
 > Generated on 2026-06-14. Covers the runtime/build dependencies of the Node
 > components (`backend`, `frontend`, `bridge`, `executor`), the Python services
-> (`embedding-service`, `whisper-service`) and the ML models downloaded at runtime.
+> (`embedding-service`, `whisper-service`, `ocr-service` — added 2026-09-30) and the ML models.
 > To regenerate the Node list: `npx license-checker --production` in each workspace.
 
 ## License summary
@@ -13,7 +13,9 @@ The required attributions and license notices are listed below.
 Nearly all third-party dependencies are under **permissive** licenses (MIT, ISC,
 BSD-2/3-Clause, Apache-2.0, and similar). The only third-party copyleft is
 `lightningcss` (**MPL-2.0**, a build-time CSS transformer; weak, file-level copyleft,
-not part of the runtime). **No third-party GPL/LGPL/AGPL** is included. Dual-licensed
+not part of the runtime). The only third-party **AGPL** component is **PyMuPDF** in the
+`ocr-service` (dual AGPL-3.0 / Artifex commercial, used under **AGPL-3.0** — the same
+license as Arkimede, see below). No third-party GPL/LGPL is included. Dual-licensed
 components (e.g. `jszip`, `oracledb`) are used under the permissive option (MIT and
 Apache-2.0 respectively).
 
@@ -55,6 +57,9 @@ Full license text: https://www.apache.org/licenses/LICENSE-2.0
 
 - `jszip` — `MIT OR GPL-3.0-or-later` → used under **MIT**.
 - `oracledb` — `Apache-2.0 OR UPL-1.0` → used under **Apache-2.0**.
+- `pymupdf` (ocr-service) — `AGPL-3.0 OR Artifex commercial` → used under **AGPL-3.0**,
+  compatible with Arkimede's own AGPL-3.0: the complete corresponding source of the
+  service is this repository (`ocr-service/`). https://github.com/pymupdf/PyMuPDF
 
 ---
 
@@ -81,22 +86,52 @@ Full license text: https://www.apache.org/licenses/LICENSE-2.0
 
 (CTranslate2, the backend of `faster-whisper`, is distributed under MIT.)
 
+### ocr-service (`requirements.txt`, `requirements-structured.txt`)
+
+| Package | License |
+|---|---|
+| fastapi | MIT |
+| uvicorn | BSD-3-Clause |
+| python-multipart | Apache-2.0 |
+| pymupdf | **AGPL-3.0** (dual-license, see above) |
+| docling, docling-core, docling-parse, docling-ibm-models | MIT |
+| rapidocr | Apache-2.0 |
+| onnxruntime | MIT |
+| torch / torchvision (PyTorch, CPU) | BSD-3-Clause / Apache-2.0 (per package metadata) |
+| transformers | Apache-2.0 |
+| opencv-python | Apache-2.0 |
+
+System package: **Tesseract OCR** (Debian `tesseract-ocr` + language data) — Apache-2.0,
+https://github.com/tesseract-ocr/tesseract. Transitive packages of the image were audited
+on 2026-09-30 (116 distributions): all permissive except `pymupdf` (above) and
+`certifi` / `tqdm` (MPL-2.0, weak file-level copyleft, used unmodified). The
+`requirements-structured.txt` set is only installed when the image is built with
+`OCR_STRUCTURED=1`.
+
 ---
 
 ## Machine Learning models
 
-The models are **downloaded at runtime** from their respective sources and are not
-redistributed with this software. The only models used are:
+The models are **downloaded** from their respective sources (at runtime, or at image
+build time for the ocr-service) and are not redistributed with this software's source.
+The only models used are:
 
 | Model | Use | License |
 |---|---|---|
 | `mixedbread-ai/mxbai-embed-large-v1` | Text embedding (embedding-service) | **Apache-2.0** |
 | OpenAI **Whisper** (via faster-whisper / CTranslate2) | Audio transcription (whisper-service) | **MIT** |
+| `docling-project/docling-layout-heron` | Page layout analysis (ocr-service, structured level) | **Apache-2.0** |
+| `docling-project/docling-models` (TableFormer) | Table structure (ocr-service, structured level) | **CDLA-Permissive-2.0 / Apache-2.0** |
+| PaddleOCR PP-OCR models (via RapidOCR, ONNX) | Text detection/recognition (ocr-service, structured level) | **Apache-2.0** |
+| Tesseract `tessdata` (eng, ita, …) | OCR (ocr-service, fast level) | **Apache-2.0** |
 
 - mxbai-embed-large-v1: https://huggingface.co/mixedbread-ai/mxbai-embed-large-v1 — Apache-2.0
 - Whisper: https://github.com/openai/whisper — MIT (weights and code released by OpenAI under MIT)
 
-Both licenses are permissive and allow commercial use.
+- Docling models: https://huggingface.co/docling-project — Apache-2.0 / CDLA-Permissive-2.0
+- PaddleOCR / RapidOCR: https://github.com/PaddlePaddle/PaddleOCR, https://github.com/RapidAI/RapidOCR — Apache-2.0
+
+All these licenses are permissive and allow commercial use.
 
 ---
 

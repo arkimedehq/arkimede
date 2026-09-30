@@ -1060,7 +1060,9 @@ POST   /api/files/upload?projectId=     ← in a project requires write (collabo
 GET    /api/files?projectId=            ← project files (all members) | ?chatId= | own
 GET    /api/files/:id/download          ← downloadable by owner or project member
 GET    /api/files/raw?rel=<path>        ← authenticated download (UPLOAD_DIR whitelist)
-POST   /api/embed/:fileId               ← body { scope: universal|project|personal, collection?, projectId? }
+POST   /api/embed/:fileId               ← body { scope: universal|project|personal, collection?, projectId?, ocrLevel? } → queued (async, notification when done)
+GET    /api/ocr/levels                  ← OCR levels: admin default/max + availability (see docs/OCR.md)
+GET|PATCH /api/admin/config/ocr         ← admin: default and maximum OCR level
 DELETE /api/embed/:fileId
 GET    /api/embed/collections
 

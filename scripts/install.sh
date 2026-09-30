@@ -287,6 +287,17 @@ else
   ok "voice services disabled (docker-compose.novoice.yml) — re-enable by dropping it from scripts/.compose-profile"
 fi
 
+# ── Document OCR (image variant) ──────────────────────────────────────────────
+# The ocr service always ships the "fast" level (Tesseract). The "structured" level
+# (Docling + RapidOCR: tables/layout → markdown) makes the image ~4 GB instead of ~0.5 GB.
+if yesno "Include the structured OCR level (tables and layout, ~4 GB image, ~1.5 GB RAM while running)?" "Y"; then
+  set_env OCR_STRUCTURED 1
+  ok "OCR: full image (fast + structured levels)"
+else
+  set_env OCR_STRUCTURED 0
+  ok "OCR: light image (fast level only) — set OCR_STRUCTURED=1 in .env and rebuild 'ocr' to add it"
+fi
+
 # ── 4. Build required images ──────────────────────────────────────────────────
 step "4/6 · Build images"
 if (( NEED_RUNNER )); then

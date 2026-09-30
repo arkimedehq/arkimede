@@ -4,8 +4,9 @@
 /**
  * @file embed-ingest.queue.ts
  *
- * Asynchronous queue for indexing files of a DataSource (see
- * EmbedService.ingestDatasourceFile). Text extraction (PDF/DOCX/OCR) + embedding
+ * Asynchronous queue for indexing files: files of a DataSource (see
+ * EmbedService.ingestDatasourceFile) and uploaded files (EmbedService.ingestFileById).
+ * Text extraction (PDF/DOCX/OCR — minutes for long scans at the higher OCR levels) + embedding
  * of many chunks can take several seconds: running it synchronously would block the
  * caller (e.g. the skill task, cap 30s) and retries would create duplicates.
  *
@@ -20,19 +21,38 @@ import { ConfigService } from '@nestjs/config';
 import { Queue, Worker, Job, ConnectionOptions } from 'bullmq';
 import { basename } from 'path';
 import type { DocScope } from '../custom-tools/custom-tool.types';
+import type { OcrLevel } from '../ocr/ocr.types';
 import { EmbedService } from './embed.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
 
 const QUEUE_NAME = 'embed-ingest';
 
-export interface EmbedIngestJob {
-  userId:     string;
-  source:     string;
-  path:       string;
+interface EmbedIngestJobBase {
+  userId:      string;
   collection?: string;
-  scope?:     DocScope;
-  projectId?: string | null;
+  scope?:      DocScope;
+  projectId?:  string | null;
+  ocrLevel?:   OcrLevel | null;
+}
+
+/** A file of a DataSource, identified by `(source, path)`. */
+export interface DatasourceIngestJob extends EmbedIngestJobBase {
+  source: string;
+  path:   string;
+}
+
+/** An uploaded file (files table), identified by its id. */
+export interface UploadIngestJob extends EmbedIngestJobBase {
+  fileId:   string;
+  filename: string;
+}
+
+export type EmbedIngestJob = DatasourceIngestJob | UploadIngestJob;
+
+function jobFilename(data: EmbedIngestJob): string {
+  if ('fileId' in data) return data.filename || 'file';
+  return basename(String(data.path).replace(/\/+$/, '')) || 'file';
 }
 
 export type EnqueueResult =
@@ -81,7 +101,7 @@ export class EmbedIngestQueueService implements OnModuleInit, OnModuleDestroy {
    * `attempts: 1`: no automatic retry → no double indexing.
    */
   async enqueue(data: EmbedIngestJob): Promise<EnqueueResult> {
-    const filename = basename(String(data.path).replace(/\/+$/, '')) || 'file';
+    const filename = jobFilename(data);
     if (this.enabled && this.queue) {
       const job = await this.queue.add('ingest', data, {
         attempts: 1,
@@ -108,21 +128,26 @@ export class EmbedIngestQueueService implements OnModuleInit, OnModuleDestroy {
    * so the user receives the notification in both cases.
    */
   private async runAndNotify(data: EmbedIngestJob): Promise<{ chunks: number; collection: string }> {
-    const { userId, source, path, collection, scope, projectId } = data;
-    const filename = basename(String(path).replace(/\/+$/, '')) || 'file';
+    const { userId, collection, scope, projectId, ocrLevel } = data;
+    const filename = jobFilename(data);
+    // Identifies the file in the notification payload (upload id or source+path).
+    const ref = 'fileId' in data ? { fileId: data.fileId } : { source: data.source, path: data.path };
     try {
-      const r = await this.embed.ingestDatasourceFile(userId, source, path, collection, { scope, projectId });
+      const opts = { scope, projectId, ocrLevel };
+      const r = 'fileId' in data
+        ? await this.embed.ingestFileById(data.fileId, userId, collection, opts)
+        : await this.embed.ingestDatasourceFile(userId, data.source, data.path, collection, opts);
       if (r.chunks > 0) {
         await this.notify(userId, 'embed_ingest_done', {
           title:   `Indexing completed: ${filename}`,
           message: `${r.chunks} blocks indexed into collection "${r.collection}".`,
-          filename, chunks: r.chunks, collection: r.collection, source, path,
+          filename, chunks: r.chunks, collection: r.collection, ...ref,
         });
       } else {
         await this.notify(userId, 'embed_ingest_failed', {
           title:   `Indexing without text: ${filename}`,
           message: 'No extractable text from the file (unsupported format or empty document).',
-          filename, source, path,
+          filename, ...ref,
         });
       }
       return r;
@@ -130,7 +155,7 @@ export class EmbedIngestQueueService implements OnModuleInit, OnModuleDestroy {
       await this.notify(userId, 'embed_ingest_failed', {
         title:   `Indexing failed: ${filename}`,
         message: err?.message ?? 'Error during indexing.',
-        filename, source, path,
+        filename, ...ref,
       });
       throw err;
     }

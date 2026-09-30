@@ -2,6 +2,7 @@
 // Copyright © 2026 Andrea Genovese
 
 import { Entity, PrimaryColumn, Column, UpdateDateColumn } from 'typeorm';
+import type { OcrLevel } from '../ocr/ocr.types';
 
 /**
  * Tool selection strategy (Axis 1 — how many tools to inject into the prompt).
@@ -244,6 +245,23 @@ export class AppConfigEntity {
    */
   @Column({ type: 'varchar', length: 200, nullable: true })
   ttsVoice: string | null;
+
+  // ── Document OCR (ocr/ocr.service.ts) ───────────────────────────────────────
+
+  /**
+   * OCR level used when a request does not choose one (none | fast |
+   * structured | vision, see ocr/ocr.types.ts). Default 'fast': local Tesseract,
+   * no LLM cost; degraded at runtime when the ocr-service is not deployed.
+   */
+  @Column({ type: 'varchar', length: 20, default: 'fast' })
+  ocrDefaultLevel: OcrLevel;
+
+  /**
+   * Highest OCR level users may request (caps both the default and per-request
+   * choices). 'vision' costs one vision-LLM call per page.
+   */
+  @Column({ type: 'varchar', length: 20, default: 'vision' })
+  ocrMaxLevel: OcrLevel;
 
   // ── Wyoming voice server (Home Assistant & co.) ─────────────────────────────
 
