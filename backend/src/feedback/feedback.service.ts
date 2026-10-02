@@ -15,9 +15,9 @@ import { ChatsService } from '../chats/chats.service';
 import { AppConfigService } from '../app-config/app-config.service';
 import { EmbeddingProviderService } from '../embed/embedding.provider.service';
 import { VectorStoreProviderService } from '../vector-db/vector-store-provider.service';
+import { FEEDBACK_COLLECTION, feedbackIndexText } from './feedback-index';
 
 /** Vector collection dedicated to the feedback-memory. */
-const FEEDBACK_COLLECTION = 'feedback_memory';
 /** Minimum similarity score to inject a feedback into the prompt (cuts the noise). */
 const MIN_SCORE = 0.35;
 /** Maximum length of the saved answer snippet. */
@@ -70,7 +70,7 @@ export class FeedbackService {
         throw new BadRequestException('feedback.memoryNotAvailable');
       }
       try {
-        await this.vectorStore.ensureCollection(FEEDBACK_COLLECTION, this.embedding.vectorSize);
+        await this.vectorStore.ensureCollection(FEEDBACK_COLLECTION, await this.embedding.getVectorSize());
       } catch (err: any) {
         throw new BadRequestException(
           I18nContext.current()?.t('feedback.collectionCreateFailed', { args: { collection: FEEDBACK_COLLECTION, error: err?.message ?? err } }) ??
@@ -132,11 +132,11 @@ export class FeedbackService {
     }
 
     try {
-      const textToEmbed = feedback.question?.trim() || feedback.answer?.trim() || feedback.comment!;
+      const textToEmbed = feedbackIndexText(feedback);
       const vector = await this.embedding.embed(textToEmbed);
       const vectorId = feedback.vectorId ?? uuidv4();
 
-      await this.vectorStore.ensureCollection(FEEDBACK_COLLECTION, this.embedding.vectorSize);
+      await this.vectorStore.ensureCollection(FEEDBACK_COLLECTION, await this.embedding.getVectorSize());
       await this.vectorStore.upsert(FEEDBACK_COLLECTION, [{
         id: vectorId,
         vector,

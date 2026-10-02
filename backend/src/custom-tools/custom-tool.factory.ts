@@ -1576,6 +1576,9 @@ async function executeRagIndex(
     await ctx.ensureCollection(config.collection);
 
     const chunks  = await ctx.chunkText(text);
+    if (chunks.length === 0) {
+      return `Nothing to index: the text is empty after whitespace normalization.`;
+    }
     const vectors = await Promise.all(chunks.map((chunk) => ctx.embedDoc(chunk)));
 
     const points: VectorPoint[] = chunks.map((chunk, i) => ({

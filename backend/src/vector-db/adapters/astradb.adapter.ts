@@ -2,7 +2,8 @@
 // Copyright © 2026 Andrea Genovese
 
 import { Logger } from '@nestjs/common';
-import type { VectorStoreAdapter, VectorPoint, SearchHit } from '../vector-store.types';
+import { VectorSizeMismatchError, VectorMaintenanceNotSupportedError } from '../vector-store.types';
+import type { VectorStoreAdapter, VectorPoint, SearchHit, CollectionInfo, ScrollPage } from '../vector-store.types';
 
 /**
  * AstraDB adapter for vector store operations.
@@ -67,7 +68,12 @@ export class AstraDbAdapter implements VectorStoreAdapter {
       // Verify the dimension if available
       const existingDim = found?.options?.vector?.dimension;
       if (existingDim && existingDim !== vectorSize) {
-        this.logger.warn(`AstraDB collection "${name}" dim=${existingDim}, expected ${vectorSize}. Recreating.`);
+        // Recreate only when there is nothing to lose; if the count is unavailable, assume data.
+        const count = await this.command(name, { countDocuments: {} })
+          .then((r) => r?.status?.count)
+          .catch(() => undefined);
+        if (count !== 0) throw new VectorSizeMismatchError(name, existingDim, vectorSize);
+        this.logger.warn(`Empty AstraDB collection "${name}" dim=${existingDim}, expected ${vectorSize}. Recreating.`);
         await this.recreateCollection(name, vectorSize);
       }
       return;
@@ -150,5 +156,18 @@ export class AstraDbAdapter implements VectorStoreAdapter {
     const res = await this.command(null, { findCollections: {} });
     const cols = res?.status?.collections ?? [];
     return Array.isArray(cols) ? cols.map((c: any) => (typeof c === 'string' ? c : c.name)) : [];
+  }
+
+  // Maintenance operations are not implemented for this provider yet (re-embed job).
+  async getCollectionInfo(): Promise<CollectionInfo> {
+    throw new VectorMaintenanceNotSupportedError('astradb', 'getCollectionInfo');
+  }
+
+  async scroll(): Promise<ScrollPage> {
+    throw new VectorMaintenanceNotSupportedError('astradb', 'scroll');
+  }
+
+  async deleteCollection(): Promise<void> {
+    throw new VectorMaintenanceNotSupportedError('astradb', 'deleteCollection');
   }
 }

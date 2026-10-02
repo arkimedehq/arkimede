@@ -30,6 +30,7 @@ import { EmbeddingProviderService } from '../embed/embedding.provider.service';
 import { VectorStoreProviderService } from '../vector-db/vector-store-provider.service';
 import { AuditService } from '../audit/audit.service';
 import { runWithLlmCallContext } from '../usage/llm-call-context';
+import { MEMORY_COLLECTION, memoryIndexText, memoryVectorPayload } from './memory-index';
 
 const QUEUE_NAME = 'memory-evolution';
 /** Delay before processing: lets the fire-and-forget enrichment land first. */
@@ -190,7 +191,7 @@ export class MemoryEvolutionService implements OnModuleInit, OnModuleDestroy {
         .catch(() => []),
       this.embedding
         .embed(note.content)
-        .then((v) => this.vectorStore.search('user_memory', v, MAX_CANDIDATES * 2, vectorFilter))
+        .then((v) => this.vectorStore.search(MEMORY_COLLECTION, v, MAX_CANDIDATES * 2, vectorFilter))
         .then((hits) => hits.map((h) => ({ id: String(h.payload?.memoryId ?? h.id), score: h.score })))
         .catch(() => []),
     ]);
@@ -304,13 +305,8 @@ export class MemoryEvolutionService implements OnModuleInit, OnModuleDestroy {
     try {
       const note = await this.repo.findOne({ where: { id } });
       if (!note || note.status !== 'confirmed') return;
-      const text = [note.content, note.context ?? '', (note.keywords ?? []).join(' ')].join('\n').trim();
-      const vector = await this.embedding.embed(text);
-      await this.vectorStore.upsert('user_memory', [{
-        id: note.id,
-        vector,
-        payload: { userId: note.userId, memoryId: note.id, tags: note.tags ?? [], category: note.category ?? null },
-      }]);
+      const vector = await this.embedding.embed(memoryIndexText(note));
+      await this.vectorStore.upsert(MEMORY_COLLECTION, [{ id: note.id, vector, payload: memoryVectorPayload(note) }]);
     } catch (err: any) {
       this.logger.warn(`Evolution reindex failed (${id}): ${err?.message ?? err}`);
     }

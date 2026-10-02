@@ -28,11 +28,34 @@ export interface SearchHit {
   payload: Record<string, any>;
 }
 
+/**
+ * Thrown when a non-empty collection exists with a vector dimension different from the
+ * active embedding model's. Dropping it would silently lose data, so callers get an
+ * explicit error; the fix is an explicit re-embed of the collection.
+ */
+export class VectorSizeMismatchError extends Error {
+  constructor(
+    readonly collection: string,
+    readonly existingSize: number,
+    readonly expectedSize: number,
+  ) {
+    super(
+      `Vector collection "${collection}" has dimension ${existingSize} but the active embedding model ` +
+      `produces ${expectedSize}. The collection is not empty, so it was not recreated: re-embed it ` +
+      `with the current model (admin re-embed) or restore the previous embedding model.`,
+    );
+    this.name = 'VectorSizeMismatchError';
+  }
+}
+
 /** Provider-agnostic adapter for vector store operations. */
 export interface VectorStoreAdapter {
   /**
    * Ensures the collection exists with the specified vector dimension.
-   * Idempotent: if it exists with a different dimension it recreates it.
+   * Idempotent. If it exists with a different dimension: an EMPTY collection is recreated
+   * (nothing to lose); a non-empty one is never dropped implicitly — throws
+   * {@link VectorSizeMismatchError}. Re-indexing with a new model must go through an
+   * explicit path (`recreateCollection` / the re-embed job).
    */
   ensureCollection(name: string, vectorSize: number): Promise<void>;
 
@@ -74,6 +97,52 @@ export interface VectorStoreAdapter {
    * Returns the list of names of the collections existing in the provider.
    */
   listCollections(): Promise<string[]>;
+
+  // ── Maintenance (used by the admin re-embed job) ─────────────────────────────
+
+  /** Dimension and point count of a collection, or `{ exists: false }`. */
+  getCollectionInfo(name: string): Promise<CollectionInfo>;
+
+  /**
+   * Pages through all points of a collection (stable order). Pass the returned
+   * `nextOffset` back until it is null.
+   */
+  scroll(collection: string, opts: ScrollOptions): Promise<ScrollPage>;
+
+  /** Deletes a collection (no-op if it does not exist). */
+  deleteCollection(name: string): Promise<void>;
+}
+
+export interface CollectionInfo {
+  exists:       boolean;
+  vectorSize?:  number;
+  pointsCount?: number;
+}
+
+export interface ScrollOptions {
+  limit:        number;
+  /** Opaque cursor returned by the previous page (null/undefined = start). */
+  offset?:      string | number | null;
+  withVectors?: boolean;
+}
+
+export interface ScrolledPoint {
+  id:      string | number;
+  payload: Record<string, any>;
+  vector?: number[];
+}
+
+export interface ScrollPage {
+  points:     ScrolledPoint[];
+  nextOffset: string | number | null;
+}
+
+/** Thrown by adapters that do not implement a maintenance operation. */
+export class VectorMaintenanceNotSupportedError extends Error {
+  constructor(provider: string, operation: string) {
+    super(`The "${provider}" vector provider does not support "${operation}" yet (needed by the re-embed job).`);
+    this.name = 'VectorMaintenanceNotSupportedError';
+  }
 }
 
 /** Supported vector DB providers. */

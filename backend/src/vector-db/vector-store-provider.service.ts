@@ -26,6 +26,9 @@ import type {
   VectorStoreConfig,
   VectorPoint,
   SearchHit,
+  CollectionInfo,
+  ScrollOptions,
+  ScrollPage,
 } from './vector-store.types';
 import { VectorDbService } from './vector-db.service';
 import { decrypt } from '../custom-tools/crypto.utils';
@@ -95,6 +98,18 @@ export class VectorStoreProviderService {
 
   async listCollections(): Promise<string[]> {
     return (await this.getAdapter()).listCollections();
+  }
+
+  async getCollectionInfo(name: string): Promise<CollectionInfo> {
+    return (await this.getAdapter()).getCollectionInfo(name);
+  }
+
+  async scroll(collection: string, opts: ScrollOptions): Promise<ScrollPage> {
+    return (await this.getAdapter()).scroll(collection, opts);
+  }
+
+  async deleteCollection(name: string): Promise<void> {
+    return (await this.getAdapter()).deleteCollection(name);
   }
 
   // ── Config resolution ─────────────────────────────────────────────────────

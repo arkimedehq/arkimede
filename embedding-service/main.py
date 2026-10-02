@@ -17,6 +17,10 @@ logger = logging.getLogger(__name__)
 MODEL_NAME = os.getenv("EMBEDDING_MODEL", "mixedbread-ai/mxbai-embed-large-v1")
 DEVICE     = os.getenv("EMBEDDING_DEVICE", "cpu")
 BATCH_SIZE = int(os.getenv("EMBEDDING_BATCH_SIZE", "32"))
+# Optional cap on input length in tokens (empty = the model's own limit). Bounds RAM and
+# latency on small hosts for long-context models (e.g. bge-m3 accepts 8192 tokens, while
+# indexed chunks are a few hundred); longer inputs are truncated.
+MAX_SEQ_LENGTH = int(os.getenv("EMBEDDING_MAX_SEQ_LENGTH") or 0) or None
 
 model: SentenceTransformer | None = None
 
@@ -26,7 +30,9 @@ async def lifespan(app: FastAPI):
     global model
     logger.info(f"Loading embedding model: {MODEL_NAME} on {DEVICE}")
     model = SentenceTransformer(MODEL_NAME, device=DEVICE, truncate_dim=None)
-    logger.info(f"Model ready — native dim: {model.get_embedding_dimension()}")
+    if MAX_SEQ_LENGTH:
+        model.max_seq_length = min(MAX_SEQ_LENGTH, model.max_seq_length or MAX_SEQ_LENGTH)
+    logger.info(f"Model ready — native dim: {model.get_embedding_dimension()}, max_seq_length: {model.max_seq_length}")
     yield
     model = None
 

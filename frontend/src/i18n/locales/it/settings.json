@@ -505,7 +505,8 @@
     "embeddingProviderLmStudioDesc": "Embedding locale tramite LM Studio",
     "embeddingProviderOpenAiCompatDesc": "Qualsiasi endpoint embedding compatibile OpenAI",
     "embeddingInternalInfoTitle": "Servizio embedding interno (auto-configurato)",
-    "embeddingInternalInfoDesc": "Usa il microservizio embedding incluso nell'app. URL, modello e dimensioni vengono rilevati automaticamente: non serve configurare nulla. Premi \"Testa\" per verificare il modello attivo."
+    "embeddingInternalInfoDesc": "Usa il microservizio embedding incluso nell'app. URL, modello e dimensioni vengono rilevati automaticamente: non serve configurare nulla.",
+    "embeddingInternalActiveModel": "Modello in uso"
   },
   "voice": {
     "title": "Voce e audio",

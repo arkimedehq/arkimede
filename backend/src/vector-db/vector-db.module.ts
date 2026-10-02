@@ -11,14 +11,17 @@ import { VectorStoreProviderService } from './vector-store-provider.service';
 import { EmbedModule } from '../embed/embed.module';
 import { CustomToolsModule } from '../custom-tools/custom-tools.module';
 import { InternalVectorController } from './internal-vector.controller';
+import { ReembedService } from './reembed.service';
+import { UserMemory } from '../user-memory/user-memory.entity';
+import { Feedback } from '../feedback/feedback.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([VectorDbConfigEntity, VectorCollectionEntity]),
+    TypeOrmModule.forFeature([VectorDbConfigEntity, VectorCollectionEntity, UserMemory, Feedback]),
     forwardRef(() => EmbedModule),        // breaks the VectorDb ↔ Embed cycle
     forwardRef(() => CustomToolsModule),  // breaks the VectorDb ↔ CustomTools cycle (auto search tool)
   ],
-  providers: [VectorDbService, VectorStoreProviderService],
+  providers: [VectorDbService, VectorStoreProviderService, ReembedService],
   controllers: [VectorDbController, InternalVectorController],
   exports: [VectorDbService, VectorStoreProviderService],
 })

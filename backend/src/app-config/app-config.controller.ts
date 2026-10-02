@@ -414,8 +414,15 @@ export class AppConfigController {
   /** GET /api/admin/config/embedding — current embedding configuration */
   @Get('embedding')
   @ApiOperation({ summary: 'Current embedding configuration' })
-  getEmbeddingConfig() {
-    return this.service.getEmbeddingConfig();
+  async getEmbeddingConfig() {
+    // `active*`: what the running provider actually serves (for 'internal' the model loaded
+    // by the embedding service), probed fresh; null if the provider is unreachable.
+    this.embeddingProvider.invalidateCache();
+    const [cfg, active] = await Promise.all([
+      this.service.getEmbeddingConfig(),
+      this.embeddingProvider.getActive().catch(() => null),
+    ]);
+    return { ...cfg, activeModel: active?.model ?? null, activeVectorSize: active?.vectorSize ?? null };
   }
 
   /** PATCH /api/admin/config/embedding — updates the embedding configuration */

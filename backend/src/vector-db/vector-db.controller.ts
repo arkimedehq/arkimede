@@ -3,12 +3,12 @@
 
 import {
   Controller, Get, Post, Patch, Delete,
-  Body, Param, UseGuards, HttpCode,
+  Body, Param, Query, UseGuards, HttpCode,
   Logger, Optional, Inject, forwardRef,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import {
-  IsString, IsOptional, IsBoolean, MaxLength, MinLength, IsIn, IsObject,
+  IsString, IsOptional, IsBoolean, MaxLength, MinLength, IsIn, IsObject, IsArray, ArrayMaxSize,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -16,6 +16,8 @@ import { AdminGuard } from '../common/guards/admin.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { VectorDbService } from './vector-db.service';
 import { VectorStoreProviderService } from './vector-store-provider.service';
+import { ReembedService } from './reembed.service';
+import { AuditService } from '../audit/audit.service';
 import { EmbedService } from '../embed/embed.service';
 import { CustomToolsService } from '../custom-tools/custom-tools.service';
 import { ragSearchToolDescription } from '../prompts/prompts';
@@ -24,6 +26,12 @@ import type { VectorDbProvider } from './vector-store.types';
 // ── DTO ───────────────────────────────────────────────────────────────────────
 
 const PROVIDERS: VectorDbProvider[] = ['qdrant', 'pgvector', 'chroma', 'astradb'];
+
+class ReembedDto {
+  /** Collections to re-embed (default: all). */
+  @IsOptional() @IsArray() @ArrayMaxSize(200) @IsString({ each: true }) @MaxLength(200, { each: true })
+  collections?: string[];
+}
 
 class UpdateVectorDbConfigDto {
   @IsIn(PROVIDERS)
@@ -93,7 +101,46 @@ export class VectorDbController {
     private readonly embedService:         EmbedService | null,
     @Optional() @Inject(forwardRef(() => CustomToolsService))
     private readonly customTools:          CustomToolsService | null,
+    private readonly reembed:              ReembedService,
+    private readonly audit:                AuditService,
   ) {}
+
+  // ── Re-embed (embedding model change) ──────────────────────────────────────
+
+  /** GET /api/admin/vector-db/reembed/plan — dry run with the active embedding model. */
+  @Get('reembed/plan')
+  @ApiOperation({ summary: 'Re-embed dry run: per-collection actions with the active embedding model' })
+  reembedPlan(@Query('collections') collections?: string) {
+    return this.reembed.plan(collections ? collections.split(',').map((c) => c.trim()).filter(Boolean) : undefined);
+  }
+
+  /** POST /api/admin/vector-db/reembed — starts the re-embed in the background. */
+  @Post('reembed')
+  @ApiOperation({ summary: 'Re-embed collections with the active embedding model (export → shadow → verify → swap)' })
+  async reembedStart(@Body() body: ReembedDto, @CurrentUser() user: any) {
+    const report = await this.reembed.start(body?.collections, user?.email ?? user?.id ?? 'admin');
+    void this.audit.record({
+      actorId: user?.id ?? null, actorName: user?.email ?? null, action: 'vectordb.reembed',
+      resource: body?.collections?.join(',') || '*', outcome: 'ok',
+      ctx: { targetModel: report.targetModel, targetSize: report.targetSize, collections: report.collections.map((c) => `${c.name}:${c.action}`) },
+    });
+    return report;
+  }
+
+  /** GET /api/admin/vector-db/reembed/selfcheck — each sampled point must find itself (top-3). */
+  @Get('reembed/selfcheck')
+  @ApiOperation({ summary: 'Model-agnostic self-retrieval check on a sample of points per collection' })
+  reembedSelfCheck(@Query('sample') sample?: string, @Query('collections') collections?: string) {
+    const n = Math.min(Math.max(parseInt(sample ?? '30', 10) || 30, 1), 200);
+    return this.reembed.selfCheck(n, collections ? collections.split(',').map((c) => c.trim()).filter(Boolean) : undefined);
+  }
+
+  /** GET /api/admin/vector-db/reembed/status — running or last report. */
+  @Get('reembed/status')
+  @ApiOperation({ summary: 'Re-embed status / last report' })
+  reembedStatus() {
+    return this.reembed.status();
+  }
 
   // ── Config ─────────────────────────────────────────────────────────────────
 

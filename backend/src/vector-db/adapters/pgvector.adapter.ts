@@ -3,7 +3,10 @@
 
 import { Logger } from '@nestjs/common';
 import { Pool } from 'pg';
-import type { VectorStoreAdapter, VectorPoint, SearchHit } from '../vector-store.types';
+import { VectorSizeMismatchError } from '../vector-store.types';
+import type {
+  VectorStoreAdapter, VectorPoint, SearchHit, CollectionInfo, ScrollOptions, ScrollPage,
+} from '../vector-store.types';
 
 /**
  * PGVector adapter for vector store operations.
@@ -68,7 +71,10 @@ export class PgVectorAdapter implements VectorStoreAdapter {
       // atttypmod for vector(N) is N + 4 (4 = header size)
       const existingSize = rows[0].atttypmod - 4;
       if (existingSize !== vectorSize) {
-        this.logger.warn(`Table "${table}" dim=${existingSize}, expected ${vectorSize}. Recreating.`);
+        // Recreate only when there is nothing to lose.
+        const { rows: any } = await this.pool.query(`SELECT 1 FROM "${table}" LIMIT 1`);
+        if (any.length > 0) throw new VectorSizeMismatchError(name, existingSize, vectorSize);
+        this.logger.warn(`Empty table "${table}" dim=${existingSize}, expected ${vectorSize}. Recreating.`);
         await this.recreateCollection(name, vectorSize);
       }
       return;
@@ -197,5 +203,43 @@ export class PgVectorAdapter implements VectorStoreAdapter {
       [`${this.tablePrefix}%`],
     );
     return rows.map((r) => r.tablename.slice(this.tablePrefix.length));
+  }
+
+  async getCollectionInfo(name: string): Promise<CollectionInfo> {
+    const table = this.tableName(name);
+    const { rows } = await this.pool.query<{ atttypmod: number }>(
+      `SELECT atttypmod FROM pg_attribute
+         JOIN pg_class ON pg_attribute.attrelid = pg_class.oid
+         JOIN pg_namespace ON pg_class.relnamespace = pg_namespace.oid
+        WHERE pg_namespace.nspname = 'public' AND pg_class.relname = $1
+          AND pg_attribute.attname = 'embedding' AND pg_attribute.attnum > 0`,
+      [table],
+    );
+    if (rows.length === 0) return { exists: false };
+    const { rows: c } = await this.pool.query<{ n: string }>(`SELECT count(*)::text AS n FROM "${table}"`);
+    return { exists: true, vectorSize: rows[0].atttypmod - 4, pointsCount: parseInt(c[0].n, 10) };
+  }
+
+  async scroll(collection: string, opts: ScrollOptions): Promise<ScrollPage> {
+    const table = this.tableName(collection);
+    const after = opts.offset ?? null;
+    const { rows } = await this.pool.query<{ id: string; payload: any; embedding?: string }>(
+      `SELECT id::text AS id, payload${opts.withVectors ? ', embedding::text AS embedding' : ''}
+         FROM "${table}" ${after !== null ? 'WHERE id > $2::uuid' : ''}
+        ORDER BY id LIMIT $1`,
+      after !== null ? [opts.limit, String(after)] : [opts.limit],
+    );
+    return {
+      points: rows.map((r) => ({
+        id: r.id,
+        payload: r.payload ?? {},
+        ...(opts.withVectors && r.embedding ? { vector: JSON.parse(r.embedding) as number[] } : {}),
+      })),
+      nextOffset: rows.length === opts.limit ? rows[rows.length - 1].id : null,
+    };
+  }
+
+  async deleteCollection(name: string): Promise<void> {
+    await this.pool.query(`DROP TABLE IF EXISTS "${this.tableName(name)}"`);
   }
 }

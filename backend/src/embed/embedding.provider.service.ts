@@ -130,6 +130,25 @@ export class EmbeddingProviderService {
     return client.config.vectorSize;
   }
 
+  /**
+   * Provider, model and dimension actually in use (for `internal`: probed from the
+   * embedding service, i.e. the model it has loaded).
+   */
+  async getActive(): Promise<{ provider: string; model: string; vectorSize: number }> {
+    const { config } = await this.getClient();
+    return { provider: config.provider, model: config.model, vectorSize: config.vectorSize };
+  }
+
+  /**
+   * Identity of the active embedding space (provider, model, dimension, query prefix).
+   * Vectors computed under different identities are not comparable: caches of vectors
+   * must be keyed by (or invalidated on) this value.
+   */
+  async getIdentity(): Promise<string> {
+    const { config } = await this.getClient();
+    return [config.provider, config.model, config.vectorSize, config.queryPrefix ?? ''].join('|');
+  }
+
   // ── Client construction ─────────────────────────────────────────────────────
 
   /** Returns the cached client, building it if necessary. */

@@ -18,6 +18,7 @@
  *
  * Used by AgentService to obtain the DynamicStructuredTool on every request.
  */
+import { splitIntoChunks } from '../embed/chunking';
 import {
   Injectable, Logger, ConflictException, NotFoundException, BadRequestException, Inject, Optional,
 } from '@nestjs/common';
@@ -497,17 +498,12 @@ export class CustomToolsService {
       ensureCollection: async (name) =>
         this.vectorStore.ensureCollection(name, await this.embeddingProvider.getVectorSize()),
 
-      chunkText: async (text) => {
-        const size    = await this.embeddingProvider.getChunkSize();
-        const overlap = await this.embeddingProvider.getChunkOverlap();
-        const chunks: string[] = [];
-        const step = size - overlap;
-        for (let i = 0; i < text.length; i += step) {
-          chunks.push(text.slice(i, i + size));
-          if (i + size >= text.length) break;
-        }
-        return chunks;
-      },
+      chunkText: async (text) =>
+        splitIntoChunks(
+          text,
+          await this.embeddingProvider.getChunkSize(),
+          await this.embeddingProvider.getChunkOverlap(),
+        ),
 
       // Indexes a file already present in the system via its ID.
       // Uses EmbedService.ingestFileById() which extracts the text natively

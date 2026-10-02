@@ -4401,6 +4401,7 @@ function EmbeddingConfigCard() {
     if (!data) return;
     setProvider(data.embeddingProvider);
     setModel(data.embeddingModel ?? '');
+    if (data.activeModel) setDetected({ model: data.activeModel, dims: data.activeVectorSize ?? undefined });
     setBaseUrl(data.embeddingBaseUrl ?? '');
     setVectorSize(String(data.embeddingVectorSize));
     setQueryPrefix(data.embeddingQueryPrefix ?? '');
@@ -4493,8 +4494,11 @@ function EmbeddingConfigCard() {
             <p className="text-gray-300 font-medium mb-0.5">{t('vectordb.embeddingInternalInfoTitle')}</p>
             <p>{t('vectordb.embeddingInternalInfoDesc')}</p>
             {detected?.model && (
-              <p className="mt-1 text-emerald-400 font-mono">
-                {detected.model}{detected.dims ? ` · ${detected.dims} dims` : ''}
+              <p className="mt-1.5">
+                <span className="text-gray-400">{t('vectordb.embeddingInternalActiveModel')}: </span>
+                <span className="text-emerald-400 font-mono">
+                  {detected.model}{detected.dims ? ` · ${detected.dims} dims` : ''}
+                </span>
               </p>
             )}
           </div>

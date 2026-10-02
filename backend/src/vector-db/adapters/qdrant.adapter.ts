@@ -3,7 +3,10 @@
 
 import { Logger } from '@nestjs/common';
 import { QdrantClient } from '@qdrant/js-client-rest';
-import type { VectorStoreAdapter, VectorPoint, SearchHit } from '../vector-store.types';
+import { VectorSizeMismatchError } from '../vector-store.types';
+import type {
+  VectorStoreAdapter, VectorPoint, SearchHit, CollectionInfo, ScrollOptions, ScrollPage,
+} from '../vector-store.types';
 
 /**
  * Qdrant adapter for vector store operations.
@@ -23,25 +26,30 @@ export class QdrantAdapter implements VectorStoreAdapter {
   }
 
   async ensureCollection(name: string, vectorSize: number): Promise<void> {
+    let info: Awaited<ReturnType<QdrantClient['getCollection']>>;
     try {
-      const info = await this.client.getCollection(name);
-      const vectors = info.config?.params?.vectors;
-      const existingSize =
-        typeof vectors === 'object' && !Array.isArray(vectors) && 'size' in vectors
-          ? (vectors as any).size
-          : undefined;
-
-      if (existingSize !== undefined && existingSize !== vectorSize) {
-        this.logger.warn(`Collection "${name}" dim=${existingSize}, expected ${vectorSize}. Recreating.`);
-        await this.recreateCollection(name, vectorSize);
-      }
+      info = await this.client.getCollection(name);
     } catch (err) {
       if (err.status !== 404 && !err.message?.includes('Not found')) throw err;
       await this.client.createCollection(name, {
         vectors: { size: vectorSize, distance: 'Cosine' },
       });
       this.logger.log(`Qdrant collection created: "${name}" (dims=${vectorSize})`);
+      return;
     }
+
+    const vectors = info.config?.params?.vectors;
+    const existingSize =
+      typeof vectors === 'object' && !Array.isArray(vectors) && 'size' in vectors
+        ? (vectors as any).size
+        : undefined;
+    if (existingSize === undefined || existingSize === vectorSize) return;
+
+    // Different dimension: recreate only when there is nothing to lose.
+    const points = info.points_count ?? (await this.client.count(name, { exact: true })).count;
+    if (points > 0) throw new VectorSizeMismatchError(name, existingSize, vectorSize);
+    this.logger.warn(`Empty collection "${name}" dim=${existingSize}, expected ${vectorSize}. Recreating.`);
+    await this.recreateCollection(name, vectorSize);
   }
 
   async recreateCollection(name: string, vectorSize: number): Promise<void> {
@@ -105,5 +113,42 @@ export class QdrantAdapter implements VectorStoreAdapter {
   async listCollections(): Promise<string[]> {
     const res = await this.client.getCollections();
     return res.collections.map((c) => c.name);
+  }
+
+  async getCollectionInfo(name: string): Promise<CollectionInfo> {
+    try {
+      const info = await this.client.getCollection(name);
+      const vectors = info.config?.params?.vectors as any;
+      return {
+        exists: true,
+        vectorSize: typeof vectors?.size === 'number' ? vectors.size : undefined,
+        pointsCount: info.points_count ?? (await this.client.count(name, { exact: true })).count,
+      };
+    } catch (err) {
+      if (err.status === 404 || err.message?.includes('Not found')) return { exists: false };
+      throw err;
+    }
+  }
+
+  async scroll(collection: string, opts: ScrollOptions): Promise<ScrollPage> {
+    const res = await this.client.scroll(collection, {
+      limit: opts.limit,
+      ...(opts.offset !== null && opts.offset !== undefined ? { offset: opts.offset } : {}),
+      with_payload: true,
+      with_vector: !!opts.withVectors,
+    });
+    return {
+      points: res.points.map((p) => ({
+        id: p.id,
+        payload: (p.payload ?? {}) as Record<string, any>,
+        ...(opts.withVectors && Array.isArray(p.vector) ? { vector: p.vector as number[] } : {}),
+      })),
+      nextOffset: (res.next_page_offset as string | number | null | undefined) ?? null,
+    };
+  }
+
+  async deleteCollection(name: string): Promise<void> {
+    const { exists } = await this.getCollectionInfo(name);
+    if (exists) await this.client.deleteCollection(name);
   }
 }

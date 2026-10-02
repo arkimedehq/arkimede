@@ -118,3 +118,7 @@ evolution job's output visible and correctable.
 - Per-agent episodic memory for multi-agent teams (same infra, `{agentId}` payload).
 - Automatic forgetting/decay.
 - A working/long-term hierarchy (the rolling summary already covers working memory).
+
+Episodic memory ("what happened and when") and the digital twin are designed as a
+separate service, [Recordare](https://github.com/arkimedehq/recordare), that Arkimede
+will use as a client.

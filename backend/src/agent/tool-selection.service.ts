@@ -71,6 +71,9 @@ export class ToolSelectionService {
    */
   private readonly embedCache = new Map<string, number[]>();
 
+  /** Embedding identity the cached vectors belong to; a change (new model) clears the cache. */
+  private embedCacheIdentity: string | null = null;
+
   /**
    * Builds the text to embed for a tool.
    *
@@ -246,6 +249,13 @@ export class ToolSelectionService {
     }
 
     try {
+      // ── Drop cached tool vectors computed with a different embedding model ─
+      const identity = await this.embeddingProvider.getIdentity();
+      if (this.embedCacheIdentity !== identity) {
+        if (this.embedCacheIdentity !== null) this.invalidateEmbeddingCache();
+        this.embedCacheIdentity = identity;
+      }
+
       // ── Split query into sub-queries ──────────────────────────────────────
       const subQueries    = this.splitSubQueries(query);
       const allQueryTexts = [query, ...subQueries];   // fullQuery + subQueries

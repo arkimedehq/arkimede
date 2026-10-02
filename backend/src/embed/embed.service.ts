@@ -13,6 +13,7 @@
  * with a payload that includes the original text, file metadata and userId.
  * This lets the agent's RAG tool filter by user and run contextualized semantic searches.
  */
+import { splitIntoChunks } from './chunking';
 import {Inject, Injectable, Logger, Optional} from '@nestjs/common';
 import {v4 as uuidv4} from 'uuid';
 import {lookup as mimeLookup} from 'mime-types';
@@ -303,19 +304,12 @@ export class EmbedService {
    *   chunk_i = text[i*step : i*step + chunkSize]
    *
    * @param text - Raw text extracted from the file
-   * @returns Array of overlapping chunks
+   * @returns Array of overlapping, non-blank chunks (see `chunking.ts`)
    */
   private async chunkText(text: string): Promise<string[]> {
     const chunkSize    = await this.embeddingProvider.getChunkSize();
     const chunkOverlap = await this.embeddingProvider.getChunkOverlap();
-
-    const chunks: string[] = [];
-    const step = chunkSize - chunkOverlap;
-    for (let i = 0; i < text.length; i += step) {
-      chunks.push(text.slice(i, i + chunkSize));
-      if (i + chunkSize >= text.length) break;
-    }
-    return chunks;
+    return splitIntoChunks(text, chunkSize, chunkOverlap);
   }
 
   /**
@@ -329,17 +323,19 @@ export class EmbedService {
     payload:        Record<string, unknown>,
   ): Promise<number> {
     const chunks  = await this.chunkText(text);
+    if (chunks.length === 0) return 0;
     const vectors = await this.embeddingProvider.embedBatch(chunks);
 
     // Sanity check: the vector dimension must match the collection's.
     // It could diverge if the embedding model was changed after the collection was created.
-    const actualDim = vectors[0]?.length;
-    this.logger.log(`Vectors received: ${vectors.length} x dim=${actualDim} (expected: ${this.embeddingProvider.vectorSize})`);
+    const actualDim   = vectors[0]?.length;
+    const expectedDim = await this.embeddingProvider.getVectorSize();
+    this.logger.log(`Vectors received: ${vectors.length} x dim=${actualDim} (expected: ${expectedDim})`);
 
-    if (actualDim !== this.embeddingProvider.vectorSize) {
+    if (actualDim !== expectedDim) {
       throw new Error(
         `Vector dimension mismatch: model returns ${actualDim} dims, ` +
-        `collection created with ${this.embeddingProvider.vectorSize}. ` +
+        `collection created with ${expectedDim}. ` +
         `Update EMBEDDING_VECTOR_SIZE=${actualDim} in .env`,
       );
     }

@@ -16,6 +16,7 @@ import { Message } from '../messages/messages.entity';
 import { User } from '../users/users.entity';
 import { AppConfigService } from '../app-config/app-config.service';
 import { LlmProviderService } from '../app-config/llm-provider.service';
+import { MEMORY_COLLECTION, memoryIndexText, memoryVectorPayload } from './memory-index';
 import { EmbeddingProviderService } from '../embed/embedding.provider.service';
 import { VectorStoreProviderService } from '../vector-db/vector-store-provider.service';
 import { runWithLlmCallContext } from '../usage/llm-call-context';
@@ -55,7 +56,6 @@ const EMPTY_METADATA: NoteMetadata = { tags: [], keywords: [], context: null, ca
 // ── Hybrid retrieval (F2) ─────────────────────────────────────────────────────
 
 /** Vector collection dedicated to the memory notes. */
-const MEMORY_COLLECTION = 'user_memory';
 /** Notes injected per message (upper bound; the cutoff can return fewer). */
 const RETRIEVE_TOP_K = 8;
 /** Candidates fetched from each leg before fusion. */
@@ -222,17 +222,9 @@ export class UserMemoryService {
   private async indexNote(note: UserMemory): Promise<void> {
     if (note.status !== 'confirmed') return;
     try {
-      const text = [note.content, note.context ?? '', (note.keywords ?? []).join(' ')].join('\n').trim();
-      const vector = await this.embedding.embed(text);
-      await this.vectorStore.ensureCollection(MEMORY_COLLECTION, this.embedding.vectorSize);
-      await this.vectorStore.upsert(MEMORY_COLLECTION, [{
-        id: note.id,
-        vector,
-        payload: {
-          userId: note.userId, memoryId: note.id, tags: note.tags ?? [],
-          category: note.category ?? null, scope: note.scope ?? 'personal', teamId: note.teamId ?? null,
-        },
-      }]);
+      const vector = await this.embedding.embed(memoryIndexText(note));
+      await this.vectorStore.ensureCollection(MEMORY_COLLECTION, await this.embedding.getVectorSize());
+      await this.vectorStore.upsert(MEMORY_COLLECTION, [{ id: note.id, vector, payload: memoryVectorPayload(note) }]);
     } catch (err: any) {
       this.logger.warn(`Memory indexing failed (${note.id}): ${err?.message ?? err}`);
     }

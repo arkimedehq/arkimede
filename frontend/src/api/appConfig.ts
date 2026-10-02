@@ -102,6 +102,9 @@ export interface EmbeddingConfig {
   embeddingQueryPrefix: string | null;
   embeddingChunkSize:   number;
   embeddingChunkOverlap: number;
+  /** Model actually served by the active provider (for 'internal': loaded by the embedding service); null if unreachable. */
+  activeModel?:         string | null;
+  activeVectorSize?:    number | null;
 }
 
 export interface UpdateEmbeddingConfigPayload {

@@ -2,7 +2,8 @@
 // Copyright © 2026 Andrea Genovese
 
 import { Logger } from '@nestjs/common';
-import type { VectorStoreAdapter, VectorPoint, SearchHit } from '../vector-store.types';
+import { VectorMaintenanceNotSupportedError } from '../vector-store.types';
+import type { VectorStoreAdapter, VectorPoint, SearchHit, CollectionInfo, ScrollPage } from '../vector-store.types';
 
 /**
  * Chroma adapter for vector store operations.
@@ -169,5 +170,18 @@ export class ChromaAdapter implements VectorStoreAdapter {
     const cols = await this.fetch<{ name: string; id: string }[]>(this.collectionsPath);
     cols.forEach((c) => this.collectionIdCache.set(c.name, c.id));
     return cols.map((c) => c.name);
+  }
+
+  // Maintenance operations are not implemented for this provider yet (re-embed job).
+  async getCollectionInfo(): Promise<CollectionInfo> {
+    throw new VectorMaintenanceNotSupportedError('chroma', 'getCollectionInfo');
+  }
+
+  async scroll(): Promise<ScrollPage> {
+    throw new VectorMaintenanceNotSupportedError('chroma', 'scroll');
+  }
+
+  async deleteCollection(): Promise<void> {
+    throw new VectorMaintenanceNotSupportedError('chroma', 'deleteCollection');
   }
 }
