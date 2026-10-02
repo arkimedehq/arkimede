@@ -13,6 +13,7 @@
  *
  * POST /internal/vector/ingest
  *   Embeds a list of items ({id, text, payload}) in batch and loads them into Qdrant.
+ *   Point ids are derived from (collection, item id): re-ingesting an item overwrites it.
  *   With recreate=true it recreates the collection from scratch (full refresh).
  *
  * Security:
@@ -29,7 +30,7 @@ import {
   IsPositive, IsString, Max, Min, ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { v4 as uuidv4 } from 'uuid';
+import { ingestPointId } from './point-id';
 
 import { InternalTokenGuard } from '../common/guards/internal-token.guard';
 import { VectorStoreProviderService } from './vector-store-provider.service';
@@ -183,7 +184,7 @@ export class InternalVectorController {
       try {
         const vectors = await this.embedService.embedBatch(batch.map((item) => item.text));
         const points  = batch.map((item, j) => ({
-          id:      uuidv4(),
+          id:      ingestPointId(dto.collection, item.id),
           vector:  vectors[j],
           payload: { ...( item.payload ?? {}), _item_id: item.id },
         }));

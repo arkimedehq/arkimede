@@ -1119,6 +1119,8 @@ for r in results:
 
 Indicizza in batch una lista di item nella collection (embedding + upsert in Qdrant).
 Con `recreate=true` ricrea la collection da zero (full refresh).
+L'id del punto deriva dalla collection e dall'`id` dell'elemento: indicizzare di nuovo un
+elemento (es. rieseguire una tappa o un aggiornamento parziale) ne sovrascrive il punto invece di duplicarlo.
 
 ### Request
 

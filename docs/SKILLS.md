@@ -1119,6 +1119,8 @@ for r in results:
 
 Batch-indexes a list of items into the collection (embedding + upsert in Qdrant).
 With `recreate=true` it recreates the collection from scratch (full refresh).
+The point id is derived from the collection and the item `id`: ingesting an item again
+(e.g. re-running a stage, or a partial update) overwrites its point instead of duplicating it.
 
 ### Request
 
