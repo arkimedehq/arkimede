@@ -68,6 +68,8 @@ export interface WyomingConfig {
   /** Conversation identity (null = STT/TTS only). */
   wyomingHandleUserId:  string | null;
   wyomingHandleAgentId: string | null;
+  /** Save the conversation turns as chats of the handle user. */
+  wyomingPersistConversations: boolean;
   running:   boolean;
   port:      number;
   clients:   number;
@@ -81,6 +83,7 @@ export interface UpdateWyomingConfigPayload {
   wyomingAllowedCidrs?:  string | null;
   wyomingHandleUserId?:  string | null;
   wyomingHandleAgentId?: string | null;
+  wyomingPersistConversations?: boolean;
 }
 
 export interface UpdateTtsConfigPayload {

@@ -1383,7 +1383,14 @@ POST /api/openai/v1/chat/completions    # formato OpenAI; streaming SSE e non-st
 ```
 
 - Il client mantiene la finestra di conversazione e la rimanda a ogni turno;
-  nessuna riga chat creata, nessuna compaction.
+  nessuna compaction e niente viene riletto dal DB.
+- Registrazione opzionale: attivando **Salva conversazioni** sulla chiave API
+  (Impostazioni → Profilo, o l'editor chiavi admin) ogni turno completato viene
+  salvato anche come chat del proprietario della chiave. Un turno continua la
+  chat aperta (stessa chiave e modello) a meno che il client sia rimasto in
+  silenzio per 15 minuti o la storia che rimanda non corrisponda più a quella
+  chat (il suo ultimo messaggio utente non è fra i recenti); altrimenti parte una
+  chat nuova. Le chiamate autenticate con JWT non vengono mai salvate.
 - I messaggi `system` in ingresso sono scartati (vince il prompt a 4 livelli);
   gli eventi dei tool restano interni — mai mappati su `tool_calls` OpenAI.
 - Scegliere lo slug di un agente come `model` applica il suo system prompt,
@@ -1406,7 +1413,9 @@ Funziona con qualsiasi provider scelto nel pannello (Whisper/Piper interni o
 cloud). Scegliendo nella stessa card un **utente di conversazione** (e
 facoltativamente un suo agente) l'hub ottiene anche Arkimede come agente di
 conversazione: l'intera pipeline vocale gira su Arkimede senza componenti
-aggiuntivi sull'hub. Il protocollo non ha autenticazione: abilitalo solo su
+aggiuntivi sull'hub. Con **Salva conversazioni** attivo, ogni conversazione
+dell'hub (il suo `conversation_id`; chiusa dopo 10 minuti di silenzio) viene
+salvata come chat dell'utente di conversazione. Il protocollo non ha autenticazione: abilitalo solo su
 reti fidate.
 
 ### Chat e messaggi

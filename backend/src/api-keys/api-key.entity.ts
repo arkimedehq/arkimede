@@ -38,6 +38,14 @@ export class ApiKey {
   @Column({ type: 'varchar', length: 16 })
   prefix: string;
 
+  /**
+   * Conversations run with this key on the OpenAI-compatible endpoint are saved
+   * as chats of the owner (see ExternalChatsService). Default off: the endpoint
+   * is stateless unless the owner opts in for this specific client.
+   */
+  @Column({ type: 'boolean', default: false })
+  persistConversations: boolean;
+
   /** Null = never expires. */
   @Column({ type: 'timestamptz', nullable: true, default: null })
   expiresAt: Date | null;

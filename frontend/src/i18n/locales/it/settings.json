@@ -420,7 +420,9 @@
     "handleUserNone": "— Nessuno (solo STT/TTS) —",
     "handleAgentLabel": "Agente",
     "handleAgentNone": "Pipeline standard (nessun agente)",
-    "handleActive": "Attivo come {{user}} — modello Wyoming \"{{model}}\""
+    "handleActive": "Attivo come {{user}} — modello Wyoming \"{{model}}\"",
+    "persistLabel": "Salva conversazioni",
+    "persistHint": "Ogni conversazione con l'assistente vocale viene salvata come chat dell'utente di conversazione (una chat per conversazione di Home Assistant)."
   },
   "vectordb": {
     "title": "Vector Database",
@@ -541,7 +543,9 @@
     "namePlaceholder": "es. Satellite voce",
     "fieldExpiry": "Scadenza",
     "days": "giorni",
-    "create": "Crea chiave"
+    "create": "Crea chiave",
+    "persistLabel": "Salva conversazioni",
+    "persistHint": "Le conversazioni fatte con questa chiave sull'endpoint compatibile OpenAI compaiono come chat del proprietario."
   },
   "ocr": {
     "title": "OCR documenti",

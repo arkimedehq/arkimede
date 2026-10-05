@@ -23,12 +23,29 @@ export interface ScheduledTask {
   lastInputTokens: number | null;
   lastOutputTokens: number | null;
   totalTokens: number;
+  /** null = global default, 0 = no cap. */
+  maxTokensPerRun: number | null;
   toolFilter: { mode: 'all' | 'names' | 'none'; names?: string[] };
   createdAt: string;
 }
 
+/** Editable fields: absent = unchanged. */
+export interface UpdateScheduledTask {
+  title?: string;
+  instruction?: string;
+  cron?: string;
+  runAt?: string;
+  timezone?: string | null;
+  toolFilter?: ScheduledTask['toolFilter'];
+  maxTokensPerRun?: number | null;
+}
+
 export const scheduledTasksApi = {
   list: (): Promise<ScheduledTask[]> => api.get('/scheduled-tasks').then((r) => r.data),
+  limits: (): Promise<{ defaultMaxTokensPerRun: number }> =>
+    api.get('/scheduled-tasks/limits').then((r) => r.data),
+  update: (id: string, data: UpdateScheduledTask): Promise<ScheduledTask> =>
+    api.patch(`/scheduled-tasks/${id}`, data).then((r) => r.data),
   activate: (id: string): Promise<ScheduledTask> =>
     api.post(`/scheduled-tasks/${id}/activate`).then((r) => r.data),
   /** Runs the automation now, out of schedule: the outcome arrives as a notification. */

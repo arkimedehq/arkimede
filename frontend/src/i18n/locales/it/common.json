@@ -61,7 +61,9 @@
     "logout": "Esci",
     "noChats": "Nessuna chat",
     "unread": "Non letta",
-    "chatOf": "Chat di {{name}}"
+    "chatOf": "Chat di {{name}}",
+    "externalWyoming": "Conversazione vocale (Wyoming)",
+    "externalApi": "Conversazione da API esterna"
   },
   "theme": {
     "light": "Chiaro",

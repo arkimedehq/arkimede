@@ -14,18 +14,42 @@
     "toolLabel": "tool",
     "toolNone": "nessuno",
     "toolAll": "tutti",
-    "runStarted": "Esecuzione avviata: riceverai una notifica al termine, con l'esito anche in chat."
+    "runStarted": "Esecuzione avviata: riceverai una notifica al termine, con l'esito anche in chat.",
+    "cap": "limite {{count}} token/esecuzione",
+    "capOff": "nessun limite token"
   },
   "actions": {
     "activate": "Attiva",
     "runNow": "Esegui ora",
     "enableLabel": "attiva",
-    "deleteConfirm": "Eliminare questa automazione?"
+    "deleteConfirm": "Eliminare questa automazione?",
+    "edit": "Modifica"
   },
   "errors": {
     "operationFailed": "Operazione non riuscita",
     "deleteFailed": "Eliminazione non riuscita",
     "activationFailed": "Attivazione non riuscita",
-    "runFailed": "Avvio dell'esecuzione non riuscito"
+    "runFailed": "Avvio dell'esecuzione non riuscito",
+    "saveFailed": "Salvataggio non riuscito"
+  },
+  "edit": {
+    "title": "Titolo",
+    "instruction": "Istruzione (eseguita a ogni avvio)",
+    "cron": "Cron (ricorrenza)",
+    "cronHint": "5 campi: minuto ora giorno mese giorno-settimana · es. 0 8 * * 1-5",
+    "runAt": "Data e ora",
+    "timezone": "Fuso orario",
+    "useTools": "Consenti l'uso di tool",
+    "toolsAll": "Questa automazione può usare tutti i tool disponibili.",
+    "otherTools": "Altri tool selezionati:",
+    "tokenCap": "Limite token per esecuzione",
+    "capDefault": "Predefinito di sistema",
+    "capDefaultValue": "Predefinito di sistema ({{count}} token)",
+    "capDefaultOff": "Predefinito di sistema (nessun limite)",
+    "capCustom": "Personalizzato:",
+    "capHintUser": "Se un'esecuzione supera il limite, l'automazione viene disattivata. Puoi solo abbassare il limite rispetto al predefinito.",
+    "capHintAdmin": "Se un'esecuzione supera il limite, l'automazione viene disattivata. 0 = nessun limite.",
+    "capInvalid": "Inserisci un numero intero ≥ 0.",
+    "capAdminOnly": "Solo un amministratore può superare il limite predefinito o rimuoverlo."
   }
 }

@@ -8,6 +8,7 @@ import {
   Users, Plus, Search, Shield, ShieldOff, KeyRound, Key, Trash2, Ban, CheckCircle2, X, Loader2, ArrowLeft, Copy, Check,
 } from 'lucide-react';
 import { apiKeysApi, type ApiKeyRow } from '../api/apiKeys';
+import ApiKeyPersistToggle from '../components/ApiKeyPersistToggle';
 import {
   adminUsersApi, type AdminUser, type UserRole, type UserStatus,
 } from '../api/adminUsers';
@@ -333,6 +334,7 @@ function ApiKeyEditor({ user, onClose }: { user: AdminUser; onClose: () => void 
               <p className="text-[11px] text-gray-500">
                 {t('apiKeys.expires')}: {k.expiresAt ? fmtDate(k.expiresAt) : t('apiKeys.never')} · {t('apiKeys.lastUsed')}: {fmtDate(k.lastUsedAt)}
               </p>
+              <ApiKeyPersistToggle row={k} queryKey={['admin-api-keys', user.id]} />
             </div>
             <button
               title={t('apiKeys.revoke')}

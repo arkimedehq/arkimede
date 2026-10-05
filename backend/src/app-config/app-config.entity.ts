@@ -292,6 +292,10 @@ export class AppConfigEntity {
   @Column({ type: 'uuid', nullable: true })
   wyomingHandleAgentId: string | null;
 
+  /** Save the conversation agent's turns as chats of the handle user (default off). */
+  @Column({ type: 'boolean', default: false })
+  wyomingPersistConversations: boolean;
+
   // ── Tool loading configuration ──────────────────────────────────────────────
 
   /**

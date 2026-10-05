@@ -14,18 +14,42 @@
     "toolLabel": "tools",
     "toolNone": "none",
     "toolAll": "all",
-    "runStarted": "Run started: you'll get a notification when it finishes, with the outcome in chat too."
+    "runStarted": "Run started: you'll get a notification when it finishes, with the outcome in chat too.",
+    "cap": "cap {{count}} tokens/run",
+    "capOff": "no token cap"
   },
   "actions": {
     "activate": "Activate",
     "runNow": "Run now",
     "enableLabel": "enable",
-    "deleteConfirm": "Delete this automation?"
+    "deleteConfirm": "Delete this automation?",
+    "edit": "Edit"
   },
   "errors": {
     "operationFailed": "Operation failed",
     "deleteFailed": "Deletion failed",
     "activationFailed": "Activation failed",
-    "runFailed": "Could not start the run"
+    "runFailed": "Could not start the run",
+    "saveFailed": "Save failed"
+  },
+  "edit": {
+    "title": "Title",
+    "instruction": "Instruction (run on every fire)",
+    "cron": "Cron (recurrence)",
+    "cronHint": "5 fields: minute hour day month weekday · e.g. 0 8 * * 1-5",
+    "runAt": "Date and time",
+    "timezone": "Timezone",
+    "useTools": "Allow tool use",
+    "toolsAll": "This automation can use every available tool.",
+    "otherTools": "Other selected tools:",
+    "tokenCap": "Token cap per run",
+    "capDefault": "System default",
+    "capDefaultValue": "System default ({{count}} tokens)",
+    "capDefaultOff": "System default (no cap)",
+    "capCustom": "Custom:",
+    "capHintUser": "If a run exceeds the cap, the automation is disabled. You can only lower the cap below the default.",
+    "capHintAdmin": "If a run exceeds the cap, the automation is disabled. 0 = no cap.",
+    "capInvalid": "Enter a whole number ≥ 0.",
+    "capAdminOnly": "Only an administrator can exceed the default cap or remove it."
   }
 }

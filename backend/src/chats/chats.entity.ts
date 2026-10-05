@@ -46,6 +46,18 @@ export class Chat {
   @Column({ type: 'boolean', default: false })
   unread: boolean;
 
+  /**
+   * External entry point that produced the chat ('wyoming' | 'api'), null for
+   * chats created in the app. Set only when the entry point persists its
+   * conversations (see ExternalChatsService); the chat is otherwise a normal one.
+   */
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  externalSource: string | null;
+
+  /** Conversation key inside `externalSource` (later turns are appended by it). */
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  externalKey: string | null;
+
   @OneToMany(() => Message, (m) => m.chat)
   messages: Message[];
 

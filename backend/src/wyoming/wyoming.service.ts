@@ -46,6 +46,7 @@ import { agentSlug } from '../openai-compat/openai-mapper';
 import { UsersService } from '../users/users.service';
 import { InvocationsService } from '../invocations/invocations.service';
 import { makeToolCollector } from '../invocations/tool-collector';
+import { ExternalChatsService } from '../chats/external-chats.service';
 import { APP_NAME, APP_NAME_SLUG } from '../config/app.config';
 import {
   WyomingDecoder, WyomingEvent, encodeEvent, pcmToWav, parseWav, chunkPcm, PcmFormat,
@@ -100,6 +101,8 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
   /** Conversation agent resolved from the config (null = handle program not exposed). */
   private handle: { userId: string; userEmail: string; agentId: string | null; agentName: string | null; model: string } | null = null;
   private readonly conversations = new Map<string, ConversationWindow>();
+  /** Save the conversation turns as chats of the handle user (admin toggle). */
+  private persistConversations = false;
 
   constructor(
     @Inject(forwardRef(() => AppConfigService))
@@ -124,6 +127,7 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
   private get agentsService(): AgentsService { return this.moduleRef.get(AgentsService,  { strict: false }); }
   private get usersService(): UsersService   { return this.moduleRef.get(UsersService,   { strict: false }); }
   private get invocations(): InvocationsService { return this.moduleRef.get(InvocationsService, { strict: false }); }
+  private get externalChats(): ExternalChatsService { return this.moduleRef.get(ExternalChatsService, { strict: false }); }
 
   async onModuleInit(): Promise<void> {
     await this.applyConfig();
@@ -146,6 +150,7 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
     const cfg = await this.appConfig.getWyomingConfig();
     this.allowlist = (cfg.wyomingAllowedCidrs ?? '').split(',').map((s) => s.trim()).filter(Boolean);
     this.handle = await this.resolveHandle(cfg.wyomingHandleUserId, cfg.wyomingHandleAgentId);
+    this.persistConversations = cfg.wyomingPersistConversations;
     if (cfg.wyomingEnabled) {
       if (!this.server) await this.start();
     } else if (this.server) {
@@ -372,13 +377,22 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
           window.messages.push({ role: 'user', content: text }, { role: 'assistant', content: answer });
           if (window.messages.length > CONVERSATION_MAX_MESSAGES) window.messages.splice(0, window.messages.length - CONVERSATION_MAX_MESSAGES);
           window.updatedAt = Date.now();
-          this.logger.log(`Wyoming: handled turn for ${ip} [${this.handle.model}] (${text.length} → ${answer.length} chars, ${history.length} history) in ${Date.now() - t0}ms`);
+          this.logger.log(`Wyoming: handled turn for ${ip} [${this.handle.model}] (${text.length} → ${answer.length} chars, ${history.length} history, key ${key}) in ${Date.now() - t0}ms`);
           void this.invocations.record({
             userId: this.handle.userId, origin: 'voice', route: 'chat', model: `wyoming:${this.handle.model}`,
             inputPreview: text, outputPreview: answer || null, toolCalls: tools.records,
             inputTokens: usage?.inputTokens ?? null, outputTokens: usage?.outputTokens ?? null,
             durationMs: Date.now() - t0, status: 'ok',
           });
+          if (this.persistConversations) {
+            // The hub's conversation id (or the client IP) already identifies the
+            // conversation; the window TTL closes the chat like it drops the context.
+            const userId = this.handle.userId;
+            void this.externalChats.recordTurn({
+              userId, source: 'wyoming', key, idleMs: CONVERSATION_TTL_MS,
+              userText: text, answer, toolCalls: tools.records, usage,
+            }).catch((err) => this.logger.warn(`Wyoming: saving the turn failed: ${err?.message ?? err}`));
+          }
           this.send(socket, { type: 'handled', data: { text: answer, ...(context.conversation_id ? { context } : {}) } });
         } catch (err: any) {
           const message = err?.message ?? 'Internal error';

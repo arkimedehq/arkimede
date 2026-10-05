@@ -10,8 +10,10 @@
  * their side.
  *
  * Contract:
- *  - STATELESS: no chat rows are created and no compaction runs (chatId is
- *    never passed) — the caller resends the window in `messages[]` each turn.
+ *  - STATELESS run: no compaction runs and the context is only what the caller
+ *    resends in `messages[]` each turn (chatId is never passed). When the API key
+ *    has `persistConversations` on, each completed turn is ALSO recorded as a chat
+ *    of the key owner (ExternalChatsService) — a record, never read back here.
  *  - Incoming system messages are discarded (the pipeline has its own layered
  *    prompt); tool events stay internal and never map to OpenAI tool_calls.
  *  - `model` selects the pipeline: 'arkimede' (default) runs the user's
@@ -37,6 +39,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { TranscriptionService } from '../transcription/transcription.service';
 import { TtsService } from '../tts/tts.service';
 import { InvocationsService } from '../invocations/invocations.service';
+import { ExternalChatsService } from '../chats/external-chats.service';
 import { SpeechRequestDto } from './openai-audio.dto';
 import {
   agentSlug, chunkFrame, completionBody, errorBody, mapOpenAiMessages,
@@ -48,6 +51,12 @@ const DEFAULT_MODEL_ID = 'arkimede';
 
 /** Audio size limit: 25 MB (aligned with the OpenAI/Whisper limit). */
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
+
+/**
+ * Persisted conversations: a turn after this much silence opens a new chat even
+ * if the client keeps resending the same history (clients that never reset it).
+ */
+const PERSIST_IDLE_MS = 15 * 60 * 1000;
 
 @ApiTags('openai-compat')
 @ApiBearerAuth()
@@ -62,6 +71,7 @@ export class OpenAiCompatController {
     private readonly transcription: TranscriptionService,
     private readonly tts: TtsService,
     private readonly invocations: InvocationsService,
+    private readonly externalChats: ExternalChatsService,
   ) {}
 
   /**
@@ -151,6 +161,22 @@ export class OpenAiCompatController {
         error: error ?? (abort.signal.aborted ? 'client aborted' : null),
       });
 
+    // Opt-in chat record of a completed turn (per API key; never for JWT callers).
+    const persistTurn = (answer: string, usage: any) => {
+      if (!user.apiKeyPersistConversations || abort.signal.aborted) return;
+      void this.externalChats.recordTurn({
+        userId: user.id,
+        source: 'api',
+        key: `${user.apiKeyId}:${modelId}`,
+        idleMs: PERSIST_IDLE_MS,
+        priorUserTexts: history.filter((h) => h.role === 'user').map((h) => h.content),
+        userText: userInput,
+        answer,
+        toolCalls: tools.records,
+        usage,
+      }).catch((err) => this.logger.warn(`saving the turn failed: ${err?.message ?? err}`));
+    };
+
     if (body?.stream) {
       res.status(200);
       res.setHeader('Content-Type', 'text/event-stream');
@@ -178,6 +204,7 @@ export class OpenAiCompatController {
         res.write('data: [DONE]\n\n');
         this.logger.log(`← [${modelId}] stream done in ${Date.now() - t0}ms${abort.signal.aborted ? ' (client aborted)' : ''}`);
         logInvocation(text, usage);
+        persistTurn(text, usage);
       } catch (err: any) {
         this.logger.warn(`← [${modelId}] stream failed in ${Date.now() - t0}ms: ${err?.message ?? 'Internal error'}`);
         logInvocation(text, null, err?.message ?? 'Internal error');
@@ -205,6 +232,7 @@ export class OpenAiCompatController {
       finished = true;
       this.logger.log(`← [${modelId}] sync done in ${Date.now() - t0}ms, ${text.length} chars`);
       logInvocation(text, usage);
+      persistTurn(text, usage);
       res.json(completionBody(id, created, modelId, text, toOpenAiUsage(usage)));
     } catch (err: any) {
       finished = true;

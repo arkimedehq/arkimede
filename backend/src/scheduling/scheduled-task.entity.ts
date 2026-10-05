@@ -87,6 +87,14 @@ export class ScheduledTask {
   totalTokens: number;
 
   /**
+   * Per-automation token cap for a single run. NULL = global default
+   * (SCHED_MAX_TOKENS_PER_RUN), 0 = no cap, N > 0 = the automation is disabled
+   * when a run exceeds N tokens. Values above the default (or 0) are admin-only.
+   */
+  @Column({ type: 'int', nullable: true })
+  maxTokensPerRun: number | null;
+
+  /**
    * Subset of tools allowed in the headless run. Default `none` (cheap run):
    * most automations need no tool; the agent opts in
    * to the tools needed at scheduling time (and the user confirms).

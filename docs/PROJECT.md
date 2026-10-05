@@ -1099,6 +1099,7 @@ POST   /api/mcp-servers/:id/test          ← handshake + tools/list (discovered
 # API keys (long-lived opaque Bearer credentials, ak_… ; hash at rest, shown once)
 GET    /api/api-keys                      ← own keys (no secrets)
 POST   /api/api-keys                      ← { name, expiresInDays? } → { key, row }
+PATCH  /api/api-keys/:id                  ← { persistConversations } (owner or admin)
 DELETE /api/api-keys/:id                  ← revoke (owner or admin)
 GET    /api/api-keys/user/:userId         ← [ADMIN] keys of a user
 POST   /api/api-keys/admin                ← [ADMIN] issue for a service account
@@ -1106,7 +1107,9 @@ POST   /api/api-keys/admin                ← [ADMIN] issue for a service accoun
 # OpenAI-compatible API (stateless; JWT or ak_ key as Bearer)
 GET    /api/openai/v1/models              ← 'arkimede' (default pipeline) + the user's agents as models
 POST   /api/openai/v1/chat/completions    ← OpenAI chat format; SSE streaming and non-streaming
-#   ↳ external clients keep the conversation window (no chat rows, no compaction);
+#   ↳ external clients keep the conversation window (no compaction, nothing read back);
+#     key with persistConversations → each turn also saved as a chat of the owner
+#     (chats.externalSource='api'; same key+model, <15 min idle, coherent history);
 #     incoming system messages discarded (the 4-layer prompt wins); tool events stay
 #     internal (never mapped to OpenAI tool_calls); costs tagged origin='voice'.
 #     model = an agent slug → applies its prompt, tool filter, iteration cap, LLM config.

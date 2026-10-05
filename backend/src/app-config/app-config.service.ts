@@ -79,6 +79,8 @@ export interface WyomingConfigDto {
   wyomingAllowedCidrs:  string | null;
   wyomingHandleUserId:  string | null;
   wyomingHandleAgentId: string | null;
+  /** Omitted = keep the current value. */
+  wyomingPersistConversations?: boolean;
 }
 
 export interface TtsConfigDto {
@@ -352,6 +354,7 @@ export class AppConfigService implements OnModuleInit {
     wyomingAllowedCidrs:  string | null;
     wyomingHandleUserId:  string | null;
     wyomingHandleAgentId: string | null;
+    wyomingPersistConversations: boolean;
   }> {
     const config = await this.repo.findOne({ where: { id: CONFIG_ID } });
     return {
@@ -359,6 +362,7 @@ export class AppConfigService implements OnModuleInit {
       wyomingAllowedCidrs:  config?.wyomingAllowedCidrs  ?? null,
       wyomingHandleUserId:  config?.wyomingHandleUserId  ?? null,
       wyomingHandleAgentId: config?.wyomingHandleAgentId ?? null,
+      wyomingPersistConversations: config?.wyomingPersistConversations ?? false,
     };
   }
 
@@ -380,14 +384,15 @@ export class AppConfigService implements OnModuleInit {
       wyomingHandleUserId:  dto.wyomingHandleUserId  || null,
       // An agent without a user makes no sense: the agent is resolved in that user's scope.
       wyomingHandleAgentId: dto.wyomingHandleUserId ? (dto.wyomingHandleAgentId || null) : null,
+      wyomingPersistConversations: dto.wyomingPersistConversations ?? current?.wyomingPersistConversations ?? false,
     });
-    this.logger.log(`WyomingConfig: updated — enabled=${dto.wyomingEnabled} allowlist=${cidrs || '(any)'} handleUser=${dto.wyomingHandleUserId ?? '-'} agent=${dto.wyomingHandleAgentId ?? '-'}`);
+    this.logger.log(`WyomingConfig: updated — enabled=${dto.wyomingEnabled} allowlist=${cidrs || '(any)'} handleUser=${dto.wyomingHandleUserId ?? '-'} agent=${dto.wyomingHandleAgentId ?? '-'} persist=${dto.wyomingPersistConversations ?? '(unchanged)'}`);
     await this.audit?.record({
       actorId: actorId ?? null,
       action: 'appconfig.update',
       resource: 'wyoming',
       outcome: 'ok',
-      ctx: { section: 'wyoming', enabled: dto.wyomingEnabled, allowlist: cidrs || null, handleUserId: dto.wyomingHandleUserId ?? null, handleAgentId: dto.wyomingHandleAgentId ?? null },
+      ctx: { section: 'wyoming', enabled: dto.wyomingEnabled, allowlist: cidrs || null, handleUserId: dto.wyomingHandleUserId ?? null, handleAgentId: dto.wyomingHandleAgentId ?? null, persistConversations: dto.wyomingPersistConversations ?? null },
     });
     return this.getWyomingConfig();
   }

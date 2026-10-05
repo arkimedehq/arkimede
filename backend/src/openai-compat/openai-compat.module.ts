@@ -7,16 +7,18 @@ import { AgentsModule } from '../agents/agents.module';
 import { TranscriptionModule } from '../transcription/transcription.module';
 import { TtsModule } from '../tts/tts.module';
 import { InvocationsModule } from '../invocations/invocations.module';
+import { ChatsModule } from '../chats/chats.module';
 import { OpenAiCompatController } from './openai-compat.controller';
 
 /**
  * OpenAI-compatible surface over the agent pipeline (chat/completions +
  * models + audio transcriptions/speech). Stateless by design: external
- * conversation clients keep the dialogue window and resend it each turn.
+ * conversation clients keep the dialogue window and resend it each turn
+ * (turns are optionally recorded as chats, per API key).
  * See openai-compat.controller.ts.
  */
 @Module({
-  imports: [AgentModule, AgentsModule, TranscriptionModule, TtsModule, InvocationsModule],
+  imports: [AgentModule, AgentsModule, TranscriptionModule, TtsModule, InvocationsModule, ChatsModule],
   controllers: [OpenAiCompatController],
 })
 export class OpenAiCompatModule {}

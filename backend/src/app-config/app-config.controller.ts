@@ -171,6 +171,10 @@ class UpdateWyomingConfigDto {
   /** Agent of that user to run (null = standard pipeline). */
   @IsOptional() @IsUUID()
   wyomingHandleAgentId?: string | null;
+
+  /** Save the conversation turns as chats of the handle user (omitted = unchanged). */
+  @IsOptional() @IsBoolean()
+  wyomingPersistConversations?: boolean;
 }
 
 @ApiTags('admin')
@@ -557,6 +561,7 @@ export class AppConfigController {
       wyomingAllowedCidrs:  dto.wyomingAllowedCidrs ?? null,
       wyomingHandleUserId:  handleUserId,
       wyomingHandleAgentId: handleAgentId,
+      wyomingPersistConversations: dto.wyomingPersistConversations,
     }, user?.id);
     await this.wyoming.applyConfig();
     return { ...cfg, ...this.wyoming.getStatus() };

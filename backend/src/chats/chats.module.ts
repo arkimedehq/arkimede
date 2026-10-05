@@ -5,13 +5,15 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Chat } from './chats.entity';
 import { ChatsService } from './chats.service';
+import { ExternalChatsService } from './external-chats.service';
+import { Message } from '../messages/messages.entity';
 import { ChatsController } from './chats.controller';
 import { ProjectsModule } from '../projects/projects.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Chat]), ProjectsModule],
-  providers: [ChatsService],
+  imports: [TypeOrmModule.forFeature([Chat, Message]), ProjectsModule],
+  providers: [ChatsService, ExternalChatsService],
   controllers: [ChatsController],
-  exports: [ChatsService],
+  exports: [ChatsService, ExternalChatsService],
 })
 export class ChatsModule {}

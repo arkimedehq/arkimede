@@ -420,7 +420,9 @@
     "handleUserNone": "— None (STT/TTS only) —",
     "handleAgentLabel": "Agent",
     "handleAgentNone": "Standard pipeline (no agent)",
-    "handleActive": "Active as {{user}} — Wyoming model \"{{model}}\""
+    "handleActive": "Active as {{user}} — Wyoming model \"{{model}}\"",
+    "persistLabel": "Save conversations",
+    "persistHint": "Each conversation with the voice assistant is saved as a chat of the conversation user (one chat per Home Assistant conversation)."
   },
   "vectordb": {
     "title": "Vector Database",
@@ -541,7 +543,9 @@
     "namePlaceholder": "e.g. Voice satellite",
     "fieldExpiry": "Expiry",
     "days": "days",
-    "create": "Create key"
+    "create": "Create key",
+    "persistLabel": "Save conversations",
+    "persistHint": "Conversations run with this key on the OpenAI-compatible endpoint show up as chats of the owner."
   },
   "ocr": {
     "title": "Document OCR",

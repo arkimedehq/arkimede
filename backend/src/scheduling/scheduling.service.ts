@@ -19,7 +19,7 @@
  */
 import {
   Injectable, Logger, OnModuleInit, OnModuleDestroy,
-  NotFoundException, ServiceUnavailableException,
+  NotFoundException, ServiceUnavailableException, BadRequestException, ForbiddenException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ModuleRef } from '@nestjs/core';
@@ -28,6 +28,7 @@ import { Repository, LessThan } from 'typeorm';
 import { Queue, Worker, Job, ConnectionOptions } from 'bullmq';
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
+import { parseExpression } from 'cron-parser';
 import { SCHEDULE_TASK_DESC, CONFIRM_SCHEDULED_TASK_DESC } from '../prompts/prompts';
 
 import { NotificationsService } from '../notifications/notifications.service';
@@ -62,6 +63,18 @@ export interface CreateTaskInput {
   /** Origin chat: for one-shot tasks it becomes the outcome delivery chat. */
   chatId?: string | null;
   toolFilter?: { mode: 'all' | 'names' | 'none'; names?: string[] };
+}
+
+/** Editable fields of an automation (all optional: absent = unchanged). */
+export interface UpdateTaskInput {
+  title?: string;
+  instruction?: string;
+  cron?: string;
+  runAt?: string;
+  timezone?: string | null;
+  toolFilter?: { mode: 'all' | 'names' | 'none'; names?: string[] };
+  /** null = back to the global default; 0 = no cap (admin only). */
+  maxTokensPerRun?: number | null;
 }
 
 @Injectable()
@@ -271,6 +284,79 @@ export class SchedulingService implements OnModuleInit, OnModuleDestroy {
     return task;
   }
 
+  /** Global limits, so the UI can show the default the per-task cap falls back to. */
+  limits(): { defaultMaxTokensPerRun: number } {
+    return { defaultMaxTokensPerRun: this.maxTokensPerRun };
+  }
+
+  /** Token cap applied to a run of this task (0 = no cap). */
+  private effectiveTokenCap(task: ScheduledTask): number {
+    return task.maxTokensPerRun ?? this.maxTokensPerRun;
+  }
+
+  /**
+   * Edits an automation. The schedule type is fixed (cron stays cron, one-shot
+   * stays one-shot); an active+enabled task is re-registered on BullMQ so the new
+   * cron/timezone/runAt take effect immediately. Raising the token cap above the
+   * global default (or removing it with 0) is reserved to admins: the default is
+   * the deploy's cost guardrail.
+   */
+  async update(id: string, userId: string, isAdmin: boolean, data: UpdateTaskInput): Promise<ScheduledTask> {
+    const task = await this.repo.findOne({ where: { id, userId } });
+    if (!task) throw new NotFoundException('Automation not found.');
+
+    if (data.instruction !== undefined) {
+      if (!data.instruction.trim()) throw new BadRequestException('The instruction cannot be empty.');
+      task.instruction = data.instruction;
+    }
+    if (data.title !== undefined) task.title = data.title.trim() || task.instruction.slice(0, 120);
+    if (data.timezone !== undefined) task.timezone = data.timezone?.trim() || null;
+
+    if (task.scheduleType === 'cron') {
+      if (data.runAt !== undefined) throw new BadRequestException('A recurring automation has no "runAt": edit its cron.');
+      if (data.cron !== undefined) task.cron = data.cron.trim();
+      if (data.cron !== undefined || data.timezone !== undefined) {
+        try {
+          parseExpression(task.cron ?? '', { tz: task.timezone || undefined });
+        } catch (err: any) {
+          throw new BadRequestException(`Invalid cron expression or timezone: ${err?.message ?? err}`);
+        }
+      }
+    } else {
+      if (data.cron !== undefined) throw new BadRequestException('A one-time automation has no cron: edit its date/time.');
+      if (data.runAt !== undefined) {
+        const when = new Date(data.runAt);
+        if (isNaN(when.getTime())) throw new BadRequestException(`"runAt" (${data.runAt}) is not a valid date.`);
+        if (when.getTime() <= Date.now()) throw new BadRequestException('"runAt" must be in the future.');
+        task.runAt = when;
+        // Rescheduling a one-shot that already ran (or failed) arms it again.
+        if (task.status === 'done' || task.status === 'error') task.status = 'active';
+      }
+    }
+
+    if (data.toolFilter !== undefined) {
+      const names = (data.toolFilter.names ?? []).map((n) => n.trim()).filter(Boolean);
+      task.toolFilter = data.toolFilter.mode === 'names'
+        ? (names.length ? { mode: 'names', names } : { mode: 'none' })
+        : { mode: data.toolFilter.mode };
+    }
+
+    if (data.maxTokensPerRun !== undefined) {
+      const cap = data.maxTokensPerRun;
+      const withinDefault = cap === null || (cap > 0 && (this.maxTokensPerRun === 0 || cap <= this.maxTokensPerRun));
+      if (!withinDefault && !isAdmin) {
+        throw new ForbiddenException(
+          `Only an administrator can set a token cap above the default (${this.maxTokensPerRun}) or remove it.`,
+        );
+      }
+      task.maxTokensPerRun = cap;
+    }
+
+    await this.repo.save(task);
+    await this.registerJob(task); // removes the old job; re-adds only if active+enabled
+    return task;
+  }
+
   async remove(id: string, userId: string): Promise<void> {
     await this.removeJobs(id);
     await this.repo.delete({ id, userId });
@@ -382,7 +468,8 @@ export class SchedulingService implements OnModuleInit, OnModuleDestroy {
 
     // Cost guardrail: beyond the per-run cap → disable the automation.
     let disabledByCost = false;
-    if (this.maxTokensPerRun > 0 && runTokens > this.maxTokensPerRun) {
+    const tokenCap = this.effectiveTokenCap(task);
+    if (tokenCap > 0 && runTokens > tokenCap) {
       task.enabled = false;
       disabledByCost = true;
       await this.removeJobs(task.id);
@@ -413,7 +500,7 @@ export class SchedulingService implements OnModuleInit, OnModuleDestroy {
     const eventType = disabledByCost ? 'scheduled_task_disabled' : 'scheduled_task';
     const payload = { title, result, taskId: task.id, chatId, tokens: runTokens, disabledByCost };
     if (disabledByCost) {
-      payload.result = `⚠️ Automation disabled: the run exceeded the limit of ${this.maxTokensPerRun} tokens (${runTokens}). Outcome: ${result}`;
+      payload.result = `⚠️ Automation disabled: the run exceeded the limit of ${tokenCap} tokens (${runTokens}). Outcome: ${result}`;
     }
     const notif = await this.notifications.create({
       userId: task.userId, source: 'auto_scheduler', sourceId: task.id, eventType, payload,

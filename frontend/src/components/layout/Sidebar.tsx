@@ -13,7 +13,7 @@ import ProjectModal from '../projects/ProjectModal';
 import {
   MessageSquare, FolderOpen, Plus, ChevronDown, ChevronRight,
   Trash2, Settings, LogOut, PanelLeftClose, PanelLeft, Pencil,
-  Sun, Moon, Monitor, Users,
+  Sun, Moon, Monitor, Users, AudioLines, Plug,
 } from 'lucide-react';
 import { APP_NAME } from '../../config/app.config';
 import { useTheme, type ThemePreference } from '../../hooks/useTheme';
@@ -265,6 +265,14 @@ export default function Sidebar() {
 }
 
 /** Compact token format: 1234 → 1.2k, 1200000 → 1.2M. */
+/** Sidebar icon of a chat: external entry points get their own glyph. */
+function ChatIcon({ source }: { source?: string | null }) {
+  const { t } = useTranslation();
+  if (source === 'wyoming') return <span title={t('nav.externalWyoming')} className="flex-shrink-0 flex"><AudioLines size={13} className="opacity-60" /></span>;
+  if (source === 'api')     return <span title={t('nav.externalApi')} className="flex-shrink-0 flex"><Plug size={13} className="opacity-60" /></span>;
+  return <MessageSquare size={13} className="flex-shrink-0 opacity-60" />;
+}
+
 function fmtTokensCompact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000)     return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`;
@@ -349,7 +357,7 @@ function ChatItem({
     >
       {unread
         ? <span className="flex-shrink-0 w-2 h-2 rounded-full bg-emerald-400" title={t('nav.unread')} />
-        : <MessageSquare size={13} className="flex-shrink-0 opacity-60" />}
+        : <ChatIcon source={chat.externalSource} />}
       <span className={`text-sm flex-1 truncate ${unread ? 'font-semibold text-gray-100' : ''}`}>{chat.title}</span>
       {foreign && authorName && (
         <span className="flex-shrink-0 text-[10px] text-gray-500 group-hover:hidden truncate max-w-[60px]">

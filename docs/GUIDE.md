@@ -1365,6 +1365,7 @@ service accounts without logging in as them).
 ```bash
 GET    /api/api-keys                    # own keys (no secrets)
 POST   /api/api-keys                    # {name, expiresInDays?} → {key, row} (key shown once)
+PATCH  /api/api-keys/:id                # {persistConversations} (owner or admin)
 DELETE /api/api-keys/:id                # revoke (owner or admin)
 GET    /api/api-keys/user/:userId       # [ADMIN] keys of a user
 POST   /api/api-keys/admin              # [ADMIN] {userId, name, expiresInDays?}
@@ -1381,8 +1382,14 @@ GET  /api/openai/v1/models              # 'arkimede' (default pipeline) + the us
 POST /api/openai/v1/chat/completions    # OpenAI format; SSE streaming and non-streaming
 ```
 
-- The client keeps the conversation window and resends it each turn; no chat
-  rows are created and no compaction runs.
+- The client keeps the conversation window and resends it each turn; no
+  compaction runs and nothing is read back from the DB.
+- Optional record: enable **Save conversations** on the API key (Settings →
+  Profile, or the admin key editor) and each completed turn is also saved as a
+  chat of the key owner. A turn continues the open chat (same key and model)
+  unless the client was silent for 15 minutes or the history it resends no
+  longer matches that chat (its last user message is not among the recent ones);
+  otherwise a new chat starts. Calls authenticated with a JWT are never saved.
 - Incoming `system` messages are discarded (the 4-level prompt wins); tool
   events stay internal — never mapped to OpenAI `tool_calls`.
 - Picking an agent slug as `model` applies that agent's system prompt, tool
@@ -1404,6 +1411,8 @@ Works with any provider chosen in the panel (internal Whisper/Piper or cloud).
 Pick a **conversation user** (and optionally one of their agents) in the same
 card and the hub also gets Arkimede as its conversation agent: the whole voice
 pipeline runs on Arkimede with no extra component on the hub.
+With **Save conversations** on, each hub conversation (its `conversation_id`;
+closed after 10 minutes of silence) is saved as a chat of the conversation user.
 The protocol has no authentication: enable it on trusted networks only.
 
 ### Chat and messages

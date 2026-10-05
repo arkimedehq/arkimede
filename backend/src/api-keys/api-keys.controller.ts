@@ -2,10 +2,10 @@
 // Copyright © 2026 Andrea Genovese
 
 import {
-  Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Post, UseGuards,
+  Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
-import { IsInt, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -18,6 +18,12 @@ class CreateApiKeyDto {
   /** Days until expiry; omit/0 = never expires. */
   @IsOptional() @IsInt() @Min(0) @Max(3650)
   expiresInDays?: number;
+}
+
+class UpdateApiKeyDto {
+  /** Save the conversations run with this key on the OpenAI-compatible endpoint. */
+  @IsBoolean()
+  persistConversations: boolean;
 }
 
 class AdminCreateApiKeyDto extends CreateApiKeyDto {
@@ -62,6 +68,13 @@ export class ApiKeysController {
   @ApiOperation({ summary: '[ADMIN] Create an API key for any user (clear key returned once)' })
   createForUser(@Body() dto: AdminCreateApiKeyDto, @CurrentUser() user: any) {
     return this.service.create(dto.userId, dto.name, dto.expiresInDays ?? null, user.id);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Update the options of an API key (owner or admin)' })
+  @ApiParam({ name: 'id', description: 'API key UUID' })
+  update(@Param('id') id: string, @Body() dto: UpdateApiKeyDto, @CurrentUser() user: any) {
+    return this.service.setPersistConversations(id, dto.persistConversations, user.id, user.role === 'admin', user.id);
   }
 
   @Delete(':id')

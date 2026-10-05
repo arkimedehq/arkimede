@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import type { LlmProvider, EmbeddingProvider, EmbeddingConfig, ToolLoadingConfig, ToolLoadingStrategy, ToolSchemaFormat, TranscriptionProvider, TtsProvider, SandboxNetwork, SandboxExecMode } from '../api/appConfig';
 import { apiKeysApi } from '../api/apiKeys';
+import ApiKeyPersistToggle from '../components/ApiKeyPersistToggle';
 import { adminUsersApi } from '../api/adminUsers';
 import { filesApi, type FileRecord, type DocScope, type FileScope } from '../api/files';
 import { profileApi } from '../api/profile';
@@ -1807,6 +1808,7 @@ function ApiKeysCard() {
               <p className="text-[11px] text-gray-500">
                 {t('apiKeys.expires')}: {k.expiresAt ? fmtDate(k.expiresAt) : t('apiKeys.never')} · {t('apiKeys.lastUsed')}: {fmtDate(k.lastUsedAt)}
               </p>
+              <ApiKeyPersistToggle row={k} queryKey={['api-keys']} />
             </div>
             <button
               title={t('apiKeys.revoke')}
@@ -5478,6 +5480,7 @@ function WyomingConfigCard() {
   const [cidrs,   setCidrs]   = useState('');
   const [handleUserId,  setHandleUserId]  = useState('');
   const [handleAgentId, setHandleAgentId] = useState('');
+  const [persist, setPersist] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
@@ -5486,6 +5489,7 @@ function WyomingConfigCard() {
     setCidrs(data.wyomingAllowedCidrs ?? '');
     setHandleUserId(data.wyomingHandleUserId ?? '');
     setHandleAgentId(data.wyomingHandleAgentId ?? '');
+    setPersist(data.wyomingPersistConversations);
   }, [data]);
 
   // Conversation identity pickers: active users, then the agents visible to the chosen user.
@@ -5507,6 +5511,7 @@ function WyomingConfigCard() {
       wyomingAllowedCidrs:  cidrs.trim() || null,
       wyomingHandleUserId:  handleUserId || null,
       wyomingHandleAgentId: handleUserId ? (handleAgentId || null) : null,
+      wyomingPersistConversations: persist,
     }),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['wyoming-config'] });
@@ -5523,6 +5528,7 @@ function WyomingConfigCard() {
     || cidrs.trim() !== (data.wyomingAllowedCidrs ?? '')
     || handleUserId !== (data.wyomingHandleUserId ?? '')
     || (handleUserId ? handleAgentId : '') !== (data.wyomingHandleAgentId ?? '')
+    || persist !== data.wyomingPersistConversations
   );
   const hostHint = window.location.hostname;
 
@@ -5620,6 +5626,23 @@ function WyomingConfigCard() {
             {t('wyoming.handleActive', { user: data.handle.userEmail, model: data.handle.model })}
           </p>
         )}
+        <div className="flex items-center justify-between pt-1">
+          <div className="pr-4">
+            <p className="text-sm text-gray-200">{t('wyoming.persistLabel')}</p>
+            <p className="text-xs text-gray-500 mt-0.5">{t('wyoming.persistHint')}</p>
+          </div>
+          <button
+            role="switch"
+            aria-checked={persist}
+            disabled={isLoading || !handleUserId}
+            onClick={() => setPersist((v) => !v)}
+            className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors
+              disabled:opacity-50 focus:outline-none ${persist ? 'bg-blue-600' : 'bg-gray-700'}`}
+          >
+            <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform
+              ${persist ? 'translate-x-6' : 'translate-x-1'}`} />
+          </button>
+        </div>
       </div>
 
       {/* ── How to connect ── */}

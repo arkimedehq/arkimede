@@ -10,6 +10,8 @@ export interface ApiKeyRow {
   name: string;
   /** Identification prefix, e.g. "ak_3fk9aB". */
   prefix: string;
+  /** Conversations run with this key on the OpenAI-compatible endpoint are saved as chats. */
+  persistConversations: boolean;
   expiresAt: string | null;
   lastUsedAt: string | null;
   createdAt: string;
@@ -36,6 +38,10 @@ export const apiKeysApi = {
   /** [Admin] Create a key for any user (service accounts). */
   createForUser: (userId: string, name: string, expiresInDays?: number) =>
     api.post<ApiKeyCreated>('/api-keys/admin', { userId, name, expiresInDays }).then((r) => r.data),
+
+  /** Toggle conversation persistence (owner or admin). */
+  setPersistConversations: (id: string, persistConversations: boolean) =>
+    api.patch<ApiKeyRow>(`/api-keys/${id}`, { persistConversations }).then((r) => r.data),
 
   /** Revoke (owner or admin). */
   revoke: (id: string) => api.delete(`/api-keys/${id}`),
