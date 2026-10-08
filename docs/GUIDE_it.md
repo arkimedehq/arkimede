@@ -1734,7 +1734,7 @@ qualsiasi backend in esecuzione — stessa API REST + SSE, stesso JWT, nessuna
 modifica lato server. Linux/macOS, Node ≥ 18.
 
 ```bash
-npm install -g arkimede-cli                  # oppure: cd cli && npm install && npm run build
+npm install -g @arkimedehq/arkimede-cli                  # oppure: cd cli && npm install && npm run build
 arkimede login --url http://localhost:3000   # chiede email + password
 arkimede                                     # TUI full-screen sull'ultima chat
 ```

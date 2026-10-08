@@ -1,5 +1,5 @@
 {
-  "name": "arkimede-cli",
+  "name": "@arkimedehq/arkimede-cli",
   "version": "0.1.0",
   "description": "Arkimede terminal client — login and chat with your self-hosted AI agents from the shell (TUI + scriptable REPL)",
   "license": "AGPL-3.0-or-later",
@@ -56,5 +56,8 @@
     "@types/node": "^20.14.0",
     "@types/react": "^18.3.31",
     "typescript": "^5.5.4"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

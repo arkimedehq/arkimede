@@ -151,9 +151,15 @@ cd arkimede-deploy
 ```
 
 `install-hub.sh` è lo stesso flusso guidato di `install.sh` (segreti, livello di isolamento,
-device embedding) ma **scarica** le immagini invece di buildarle. Fissa `ARKIMEDE_VERSION` nel
-`.env` a un tag di release per deploy riproducibili. Dettagli completi nel repo
+device embedding, più immagine OCR e servizi vocali) ma **scarica** le immagini invece di
+buildarle; `./update-hub.sh` aggiorna. Fissa `ARKIMEDE_VERSION` nel `.env` a un tag di release
+per deploy riproducibili. Dettagli completi nel repo
 [arkimede-deploy](https://github.com/arkimedehq/arkimede-deploy).
+
+Il bundle è **generato** da questo repo a ogni release (`scripts/gen-deploy-bundle.py`, sorgenti
+in `deploy/`): i suoi file compose sono quelli di questo repo, con ogni `build:` sostituito
+dall'immagine pubblicata, e le immagini le costruisce `.github/workflows/release-images.yml` su
+un tag `v*`.
 
 > Build da sorgente (questo repo, `./scripts/install.sh`) e pull-and-run
 > ([arkimede-deploy](https://github.com/arkimedehq/arkimede-deploy)) avviano lo **stesso** stack —
@@ -185,7 +191,7 @@ skill, data source, server MCP, consumo token) che parla con la stessa API e
 gli stessi permessi della web UI. Linux/macOS, Node ≥ 18.
 
 ```bash
-npm install -g arkimede-cli        # oppure build da sorgente in cli/
+npm install -g @arkimedehq/arkimede-cli        # oppure build da sorgente in cli/
 arkimede login --url http://localhost:3000
 arkimede            # apre la TUI
 ```

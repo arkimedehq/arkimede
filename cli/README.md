@@ -7,9 +7,9 @@ Terminal client for [Arkimede](../README.md): log in and chat with your agents s
 From npm (recommended):
 
 ```bash
-npm install -g arkimede-cli
+npm install -g @arkimedehq/arkimede-cli
 # or run without installing:
-npx arkimede-cli login --url http://localhost:3000
+npx @arkimedehq/arkimede-cli login --url http://localhost:3000
 ```
 
 From source:

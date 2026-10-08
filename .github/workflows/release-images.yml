@@ -11,14 +11,15 @@ name: Release Images
 # Trigger: push a tag `v<version>` (an app release), or run manually from the Actions
 # tab (workflow_dispatch) providing a version. Each service is one matrix entry;
 # `embedding` has two entries (cpu default + a `-cuda` variant) because the device is
-# baked at build time (CPU-only torch vs the CUDA stack).
+# baked at build time (CPU-only torch vs the CUDA stack); `ocr` likewise (full default +
+# a `-light` variant without Docling).
 #
 # Notes:
 #  - The embedding/whisper models are PRE-DOWNLOADED into the image at build time
 #    (see their Dockerfiles), so a published image carries the DEFAULT model. Overriding
 #    EMBEDDING_MODEL/WHISPER_MODEL at runtime still works — it just re-downloads on first
 #    start instead of using the baked copy.
-#  - The two ML images build linux/amd64 only: cross-building torch + a model download
+#  - The ML images (embedding, whisper, piper, ocr) build linux/amd64 only: cross-building torch + a model download
 #    under QEMU is slow/fragile. On arm64 hosts they run under emulation. The lightweight
 #    images are multi-arch (amd64 + arm64).
 
@@ -68,6 +69,23 @@ jobs:
           - service: whisper
             context: ./whisper-service
             platforms: linux/amd64
+          - service: piper
+            context: ./piper-service
+            platforms: linux/amd64
+          # ocr — the full image (Docling + RapidOCR, "structured" level) is the default
+          # tag; `-light` is Tesseract only ("fast" level, ~0.5 GB instead of ~4 GB).
+          - service: ocr
+            context: ./ocr-service
+            platforms: linux/amd64
+            tag-suffix: ''
+            build-args: |
+              OCR_STRUCTURED=1
+          - service: ocr
+            context: ./ocr-service
+            platforms: linux/amd64
+            tag-suffix: '-light'
+            build-args: |
+              OCR_STRUCTURED=0
           # embedding — cpu is the default tag (no suffix); cuda is a separate tag.
           - service: embedding
             context: ./embedding-service
@@ -98,7 +116,9 @@ jobs:
           {
             echo "tags<<EOF"
             echo "${IMAGE}:${VERSION}${SUFFIX}"
-            echo "${IMAGE}:latest${SUFFIX}"
+            # `latest` moves only with a release tag: a manual (e.g. `edge`) build must
+            # not replace what `latest` deployments pull.
+            if [ "${{ github.event_name }}" = "push" ]; then echo "${IMAGE}:latest${SUFFIX}"; fi
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 

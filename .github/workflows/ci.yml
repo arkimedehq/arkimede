@@ -60,6 +60,25 @@ jobs:
       - name: Build
         run: npm run build
 
+  deploy-bundle:
+    name: Deploy bundle — generate + validate compose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate the pull-based bundle
+        run: ./scripts/gen-deploy-bundle.py /tmp/bundle
+      - name: Validate every compose chain
+        working-directory: /tmp/bundle
+        run: |
+          cp .env.example .env
+          printf 'DB_PASSWORD=x\nJWT_SECRET=x\nTOOL_SECRETS_KEY=x\nRUN_TOKEN_SECRET=x\nSERVICE_API_KEY=x\nHOST_DATA_DIR=/srv/ark\nJOB_EGRESS_NETWORK=sandboxnet\n' >> .env
+          for chain in "" "broker" "broker egress" "novoice" "broker egress novoice"; do
+            args=(-p arkimede -f docker-compose.hub.yml)
+            for f in $chain; do args+=(-f "docker-compose.hub.$f.yml"); done
+            echo "▸ base $chain"; docker compose "${args[@]}" config -q
+          done
+          bash -n install-hub.sh update-hub.sh bootstrap-broker.sh
+
   integration:
     name: Backend — integration (testcontainers)
     runs-on: ubuntu-latest

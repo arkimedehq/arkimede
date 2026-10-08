@@ -14,9 +14,9 @@ From npm (recommended — works with any install method, including the
 pull-based [arkimede-deploy](https://github.com/arkimedehq/arkimede-deploy)):
 
 ```bash
-npm install -g arkimede-cli
+npm install -g @arkimedehq/arkimede-cli
 # or run without installing:
-npx arkimede-cli login --url http://localhost:3000
+npx @arkimedehq/arkimede-cli login --url http://localhost:3000
 ```
 
 From source:

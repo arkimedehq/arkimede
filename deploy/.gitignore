@@ -1,0 +1,7 @@
+# Local runtime config and generated files — never committed.
+.env
+.env.bak-*
+.compose-profile
+scripts/.compose-profile
+compose.sh
+backups/

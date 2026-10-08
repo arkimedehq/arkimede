@@ -151,9 +151,15 @@ cd arkimede-deploy
 ```
 
 `install-hub.sh` is the same guided flow as `install.sh` (secrets, isolation level, embedding
-device) but it **pulls** the images rather than building them. Pin `ARKIMEDE_VERSION` in the
-`.env` to a release tag for reproducible deployments. Full details in the
+device, plus OCR image and voice services) but it **pulls** the images rather than building
+them; `./update-hub.sh` upgrades. Pin `ARKIMEDE_VERSION` in the `.env` to a release tag for
+reproducible deployments. Full details in the
 [arkimede-deploy](https://github.com/arkimedehq/arkimede-deploy) repo.
+
+The bundle is **generated** from this repo at every release (`scripts/gen-deploy-bundle.py`,
+sources in `deploy/`): its compose files are this repo's, with each `build:` replaced by the
+published image, and the images are built by `.github/workflows/release-images.yml` on a
+`v*` tag.
 
 > Build-from-source (this repo, `./scripts/install.sh`) vs pull-and-run
 > ([arkimede-deploy](https://github.com/arkimedehq/arkimede-deploy)) start the **same** stack —
@@ -185,7 +191,7 @@ servers, token usage) that talks to the same API with the same permissions
 as the web UI. Linux/macOS, Node ≥ 18.
 
 ```bash
-npm install -g arkimede-cli        # or build from source in cli/
+npm install -g @arkimedehq/arkimede-cli        # or build from source in cli/
 arkimede login --url http://localhost:3000
 arkimede            # opens the TUI
 ```
