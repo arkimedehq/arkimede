@@ -7,6 +7,8 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiBearerAuth, ApiConsumes, ApiBody, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { withTraceUser } from '../observability/genai-tracing';
 import { TranscriptionService } from './transcription.service';
 
 /** Audio size limit: 25 MB (aligned with the OpenAI/Whisper limit). */
@@ -55,13 +57,14 @@ export class TranscriptionController {
   )
   async transcribe(
     @UploadedFile() audio: Express.Multer.File,
-    @Body('language') language?: string,
+    @Body('language') language: string | undefined,
+    @CurrentUser() user: any,
   ): Promise<{ text: string }> {
     if (!audio?.buffer?.length) {
       throw new BadRequestException('transcription.emptyAudio');
     }
     const lang = language && /^[a-z]{2}$/i.test(language) ? language.toLowerCase() : undefined;
-    const text = await this.service.transcribe(audio.buffer, audio.originalname || 'audio.webm', lang);
+    const text = await withTraceUser(user?.id, () => this.service.transcribe(audio.buffer, audio.originalname || 'audio.webm', lang));
     return { text };
   }
 }

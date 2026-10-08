@@ -25,7 +25,7 @@ if [ -f "../.env" ]; then
 fi
 
 echo "Starting embedding service on http://localhost:8000"
-echo "Model:  ${EMBEDDING_MODEL:-mixedbread-ai/mxbai-embed-large-v1}"
+echo "Model:  ${EMBEDDING_MODEL:-BAAI/bge-m3}"
 echo "Device: ${EMBEDDING_DEVICE:-cpu}"
 
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload

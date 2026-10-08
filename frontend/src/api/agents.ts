@@ -19,6 +19,8 @@ export interface Agent {
   toolFilter: AgentToolFilter;
   maxIterations: number | null;
   exposeAsTool: boolean;
+  /** Recordare memory context before each answer. */
+  memoryContext: boolean;
   scope: AgentScope;
   teamId: string | null;
   createdAt: string;

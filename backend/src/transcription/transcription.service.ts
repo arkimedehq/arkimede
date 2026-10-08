@@ -15,6 +15,9 @@
  *
  * Cache: the OpenAI client is built lazily and invalidated with
  * invalidateCache() when the admin saves a new configuration.
+ *
+ * Tracing: every transcription runs in a `transcription {model}` OTel span
+ * (opt-in, metadata only — never the audio nor the transcript).
  */
 import { Injectable, Logger, BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -22,6 +25,7 @@ import OpenAI, { toFile } from 'openai';
 import { AppConfigService } from '../app-config/app-config.service';
 import { TranscriptionProvider } from '../app-config/app-config.entity';
 import { isInternalServiceAvailable } from '../common/internal-service-probe.util';
+import { wavDurationSeconds, withVoiceSpan } from '../observability/genai-tracing';
 
 interface TranscriptionRuntimeConfig {
   enabled:  boolean;
@@ -45,12 +49,19 @@ const DEFAULT_BASE_URLS: Partial<Record<TranscriptionProvider, string>> = {
   groq:     'https://api.groq.com/openai/v1',
 };
 
+/** Provider → gen_ai.provider.name on the trace span (openai-compatible: real backend unknown). */
+const TRACE_PROVIDER: Partial<Record<TranscriptionProvider, string>> = {
+  internal: 'whisper',
+  openai:   'openai',
+  groq:     'groq',
+};
+
 @Injectable()
 export class TranscriptionService {
   private readonly logger = new Logger(TranscriptionService.name);
 
   /** Cached OpenAI client + associated model. Reset by invalidateCache(). */
-  private cached: { client: OpenAI; model: string } | null = null;
+  private cached: { client: OpenAI; model: string; provider: TranscriptionProvider } | null = null;
 
   constructor(
     private readonly appConfig: AppConfigService,
@@ -116,7 +127,7 @@ export class TranscriptionService {
   }
 
   /** Builds (or reuses) the OpenAI client for transcription. */
-  private async getClient(): Promise<{ client: OpenAI; model: string; enabled: boolean }> {
+  private async getClient(): Promise<{ client: OpenAI; model: string; provider: TranscriptionProvider; enabled: boolean }> {
     const config = await this.loadConfig();
     if (this.cached) return { ...this.cached, enabled: config.enabled };
 
@@ -125,8 +136,8 @@ export class TranscriptionService {
       apiKey: config.apiKey ?? 'not-needed',
       ...(config.baseUrl ? { baseURL: config.baseUrl } : {}),
     });
-    this.cached = { client, model: config.model };
-    return { client, model: config.model, enabled: config.enabled };
+    this.cached = { client, model: config.model, provider: config.provider };
+    return { ...this.cached, enabled: config.enabled };
   }
 
   /**
@@ -170,7 +181,7 @@ export class TranscriptionService {
    * @param language  ISO-639-1 language hint (e.g. 'it'); improves accuracy
    */
   async transcribe(buffer: Buffer, filename: string, language?: string): Promise<string> {
-    const { client, model, enabled } = await this.getClient();
+    const { client, model, provider, enabled } = await this.getClient();
     if (!enabled) {
       throw new ServiceUnavailableException('transcription.disabled');
     }
@@ -178,19 +189,27 @@ export class TranscriptionService {
       throw new BadRequestException('transcription.emptyAudio');
     }
 
-    try {
-      const file = await toFile(buffer, filename);
-      const res = await client.audio.transcriptions.create({
-        file,
-        model,
-        ...(language ? { language } : {}),
-      });
-      return (res.text ?? '').trim();
-    } catch (err: any) {
-      const detail = err?.response?.data?.error?.message ?? err?.message ?? 'unknown error';
-      this.logger.error(`Transcription failed: ${detail}`);
-      throw new ServiceUnavailableException('transcription.failed');
-    }
+    return withVoiceSpan(
+      () => ({
+        operation: 'transcription', model, provider: TRACE_PROVIDER[provider], remote: true,
+        audioSeconds: wavDurationSeconds(buffer),
+      }),
+      async () => {
+        try {
+          const file = await toFile(buffer, filename);
+          const res = await client.audio.transcriptions.create({
+            file,
+            model,
+            ...(language ? { language } : {}),
+          });
+          return (res.text ?? '').trim();
+        } catch (err: any) {
+          const detail = err?.response?.data?.error?.message ?? err?.message ?? 'unknown error';
+          this.logger.error(`Transcription failed: ${detail}`);
+          throw new ServiceUnavailableException('transcription.failed');
+        }
+      },
+    );
   }
 
   /**

@@ -8,6 +8,8 @@ export interface McpTestResult {
   ok: boolean;
   transport: 'http' | 'sse' | 'local' | 'remote';
   tools: { name: string; description?: string }[];
+  /** Resources and URI templates; the agent reads them via mcp_<server>_read_resource. */
+  resources?: { uri: string; name?: string; template?: boolean }[];
   latencyMs: number;
   /** http/sse only: negotiated session flavor (legacy-sse = event-stream transport). */
   sessionMode?: 'streamable' | 'plain' | 'legacy-sse';

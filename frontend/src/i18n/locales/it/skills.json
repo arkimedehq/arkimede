@@ -225,7 +225,7 @@
     "history": "Storici ({{count}})"
   },
   "shared": {
-    "info": "Queste skill sono installate da altri utenti e rese disponibili a tutti. Sono già attive nell'agente — non serve installarle. L'owner controlla configurazione, assegnazioni e aggiornamenti.",
+    "info": "Queste skill sono installate da altri utenti e rese disponibili a tutti. Quelle «Attive» sono già disponibili nell'agente — non serve installarle; quelle «Disattivate» le ha spente il proprietario. L'owner controlla attivazione, configurazione, assegnazioni e aggiornamenti.",
     "emptyTitle": "Nessuna skill condivisa disponibile",
     "emptyHint": "Quando un utente condivide una skill e viene approvata, apparirà qui.",
     "badge": "Condivisa",
@@ -241,5 +241,11 @@
   },
   "scopeBadge": {
     "personal": "Personale"
+  },
+  "enabledBadge": {
+    "on": "Attiva",
+    "off": "Disattivata",
+    "onHint": "Il proprietario l'ha attivata: gli agenti possono usarla",
+    "offHint": "Il proprietario l'ha disattivata: per ora nessun agente può usarla"
   }
 }

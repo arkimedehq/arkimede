@@ -15,6 +15,7 @@ import {AgentService} from '../agent/agent.service';
 import {MultiAgentService} from '../agents/multi-agent.service';
 import {FilesService} from '../files/files.service';
 import {UserMemoryService} from '../user-memory/user-memory.service';
+import { withoutRecordareIngest } from '../recordare/recordare-outbox';
 
 class SendMessageDto {
   @IsString() content: string;
@@ -436,11 +437,13 @@ export class MessagesController {
 
       // Save the error message to the DB — so it stays visible in the history
       try {
-        const errMsg = await this.messagesService.save({
+        // Error turns are shown in the history but are not part of the conversation:
+        // never sent to the episodic memory (Recordare).
+        const errMsg = await withoutRecordareIngest(() => this.messagesService.save({
           chatId,
           role:    'assistant',
           content: `⚠️ ${userMessage}`,
-        });
+        }));
         await this.chatsService.touch(chatId);
         // Dedicated error event + done with real messageId → the frontend reloads
         send({ type: 'error', code: errorCode, message: userMessage });

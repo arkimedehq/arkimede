@@ -226,7 +226,8 @@ export class MemoryEvolutionService implements OnModuleInit, OnModuleDestroy {
       'Respond EXCLUSIVELY with one JSON object, no extra text:\n' +
       '{"links":["id1"],"enrich":[{"id":"id1","addTags":["tag"],"appendContext":"..."}],"merge":null}';
 
-    const res = await runWithLlmCallContext({ priority: 'background', origin: 'system' }, () => model.invoke(prompt));
+    // Evolution of the note's author's memory: attribute the LLM call to them.
+    const res = await runWithLlmCallContext({ priority: 'background', origin: 'system', userId: note.userId }, () => model.invoke(prompt));
     const text = typeof res.content === 'string'
       ? res.content
       : Array.isArray(res.content) ? res.content.map((b: any) => (b?.type === 'text' ? b.text : '')).join('') : '';

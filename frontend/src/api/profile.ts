@@ -24,6 +24,16 @@ export interface UserProfile {
   autoMemoryEnabled: boolean;
   /** Memory extraction threshold override (n. messages); null = global default. */
   memoryThreshold: number | null;
+  /** Episodic memory in Recordare (separate from autoMemoryEnabled). */
+  episodicMemoryEnabled: boolean;
+  /** True when Recordare is configured on this installation. */
+  episodicMemoryAvailable?: boolean;
+  /** off | waiting_activation (consent not given in Recordare yet) | active | unknown (Recordare unreachable). */
+  episodicMemoryStatus?: 'off' | 'waiting_activation' | 'active' | 'unknown';
+  /** Personal memory, or shared by everyone using this account (Recordare "entity"); null = not known yet. */
+  episodicMemoryKind?: 'human' | 'entity' | null;
+  /** Recordare Atlas address (admins only, when installed). */
+  recordareAtlasUrl?: string | null;
   createdAt:    string;
   updatedAt:    string;
 }
@@ -44,6 +54,8 @@ export const profileApi = {
     maxHistoryTokens?: number | null;
     autoMemoryEnabled?: boolean;
     memoryThreshold?: number | null;
+    episodicMemoryEnabled?: boolean;
+    episodicMemoryKind?: 'human' | 'entity';
   }): Promise<UserProfile> =>
     api.patch('/users/me', data).then((r) => r.data),
 

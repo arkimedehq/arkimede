@@ -1289,6 +1289,143 @@ VITE_APP_NAME=Arkimede
 # VITE_WS_URL=ws://localhost:3000
 ```
 
+### Immagine Postgres e modello di embedding — default e aggiornamenti
+
+**Immagine Postgres `pgvector/pgvector:pg16`** (prima `postgres:16-alpine`). Stessa major, stesse variabili, stesso
+healthcheck e stesso percorso dati (`/var/lib/postgresql/data`); aggiunge l'estensione `vector`, così un servizio
+ospitato sullo stesso Postgres (es. Recordare, con database e utente propri) può usarla. Per Arkimede non cambia nulla.
+- **Installazioni nuove**: nulla da fare.
+- **Installazioni esistenti con data dir creata dall'immagine alpine**: alpine usa musl, l'immagine pgvector è
+  Debian/glibc, e `en_US.utf8` ordina il testo diversamente con le due librerie C: gli indici B-tree su colonne di
+  testo vanno ricostruiti una volta. `./scripts/update.sh` lo fa da solo (passo 5b); a mano:
+  `./scripts/postgres-to-pgvector.sh` (dalla root del repo, stack attivo, dopo aver aggiornato il compose). Fa un
+  backup (`scripts/backup.sh`), ricrea solo il container postgres sulla nuova immagine se serve (volume dati
+  conservato), esegue `REINDEX DATABASE` e registra la nuova versione di collation per ogni database coinvolto, poi
+  verifica con `amcheck` (`bt_index_check`). Idempotente: su un'installazione già migrata o nuova risponde "nothing to
+  do". Il REINDEX blocca brevemente le scritture tabella per tabella: eseguirlo in un momento tranquillo.
+- All'avvio il backend registra un avviso finché la versione di collation registrata di un database differisce da
+  quella della libreria C (`pg_database.datcollversion` vs `pg_database_collation_actual_version`), indicando lo
+  script; non blocca mai l'avvio.
+
+**Modello di embedding `BAAI/bge-m3`** (prima `mixedbread-ai/mxbai-embed-large-v1`): entrambi a 1024 dimensioni, ma i
+vettori **non sono intercambiabili**. Le installazioni il cui `.env` imposta già `EMBEDDING_MODEL` (tutte quelle create
+da `.env.example`) mantengono il loro modello. Cambiare modello su un'installazione con vettori = eseguire il job di
+re-embed dell'admin (`GET /api/admin/vector-db/reembed/plan`, poi `POST /api/admin/vector-db/reembed`). Il modello che
+ha prodotto i vettori salvati è registrato in `app_config.embeddingIndexedModel` (`provider|modello|dimensioni`) dal job
+di re-embed e su un vector store vuoto; all'avvio il backend lo confronta con il modello in esecuzione e registra un
+avviso se differiscono, oppure — per vettori indicizzati prima di questa registrazione — che il modello è sconosciuto
+(finché un re-embed non lo registra). L'immagine `embedding` scarica il modello in fase di build: bge-m3 pesa ~2,3 GB
+(contro ~0,7 GB) e usa ~1,4 GB di RAM.
+
+### Recordare — memoria episodica (opzionale)
+
+Recordare è un servizio separato di memoria / gemello digitale. Arkimede
+può usarlo come **memoria episodica** dei suoi utenti (cosa è successo e quando), accanto — non al posto — di A-MEM,
+che resta invariata (`autoMemoryEnabled`, `save_memory` / `search_memory`, `search_conversations`). Codice:
+`backend/src/recordare/`, sulla **libreria client** di Recordare (`backend/src/recordare/client/`, copia sincronizzata
+dal `packages/client` di Recordare — mai modificata qui): SDK MCP ufficiale, errori RFC 9457, `Retry-After`, contesto
+di traccia W3C; le richieste passano da `safeFetch`.
+
+```bash
+RECORDARE_URL=http://recordare:8080   # spento finché non sono impostati entrambi
+RECORDARE_API_KEY=rk_...              # chiave client Recordare (scope ingest + mcp + read + write), segreta
+RECORDARE_OUTBOX_POLL_MS=3000         # opzionale
+```
+
+- **Interruttore per utente** `users.episodicMemoryEnabled` (default spento; Impostazioni → Memoria, visibile solo
+  se Recordare è configurato; `PATCH /api/users/me {episodicMemoryEnabled}`). Governa solo il lato Arkimede: **il
+  consenso dentro Recordare lo dà l'amministratore di Recordare** (`episodicEnabled` per persona). `GET api/v1/me` lo
+  riporta; Arkimede lo tiene in cache (5 min, ricontrollato quando cambia l'interruttore e a ogni lettura del profilo)
+  ed espone `episodicMemoryStatus`: `off | waiting_activation | active | unknown` (Recordare non raggiungibile). Con
+  l'interruttore acceso e il consenso non dato, le Impostazioni mostrano "In attesa di attivazione da parte
+  dell'amministratore di Recordare".
+- **Identità**: al primo uso `GET api/v1/me` con `X-Recordare-User: <id utente Arkimede>` (Recordare crea la persona
+  in automatico), l'`ownerId` viene salvato in `users.recordareOwnerId` e il nome della persona segue il profilo di
+  Arkimede (`PATCH api/v1/me {displayName}`, sincronizzato a ogni controllo). Il tipo di memoria — personale, o
+  condivisa da chi usa l'account (l'entità di Recordare, es. l'utente voice) — si sceglie nelle Impostazioni finché la
+  memoria è vuota; gli admin trovano lì il link a Recordare Atlas. Gli span di tracing portano `recordare.owner_id` quando è noto (solo valore in
+  cache).
+- **Ingest tramite outbox**: un subscriber TypeORM su `Message` scrive una riga `recordare_outbox` nella stessa
+  transazione di ogni messaggio salvato (protetta da savepoint: un errore dell'outbox non fa mai fallire la chat), per
+  le chat il cui proprietario ha l'interruttore acceso. **Nulla viene accumulato prima del consenso**: i proprietari
+  con consenso noto come spento sono esclusi nella stessa istruzione (sconosciuto → accodato; Recordare risponde
+  `stored: false` e la riga viene scartata). I turni di errore della chat (i messaggi "⚠️ …" salvati sui fallimenti,
+  dentro `withoutRecordareIngest`) non vengono mai inviati. Un worker in background le invia a
+  `POST api/v1/ingest/messages` (conversazione = id chat, externalId = id messaggio → idempotente; chiamate ai tool
+  come messaggi `tool`; altri utenti di una chat condivisa come partecipanti `other`), con la politica di consegna
+  della libreria (back-off esponenziale con jitter, `Retry-After` di Recordare rispettato); dopo
+  12 tentativi (o un 400/413/422) la riga viene parcheggiata (`parkedAt`, `lastError`, avviso nel log). Rewind ed
+  eliminazione delle chat vengono propagati (`DELETE …/messages/{id}`, `DELETE …/conversations/{id}`). Il percorso
+  della richiesta non attende mai Recordare.
+- **Tool di richiamo** (solo per utenti con l'interruttore acceso, in una chat salvata, e non mentre il consenso è
+  noto come spento): `recordare_search_episodes`, `recordare_search_memory`, `recordare_resolve_period`,
+  `recordare_remember`, `recordare_correct_episode`, `recordare_forget_episode` (niente `log_episode`: l'ingest cattura
+  già la conversazione, registrare in più duplicherebbe) — costruiti dai tool che Recordare elenca via MCP (i suoi
+  nomi, descrizioni e JSON Schema, con prefisso `recordare_`), chiamati con la libreria client (`/mcp`, streamable
+  HTTP, una sessione per utente e chat). Ogni richiesta porta `X-Recordare-User` e
+  `X-Recordare-Conversation: <id chat>`, impostati nel codice (il contesto di chi legge: senza, Recordare non
+  restituisce nulla). Le righe outbox in sospeso della chat vengono inviate (≤3 s) prima di una chiamata.
+- **Contesto di memoria** (opzione dell'agente `memoryContext`, Agenti → agente, spenta di default): prima di ogni
+  risposta l'agente riceve da Recordare i ricordi dell'utente pertinenti al messaggio (`POST api/v1/context`, un blocco
+  recintato `<memory-context>` marcato come dati) in fondo al prompt di sistema — non in cache, dopo gli altri blocchi per
+  richiesta; attesa limitata (2,5 s, il turno corrente inviato prima), non fa mai fallire la risposta. Utile dove conta la
+  latenza (l'agente vocale): l'agente può rispondere senza un giro di strumento di memoria. Misurato nella WORK_PLAN 5.7
+  di Recordare.
+- **Diario** (Impostazioni → Diario, visibile quando Recordare è configurato): cosa ricorda Recordare dell'utente —
+  linea del tempo (ricerca, dettaglio con i messaggi originali e le versioni precedenti, correggi, dimentica), il diario
+  notturno del giorno / mese, chi è (fatti con storia, note: fissa, elimina), i piani e ciò che attende conferma (fatti e
+  note dedotti: conferma / rifiuta). Proxy nel backend `api/recordare/diary/*` sulla API di lettura di Recordare, sempre
+  per l'utente collegato (il browser non vede mai la chiave di Recordare); per le modifiche la chiave richiede lo scope
+  `write`.
+
+### Tracce OpenTelemetry GenAI (opzionale)
+
+Il backend può emettere tracce OpenTelemetry del lavoro degli agenti, secondo le
+[convenzioni semantiche GenAI](https://opentelemetry.io/docs/specs/semconv/gen-ai/) (`backend/src/observability/`).
+**Spento finché non è impostato un endpoint OTLP**: nessun SDK, nessun exporter, nessun callback handler — costo zero,
+nessun cambio di comportamento.
+
+```bash
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://collector:4318/v1/traces  # oppure OTEL_EXPORTER_OTLP_ENDPOINT (URL base)
+OTEL_EXPORTER_OTLP_TRACES_HEADERS=Authorization=Bearer <token>      # opzionale
+OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf                    # default; supportato anche http/json
+OTEL_SERVICE_NAME=arkimede                                          # default
+```
+
+Span: `invoke_agent {agente}` attorno a ogni turno di chat (nome agente = `APP_NAME`, `gen_ai.conversation.id` = id
+della chat), automazione headless, run di un agente multi-agent e run di un team (sotto-agenti e agenti/team delegati
+come tool si annidano sotto lo span chiamante); `chat {modello}` per ogni chiamata LLM (`gen_ai.request.model`,
+`gen_ai.response.model`, `gen_ai.provider.name`, `gen_ai.usage.input_tokens` / `output_tokens`); `execute_tool {tool}`
+per ogni esecuzione di tool. `user.id` = id utente Arkimede. Gli errori impostano lo stato ERROR con solo `error.type`.
+L'export è a lotti in background (BatchSpanProcessor): il percorso della richiesta non attende mai la rete.
+
+Span vocali (le convenzioni GenAI non definiscono un'operazione per il parlato): `transcription {modello}` attorno a
+ogni speech-to-text e `speech {modello}` attorno a ogni text-to-speech, aperti in un solo punto ciascuno
+(`TranscriptionService.transcribe`, sintesi di `TtsService`), così ogni percorso è coperto — microfono della chat
+(`POST /api/transcription`), lettura ad alta voce e satelliti vocali (`POST /api/openai/v1/audio/transcriptions`,
+`/audio/speech`), server Wyoming (asr / tts) e test TTS dell'admin. Kind CLIENT (i motori sono servizi remoti).
+Attributi: `voice.operation` = `transcription` | `speech`; `gen_ai.request.model` (modello STT; modello TTS, o l'id
+della voce per il Piper interno); `gen_ai.provider.name` quando noto (`whisper` / `piper` per i servizi inclusi,
+`openai`, `groq`; omesso per gli endpoint OpenAI-compatible); `voice.audio_seconds` (durata dell'audio in ingresso
+STT / in uscita TTS, solo se l'audio è WAV — letta dall'header); `voice.characters` (lunghezza del testo TTS, un
+conteggio); `user.id` e `recordare.owner_id` quando l'utente è noto (le richieste Wyoming asr / tts da Home Assistant
+agiscono per l'utente di conversazione Wyoming quando è configurato, altrimenti nessuno). Uno span vocale si annida sotto lo span attivo quando c'è; le rotte HTTP e il protocollo Wyoming (una
+richiesta per connessione: asr, handle e tts arrivano separati) rendono ogni chiamata vocale una traccia a sé, mentre
+il turno `handle` di Wyoming è una traccia `invoke_agent` propria.
+
+**Solo metadati — regola rigida.** Gli span portano nomi, modelli, provider, conteggi di token, durate dell'audio,
+conteggi di caratteri, durate, stato e id. Prompt, messaggi, istruzioni di sistema, risposte, argomenti e risultati
+dei tool, trascrizioni, testo da pronunciare e audio non vengono mai registrati (nessun `gen_ai.input.messages`,
+`gen_ai.output.messages`, `gen_ai.system_instructions`, `gen_ai.tool.call.arguments`, `gen_ai.tool.call.result`),
+nemmeno dietro un flag.
+
+Esempio — Recordare Atlas come visualizzatore:
+
+```bash
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://<host atlas>:5175/v1/traces
+OTEL_EXPORTER_OTLP_TRACES_HEADERS=Authorization=Bearer <ATLAS_INGEST_TOKEN>
+```
+
 ---
 
 ## 13. Avvio Sviluppo
@@ -1921,6 +2058,7 @@ dalla config LLM default. Riferimento: [CLI_it.md](CLI_it.md).
 | ~~CRON, attivazioni una tantum~~ | ✅ Fatto  | Confluito nei trigger `cron`/`scheduled` dei [Flows](#flows) e nell'[Auto-Scheduling](#auto-scheduling-design) (BullMQ + Redis)                                                                                                                                                                                  |
 | ~~Multilingua~~                  | ✅ Fatto  | **IT + EN** su tre assi: UI frontend (react-i18next, ~20 namespace, copertura 100%), errori backend (nestjs-i18n + filtro globale `i18n-exception.filter`, 18 namespace per-modulo), lingua di risposta dell'assistente. Persistenza su `User.language`; default = auto-detect browser, fallback `en`. Convenzioni in `I18N_CONVENTIONS.md`                                                                                       |
 | ~~Multi Agent~~                  | ✅ Fatto  | **Implementato (Livello 2)** → [sezione dedicata](#multi-agent-livello-2). Modulo `agents/`: agenti riusabili + team (supervisor/sequential/parallel), `chats.agentTeamId`, UI Agenti/Team agenti. Resta solo l'Opzione 4 (StateGraph letterale)                                                                  |
+| Skill di monitoraggio del sistema | TODO    | Richiesta del proprietario 2026-10-08, dopo che un log di Kodi da 175 GB ha riempito il disco di un server fermando Postgres e Redis. Una skill (prima Linux) che sorveglia tutto l'host — disco, memoria, swap, carico, container, log fuori controllo — e invia avvisi (Telegram / notifica) secondo soglie scelte dall'utente. **Prima di crearla, cercare se esiste già una skill o un server MCP che lo fa** (registri di skill, server MCP, strumenti come Netdata / Glances) e riusarla se la licenza lo permette. Sostituisce uno script provvisorio privato su quel server |
 
 ---
 
@@ -1963,6 +2101,7 @@ sentence-transformers Apache-2.0, torch BSD-3, faster-whisper MIT, CTranslate2 M
 
 | Modello | Uso | Licenza |
 |---|---|---|
+| `BAAI/bge-m3` | Embedding testo (default) | MIT |
 | `mixedbread-ai/mxbai-embed-large-v1` | Embedding testo | Apache-2.0 |
 | OpenAI Whisper (via faster-whisper) | Trascrizione audio | MIT |
 

@@ -14,6 +14,7 @@ import { encrypt, decrypt } from '../custom-tools/crypto.utils';
 import { AuditService } from '../audit/audit.service';
 import { LlmMetricsService } from '../usage/llm-metrics.service';
 import { LlmDispatcherService } from '../usage/llm-dispatcher.service';
+import { getGenAiTraceHandler, registerGenAiModel } from '../observability/genai-tracing';
 
 export interface CreateLlmConfigDto {
   name: string;
@@ -347,6 +348,16 @@ export class LlmConfigsService {
       (model as any).callbacks = [
         ...(Array.isArray((model as any).callbacks) ? (model as any).callbacks : []),
         handler,
+      ];
+    }
+    // OpenTelemetry GenAI traces (opt-in, null when off): the shared handler rides
+    // along model.callbacks, which every graph call site re-passes via config.
+    const traceHandler = getGenAiTraceHandler();
+    if (traceHandler) {
+      registerGenAiModel(entity.model ?? (model as any).model ?? null, entity.provider);
+      (model as any).callbacks = [
+        ...(Array.isArray((model as any).callbacks) ? (model as any).callbacks : []),
+        traceHandler,
       ];
     }
     // Request scheduler (P1): per-config concurrency cap; pass-through when

@@ -50,6 +50,14 @@ class UpdateProfileDto {
   @IsOptional() @IsBoolean()
   autoMemoryEnabled?: boolean;
 
+  /** Enable episodic memory in Recordare (separate from autoMemoryEnabled). */
+  @IsOptional() @IsBoolean()
+  episodicMemoryEnabled?: boolean;
+
+  /** Personal memory, or shared by everyone using the account (Recordare `entity`); only while it is empty. */
+  @IsOptional() @IsIn(['human', 'entity'])
+  episodicMemoryKind?: 'human' | 'entity';
+
   /** Override memory extraction threshold (no. of messages); null = global default. */
   @IsOptional() @IsInt() @Min(1) @Max(100) @Type(() => Number)
   memoryThreshold?: number | null;

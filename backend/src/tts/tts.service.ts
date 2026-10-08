@@ -15,6 +15,9 @@
  *
  * Cache: the OpenAI client is built lazily and invalidated with
  * invalidateCache() when the admin saves a new configuration.
+ *
+ * Tracing: every synthesis runs in a `speech {model}` OTel span (opt-in,
+ * metadata only — never the text to speak nor the audio).
  */
 import { Injectable, Logger, BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -22,6 +25,7 @@ import OpenAI from 'openai';
 import { AppConfigService } from '../app-config/app-config.service';
 import { TtsProvider } from '../app-config/app-config.entity';
 import { isInternalServiceAvailable } from '../common/internal-service-probe.util';
+import { wavDurationSeconds, withVoiceSpan } from '../observability/genai-tracing';
 
 /** Output formats accepted by the route (v1: piper only produces wav). */
 export type TtsFormat = 'wav' | 'mp3';
@@ -56,12 +60,18 @@ const DEFAULT_BASE_URLS: Partial<Record<TtsProvider, string>> = {
 
 const TTS_PROVIDERS: TtsProvider[] = ['internal', 'openai', 'openai-compatible'];
 
+/** Provider → gen_ai.provider.name on the trace span (openai-compatible: real backend unknown). */
+const TRACE_PROVIDER: Partial<Record<TtsProvider, string>> = {
+  internal: 'piper',
+  openai:   'openai',
+};
+
 @Injectable()
 export class TtsService {
   private readonly logger = new Logger(TtsService.name);
 
   /** Cached OpenAI client + associated model/voice. Reset by invalidateCache(). */
-  private cached: { client: OpenAI; model: string; voice: string | null } | null = null;
+  private cached: { client: OpenAI; model: string; voice: string | null; provider: TtsProvider } | null = null;
 
   constructor(
     private readonly appConfig: AppConfigService,
@@ -168,7 +178,7 @@ export class TtsService {
   }
 
   /** Builds (or reuses) the OpenAI client for speech synthesis. */
-  private async getClient(): Promise<{ client: OpenAI; model: string; voice: string | null }> {
+  private async getClient(): Promise<{ client: OpenAI; model: string; voice: string | null; provider: TtsProvider }> {
     if (this.cached) return this.cached;
     const config = await this.loadConfig();
 
@@ -177,7 +187,7 @@ export class TtsService {
       apiKey: config.apiKey ?? 'not-needed',
       ...(config.baseUrl ? { baseURL: config.baseUrl } : {}),
     });
-    this.cached = { client, model: config.model, voice: config.voice };
+    this.cached = { client, model: config.model, voice: config.voice, provider: config.provider };
     return this.cached;
   }
 
@@ -199,27 +209,40 @@ export class TtsService {
     if (!text?.trim()) {
       throw new BadRequestException('tts.emptyInput');
     }
-    const { client, model, voice: defaultVoice } = await this.getClient();
+    const { client, model, voice: defaultVoice, provider } = await this.getClient();
+    const effectiveVoice = voice ?? defaultVoice ?? '';
 
-    try {
-      const res = await client.audio.speech.create({
-        model,
-        input: text,
-        // Empty string → the internal piper-service falls back to its own default voice.
-        voice: (voice ?? defaultVoice ?? '') as any,
-        response_format: format,
-      });
-      return Buffer.from(await res.arrayBuffer());
-    } catch (err: any) {
-      const status = err?.status ?? err?.response?.status;
-      const detail = err?.error?.detail ?? err?.response?.data?.error?.message ?? err?.message ?? 'unknown error';
-      this.logger.error(`Speech synthesis failed: ${detail}`);
-      // Surface provider-side rejections (unknown voice, unsupported format) as 400s.
-      if (status === 400 || status === 404) {
-        throw new BadRequestException(typeof detail === 'string' ? detail : 'tts.failed');
-      }
-      throw new ServiceUnavailableException('tts.failed');
-    }
+    return withVoiceSpan(
+      () => ({
+        operation: 'speech',
+        // Piper's "model" is a placeholder: the voice id is the real model there.
+        model: provider === 'internal' ? effectiveVoice || model : model,
+        provider: TRACE_PROVIDER[provider], remote: true,
+        characters: text.length,
+      }),
+      async () => {
+        try {
+          const res = await client.audio.speech.create({
+            model,
+            input: text,
+            // Empty string → the internal piper-service falls back to its own default voice.
+            voice: effectiveVoice as any,
+            response_format: format,
+          });
+          return Buffer.from(await res.arrayBuffer());
+        } catch (err: any) {
+          const status = err?.status ?? err?.response?.status;
+          const detail = err?.error?.detail ?? err?.response?.data?.error?.message ?? err?.message ?? 'unknown error';
+          this.logger.error(`Speech synthesis failed: ${detail}`);
+          // Surface provider-side rejections (unknown voice, unsupported format) as 400s.
+          if (status === 400 || status === 404) {
+            throw new BadRequestException(typeof detail === 'string' ? detail : 'tts.failed');
+          }
+          throw new ServiceUnavailableException('tts.failed');
+        }
+      },
+      (audio) => (format === 'wav' ? wavDurationSeconds(audio) : undefined),
+    );
   }
 
   /**

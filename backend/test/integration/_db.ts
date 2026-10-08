@@ -64,7 +64,7 @@ export interface TestDb {
 
 /** Starts the container, creates the uuid extension and synchronizes the schema. */
 export async function startTestDb(): Promise<TestDb> {
-  const container = await new PostgreSqlContainer('postgres:16-alpine').start();
+  const container = await new PostgreSqlContainer('pgvector/pgvector:pg16').start();
 
   const dataSource = new DataSource({
     type: 'postgres',

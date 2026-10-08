@@ -8,7 +8,7 @@ import json
 import urllib.request
 
 BASE_URL = "http://localhost:8000"
-MODEL    = "mixedbread-ai/mxbai-embed-large-v1"
+MODEL    = "BAAI/bge-m3"
 
 TEST_TEXT = (
     "This is a test document to verify that the embedding service "

@@ -55,6 +55,9 @@
     "toolPickerError": "Could not load the available tools.",
     "toolPickerEmpty": "No tools available. Configure MCP servers, skills, flows or other agents.",
     "toolPickerHint": "{{count}} selected. Tick individual tools or a whole group.",
-    "toolPickerWholeGroup": "whole group"
+    "toolPickerWholeGroup": "whole group",
+    "memoryContext": "Memory context",
+    "memoryContextText": "Before each answer, the relevant memories from the episodic memory",
+    "memoryContextTitle": "If enabled, before each answer Recordare provides the user's memories relevant to the message (only relevant ones, at most ~300 tokens), appended at the end of the prompt: the agent can answer without calling a memory tool. Useful where latency matters (voice). Requires the user's episodic memory to be on."
   }
 }

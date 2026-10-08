@@ -225,7 +225,7 @@
     "history": "History ({{count}})"
   },
   "shared": {
-    "info": "These skills are installed by other users and made available to everyone. They're already active in the agent — no need to install them. The owner controls configuration, assignments and updates.",
+    "info": "These skills are installed by other users and made available to everyone. \"Enabled\" ones are already available in the agent — no need to install them; \"Disabled\" ones were switched off by their owner. The owner controls activation, configuration, assignments and updates.",
     "emptyTitle": "No shared skill available",
     "emptyHint": "When a user shares a skill and it's approved, it will appear here.",
     "badge": "Shared",
@@ -241,5 +241,11 @@
   },
   "scopeBadge": {
     "personal": "Personal"
+  },
+  "enabledBadge": {
+    "on": "Enabled",
+    "off": "Disabled",
+    "onHint": "Switched on by its owner: agents can use it",
+    "offHint": "Switched off by its owner: no agent can use it for now"
   }
 }

@@ -34,6 +34,7 @@ class UpsertAgentDto {
   @IsOptional() @IsObject() toolFilter?: AgentToolFilter;
   @IsOptional() @IsInt() maxIterations?: number | null;
   @IsOptional() @IsBoolean() exposeAsTool?: boolean;
+  @IsOptional() @IsBoolean() memoryContext?: boolean;
   @IsOptional() @IsIn(['personal', 'team', 'org']) scope?: AgentScope;
   @IsOptional() @IsString() teamId?: string | null;
 }

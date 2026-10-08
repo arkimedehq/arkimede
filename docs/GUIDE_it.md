@@ -212,7 +212,7 @@ Per portare un deployment attivo a una versione più recente:
 
 Fa il backup dei dati, `git pull`, ricostruisce e riavvia — preservando i volumi e il `.env`. Flag: `--yes` (nessuna conferma), `--no-backup`.
 
-Sotto il cofano, in ordine: **backup** (`scripts/backup.sh`) → **`git pull --ff-only`** → segnala eventuali **nuove variabili di `.env.example`** assenti nel tuo `.env` → **ricostruisce le immagini job del broker** (`pa-runner` / `pa-egress-proxy`) *solo se* il tuo profilo le usa e `runner/` o `egress-proxy/` sono cambiati → **`docker compose up -d --build`** → **health check**.
+Sotto il cofano, in ordine: **backup** (`scripts/backup.sh`) → **`git pull --ff-only`** → segnala eventuali **nuove variabili di `.env.example`** assenti nel tuo `.env` → **ricostruisce le immagini job del broker** (`pa-runner` / `pa-egress-proxy`) *solo se* il tuo profilo le usa e `runner/` o `egress-proxy/` sono cambiati → **`docker compose up -d --build`** → **controllo collation di Postgres** (`scripts/postgres-to-pgvector.sh`, vedi sotto) → **health check**.
 
 Quattro cose lo rendono sicuro, utili da capire se aggiorni a mano:
 
@@ -220,6 +220,11 @@ Quattro cose lo rendono sicuro, utili da capire se aggiorni a mano:
 - **Le migration sono automatiche.** Il backend applica le migration pendenti all'avvio (`migrationsRun: true`) — nessuno step manuale sul DB.
 - **Il `git pull` è obbligatorio e separato.** `install.sh` e `update.sh` buildano dalla working tree così com'è; né `install.sh` né un semplice `up --build` scaricano codice nuovo. Solo `git pull` lo fa. (`.env`, `scripts/compose.sh` e `scripts/.compose-profile` sono gitignored, quindi il pull non li sovrascrive.)
 - **Le immagini del broker NON vengono ricostruite da `up --build`.** `pa-runner` (L2/L3) e `pa-egress-proxy` (L3) sono referenziate per nome-immagine, non con `build:`. Se `runner/` o `egress-proxy/` sono cambiati, ricostruiscile a mano: `docker build -t pa-runner ./runner` e, per L3, `docker build -t pa-egress-proxy ./egress-proxy`. `update.sh` lo fa per te quando il loro sorgente è cambiato.
+
+> **Aggiornare un'installazione creata prima di ottobre 2026** — due punti da gestire una volta sola:
+>
+> - **Immagine di Postgres.** Il default è passato da `postgres:16-alpine` a `pgvector/pgvector:pg16`. Stessa versione major e stessa cartella dati, ma libreria C diversa: gli indici sul testo costruiti con alpine vanno ricostruiti una volta, altrimenti le ricerche su colonne di testo possono restituire risultati sbagliati senza errori. `update.sh` lancia `./scripts/postgres-to-pgvector.sh` per te (backup, `REINDEX`, verifica; non fa nulla se non serve). **Se aggiorni a mano, lancialo tu** dopo `up -d --build`. Finché non lo fai, il backend all'avvio logga un avviso *collation version mismatch*.
+> - **Modello di embedding.** Il default è passato da `mixedbread-ai/mxbai-embed-large-v1` a `BAAI/bge-m3`. Hanno entrambi 1024 dimensioni ma i vettori non sono intercambiabili: le collection RAG **non** vengono ricostruite in automatico e la qualità della ricerca crolla se il modello cambia sotto vettori esistenti. Se il tuo `.env` imposta `EMBEDDING_MODEL` (lo fa ogni `.env` creato da `.env.example`), non cambia nulla. Se non lo imposta, aggiungi `EMBEDDING_MODEL=mixedbread-ai/mxbai-embed-large-v1` per tenere il modello vecchio, oppure tieni bge-m3 e lancia il re-embed admin (`GET /api/admin/vector-db/reembed/plan`, poi `POST /api/admin/vector-db/reembed`). All'avvio il backend avvisa quando il modello in uso è diverso da quello che ha indicizzato i vettori. La prima build scarica ~2,3 GB di pesi del modello.
 
 **Equivalente manuale / non interattivo** (senza `update.sh`):
 
@@ -231,6 +236,7 @@ diff <(grep -oE '^[A-Z_]+=' .env.example | sort) <(grep -oE '^[A-Z_]+=' .env | s
 docker build -t pa-runner ./runner                    # solo se usi L2/L3 e runner/ è cambiato
 docker build -t pa-egress-proxy ./egress-proxy        # solo se usi L3 e egress-proxy/ è cambiato
 ./scripts/compose.sh up -d --build                    # rebuild + restart; le migration girano al boot
+./scripts/postgres-to-pgvector.sh                     # idempotente: ricostruisce gli indici sul testo una volta dopo il passaggio alpine → pgvector
 curl -s localhost:3000/api/health                     # verifica
 ```
 
@@ -642,7 +648,7 @@ Quando un file viene eliminato dall'UI, i vettori corrispondenti vengono rimossi
 
 Alcuni modelli richiedono prefissi diversi per query vs documenti:
 - Esempio nomic-embed-text: `search_query: ` per query, `search_document: ` per doc
-- Per `mxbai-embed-large-v1`: prefissi non necessari
+- Per `BAAI/bge-m3` (default) e `mxbai-embed-large-v1`: prefissi non necessari
 
 ---
 
@@ -1410,7 +1416,11 @@ Arkimede può esporre i provider STT/TTS configurati con il protocollo Wyoming
   `<host-arkimede>:10300` → scegli i nuovi STT/TTS nella pipeline di Assist.
 
 Funziona con qualsiasi provider scelto nel pannello (Whisper/Piper interni o
-cloud). Scegliendo nella stessa card un **utente di conversazione** (e
+cloud). Il Piper interno parla di default con `it_IT-serena-medium` (vince
+`PIPER_VOICE` o una voce impostata nel pannello). Le installazioni che si
+affidavano al default precedente (`it_IT-paola-medium`) passano a serena alla
+prossima ricostruzione dell'immagine; impostare `PIPER_VOICE=it_IT-paola-medium`
+per tenere paola. Scegliendo nella stessa card un **utente di conversazione** (e
 facoltativamente un suo agente) l'hub ottiene anche Arkimede come agente di
 conversazione: l'intera pipeline vocale gira su Arkimede senza componenti
 aggiuntivi sull'hub. Con **Salva conversazioni** attivo, ogni conversazione

@@ -41,6 +41,7 @@ import { TtsService } from '../tts/tts.service';
 import { InvocationsService } from '../invocations/invocations.service';
 import { ExternalChatsService } from '../chats/external-chats.service';
 import { SpeechRequestDto } from './openai-audio.dto';
+import { withTraceUser } from '../observability/genai-tracing';
 import {
   agentSlug, chunkFrame, completionBody, errorBody, mapOpenAiMessages,
   OpenAiChatRequest, toOpenAiUsage, usageFrame,
@@ -293,7 +294,7 @@ export class OpenAiCompatController {
 
     let text: string;
     try {
-      text = await this.transcription.transcribe(file.buffer, file.originalname || 'audio.webm', lang);
+      text = await withTraceUser(user.id, () => this.transcription.transcribe(file.buffer, file.originalname || 'audio.webm', lang));
     } catch (err: any) {
       log(null, err?.message ?? 'transcription failed');
       throw err;
@@ -332,7 +333,7 @@ export class OpenAiCompatController {
 
     let audio: Buffer;
     try {
-      audio = await this.tts.synthesize(dto.input, dto.voice, format);
+      audio = await withTraceUser(user.id, () => this.tts.synthesize(dto.input, dto.voice, format));
     } catch (err: any) {
       log(null, err?.message ?? 'speech synthesis failed');
       throw err;

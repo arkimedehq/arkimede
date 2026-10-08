@@ -3,13 +3,15 @@
 
 import {
   Injectable, NotFoundException, ConflictException, UnauthorizedException,
-  BadRequestException,
+  BadRequestException, Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, Not, Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { User, UserRole, UserStatus } from './users.entity';
 import { ToolLoadingStrategy, ToolSchemaFormat } from '../app-config/app-config.entity';
+import { recordareConfig } from '../recordare/recordare.config';
+import { type EpisodicMemoryKind, RecordareIdentityService, RecordareMemoryNotEmptyError } from '../recordare/recordare-identity.service';
 
 export type SafeUser = Omit<User, 'password' | 'projects' | 'chats' | 'files'>;
 
@@ -31,6 +33,7 @@ export interface ListUsersFilter {
 export class UsersService {
   constructor(
     @InjectRepository(User) private readonly repo: Repository<User>,
+    @Optional() private readonly recordare?: RecordareIdentityService,
   ) {}
 
   create(data: Partial<User>) {
@@ -67,12 +70,27 @@ export class UsersService {
         showTokenCount: true,
         autoMemoryEnabled: true,
         memoryThreshold: true,
+        episodicMemoryEnabled: true,
         createdAt: true,
         updatedAt: true,
       },
     });
     if (!user) throw new NotFoundException('users.notFound');
-    return user as SafeUser;
+    // Episodic memory (Recordare): available = configured on this installation (the UI
+    // shows the switch only then); status = off | waiting_activation | active | unknown
+    // (re-checked with Recordare on every profile read, bounded wait).
+    const episodicMemoryAvailable = recordareConfig() !== null;
+    const episodicMemoryStatus = this.recordare && episodicMemoryAvailable
+      ? await this.recordare.status(id, user.episodicMemoryEnabled)
+      : 'off';
+    // Kind: personal or shared by everyone using the account. Atlas shows every person's
+    // activity, so its address is given to admins only.
+    const details = this.recordare && episodicMemoryStatus !== 'off' ? this.recordare.details(id) : null;
+    return {
+      ...user, episodicMemoryAvailable, episodicMemoryStatus,
+      episodicMemoryKind: details?.kind ?? null,
+      recordareAtlasUrl: user.role === 'admin' ? (details?.atlasUrl ?? null) : null,
+    } as SafeUser;
   }
 
   async updateProfile(
@@ -91,6 +109,8 @@ export class UsersService {
       showTokenCount?: boolean;
       autoMemoryEnabled?: boolean;
       memoryThreshold?: number | null;
+      episodicMemoryEnabled?: boolean;
+      episodicMemoryKind?: EpisodicMemoryKind;
     },
   ): Promise<SafeUser> {
     const user = await this.repo.findOne({ where: { id } });
@@ -112,8 +132,20 @@ export class UsersService {
     if (dto.showTokenCount      !== undefined) user.showTokenCount      = dto.showTokenCount;
     if (dto.autoMemoryEnabled   !== undefined) user.autoMemoryEnabled   = dto.autoMemoryEnabled;
     if (dto.memoryThreshold     !== undefined) user.memoryThreshold     = dto.memoryThreshold ?? null;
+    if (dto.episodicMemoryEnabled !== undefined) user.episodicMemoryEnabled = dto.episodicMemoryEnabled;
 
     await this.repo.save(user);
+    // Switch or name changed: forget the cached Recordare state, getProfile re-checks it (and syncs the name).
+    if (dto.episodicMemoryEnabled !== undefined || dto.name !== undefined) this.recordare?.invalidate(id);
+    if (dto.episodicMemoryKind !== undefined) {
+      if (!user.episodicMemoryEnabled || !this.recordare) throw new BadRequestException('users.episodicMemoryOff');
+      try {
+        await this.recordare.setKind(id, dto.episodicMemoryKind);
+      } catch (err) {
+        if (err instanceof RecordareMemoryNotEmptyError) throw new ConflictException('users.memoryNotEmpty');
+        throw err;
+      }
+    }
     return this.getProfile(id);
   }
 

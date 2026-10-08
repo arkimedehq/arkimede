@@ -24,9 +24,19 @@ RUN if [ "$EMBEDDING_DEVICE" = "cpu" ]; then \
     fi \
     && pip install --no-cache-dir -r requirements.txt
 
-# Pre-download the model into the image (avoids a download on first startup)
-ARG MODEL_NAME=mixedbread-ai/mxbai-embed-large-v1
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${MODEL_NAME}')"
+# Pre-download the model into the image (avoids a download on first startup).
+# Default BAAI/bge-m3 (~2.3 GB of weights → the image grows accordingly); an existing
+# install keeps the model its .env names (EMBEDDING_MODEL). Changing the model of an
+# install that already has vectors needs the admin re-embed job.
+ARG MODEL_NAME=BAAI/bge-m3
+# Large single-file downloads (bge-m3 ships one 2.27 GB pytorch_model.bin) fail on the
+# hub's default 10 s read timeout over slow links: raise the timeouts and retry the step.
+# Only the files the model needs are fetched (not the repo's onnx/ copy).
+ENV HF_HUB_DOWNLOAD_TIMEOUT=120 HF_HUB_ETAG_TIMEOUT=60
+RUN for attempt in 1 2 3; do \
+      python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${MODEL_NAME}')" && exit 0; \
+      echo "model download failed (attempt $attempt), retrying in 15 s"; sleep 15; \
+    done; exit 1
 
 COPY main.py .
 

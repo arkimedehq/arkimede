@@ -48,6 +48,7 @@ import { InvocationsService } from '../invocations/invocations.service';
 import { makeToolCollector } from '../invocations/tool-collector';
 import { ExternalChatsService } from '../chats/external-chats.service';
 import { APP_NAME, APP_NAME_SLUG } from '../config/app.config';
+import { withTraceUser } from '../observability/genai-tracing';
 import {
   WyomingDecoder, WyomingEvent, encodeEvent, pcmToWav, parseWav, chunkPcm, PcmFormat,
 } from './wyoming.protocol';
@@ -339,8 +340,9 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
         const pcm = Buffer.concat(asr.chunks);
         asr.chunks = []; asr.bytes = 0;
         const t0 = Date.now();
+        // Speech requests act for the configured conversation user (trace attribution only).
         const text = pcm.length
-          ? await this.transcription.transcribe(pcmToWav(pcm, asr.fmt), 'audio.wav', asr.language)
+          ? await withTraceUser(this.handle?.userId, () => this.transcription.transcribe(pcmToWav(pcm, asr.fmt), 'audio.wav', asr.language))
           : '';
         this.logger.log(`Wyoming: transcript for ${ip} (${pcm.length} bytes → ${text.length} chars) in ${Date.now() - t0}ms`);
         this.send(socket, { type: 'transcript', data: { text, ...(asr.language ? { language: asr.language } : {}) } });
@@ -411,7 +413,7 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
         const text  = String(ev.data?.text ?? '');
         const voice = typeof ev.data?.voice?.name === 'string' ? ev.data.voice.name : undefined;
         const t0 = Date.now();
-        const wav = await this.tts.synthesize(text, voice, 'wav');
+        const wav = await withTraceUser(this.handle?.userId, () => this.tts.synthesize(text, voice, 'wav'));
         const { fmt, pcm } = parseWav(wav);
         this.send(socket, { type: 'audio-start', data: { ...fmt, timestamp: 0 } });
         let ts = 0;

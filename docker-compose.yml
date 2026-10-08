@@ -20,7 +20,12 @@
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # pgvector's image (Debian/glibc) instead of postgres:16-alpine (musl): same major,
+    # env vars and data path, plus the `vector` extension for services co-hosted on this
+    # Postgres (e.g. Recordare, own database + user). EXISTING data dirs created by the
+    # alpine image: run ./scripts/postgres-to-pgvector.sh once (text indexes must be rebuilt
+    # because glibc sorts text differently). Fresh installs need nothing.
+    image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
@@ -59,13 +64,13 @@ services:
       context: ./embedding-service
       dockerfile: Dockerfile
       args:
-        MODEL_NAME: ${EMBEDDING_MODEL:-mixedbread-ai/mxbai-embed-large-v1}
+        MODEL_NAME: ${EMBEDDING_MODEL:-BAAI/bge-m3}
         # Also a build-arg, not just runtime: on 'cpu' the image is built without the
         # CUDA wheels (see embedding-service/Dockerfile). Rebuild after changing it.
         EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-cpu}
     restart: unless-stopped
     environment:
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-mixedbread-ai/mxbai-embed-large-v1}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-m3}
       EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-cpu}
       EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-32}
       EMBEDDING_MAX_SEQ_LENGTH: ${EMBEDDING_MAX_SEQ_LENGTH:-}
@@ -103,10 +108,10 @@ services:
       context: ./piper-service
       dockerfile: Dockerfile
       args:
-        PIPER_VOICE: ${PIPER_VOICE:-it_IT-paola-medium}
+        PIPER_VOICE: ${PIPER_VOICE:-it_IT-serena-medium}
     restart: unless-stopped
     environment:
-      PIPER_VOICE: ${PIPER_VOICE:-it_IT-paola-medium}
+      PIPER_VOICE: ${PIPER_VOICE:-it_IT-serena-medium}
       PIPER_MODELS_DIR: /models
       PIPER_OFFLINE: ${PIPER_OFFLINE:-0}
     volumes:

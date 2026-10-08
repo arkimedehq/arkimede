@@ -36,6 +36,7 @@ import { Agent } from './agent.entity';
 import { AgentTeam } from './agent-team.entity';
 import { LlmUsage, emptyUsage, addUsage, sumUsageFromMessages, usageFromResult } from '../common/llm-usage.util';
 import { runWithLlmCallContext, getLlmCallContext } from '../usage/llm-call-context';
+import { withAgentSpan, withRunParent } from '../observability/genai-tracing';
 
 export interface TeamStep { agent: string; role: string | null; output: string }
 export interface TeamRunResult {
@@ -67,13 +68,15 @@ export class MultiAgentService {
 
   async runTeamById(teamId: string, userId: string, input: string, projectId?: string): Promise<TeamRunResult> {
     const team = await this.teams.findOneAccessible(teamId, userId);
-    let res: TeamRunResult;
-    switch (team.topology) {
-      case 'sequential': res = await this.runSequential(team.members, userId, input, projectId); break;
-      case 'parallel':   res = await this.runParallel(team.supervisorAgentId, team.members, userId, input, projectId); break;
-      case 'supervisor': res = await this.runSupervisor(team.supervisorAgentId, team.members, userId, input, projectId); break;
-      default: throw new BadRequestException(I18nContext.current()?.t('agents.topologyUnknown', { args: { topology: team.topology } }) ?? `Topology "${team.topology}" not recognized.`);
-    }
+    // invoke_agent span for the team (OpenTelemetry, opt-in): members nest under it.
+    const res: TeamRunResult = await withAgentSpan({ name: team.name, id: team.id, userId }, async () => {
+      switch (team.topology) {
+        case 'sequential': return this.runSequential(team.members, userId, input, projectId);
+        case 'parallel':   return this.runParallel(team.supervisorAgentId, team.members, userId, input, projectId);
+        case 'supervisor': return this.runSupervisor(team.supervisorAgentId, team.members, userId, input, projectId);
+        default: throw new BadRequestException(I18nContext.current()?.t('agents.topologyUnknown', { args: { topology: team.topology } }) ?? `Topology "${team.topology}" not recognized.`);
+      }
+    });
     // Cost attribution: provider/model of the default config (approximation:
     // a team may use multiple models; the total tokens are correct nonetheless).
     const def = await this.llmConfigs.getDefault();
@@ -109,7 +112,9 @@ export class MultiAgentService {
       schema: z.object({
         input: z.string().describe('The task / request to assign to the agent, in natural language.'),
       }),
-      func: async ({ input }) => this.runAgent(agent, userId, input, projectId),
+      // withRunParent: the delegated agent's span nests under this tool's span.
+      func: async ({ input }, runManager) =>
+        withRunParent(runManager?.runId, () => this.runAgent(agent, userId, input, projectId)),
     });
   }
 
@@ -122,8 +127,8 @@ export class MultiAgentService {
       schema: z.object({
         input: z.string().describe('The task to assign to the team, in natural language.'),
       }),
-      func: async ({ input }) => {
-        const result = await this.runTeamById(team.id, userId, input, projectId);
+      func: async ({ input }, runManager) => {
+        const result = await withRunParent(runManager?.runId, () => this.runTeamById(team.id, userId, input, projectId));
         return result.final;
       },
     });
@@ -146,10 +151,10 @@ export class MultiAgentService {
     // LangGraph does not fire the model's instance callbacks (serving metrics):
     // re-passed via config, same workaround as AgentService. Class inherited
     // from the surroundings (chat-triggered teams stay interactive).
-    const result: any = await runWithLlmCallContext(
+    const result: any = await withAgentSpan({ name: agent.name, id: agent.id, userId }, () => runWithLlmCallContext(
       { priority: getLlmCallContext().priority ?? 'interactive', userId, origin: 'team' },
       () => executor.invoke({ messages: [new HumanMessage(input)] }, { callbacks }),
-    );
+    ));
     const messages = result?.messages ?? [];
     const last = messages[messages.length - 1];
     return { text: this.contentToString(last?.content), usage: sumUsageFromMessages(messages) };

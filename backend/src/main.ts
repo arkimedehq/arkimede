@@ -13,6 +13,7 @@ import {APP_NAME} from './config/app.config';
 import {assertEncryptionKey} from './custom-tools/crypto.utils';
 import {assertJwtSecret} from './config/security.util';
 import {I18nExceptionFilter} from './common/i18n-exception.filter';
+import {initGenAiTracing} from './observability/genai-tracing';
 
 // LangChain + Anthropic SDK add abort listeners for each step of the ReAct loop.
 // With 6 tools the default of 10 is exceeded — we raise the global limit.
@@ -38,6 +39,9 @@ async function bootstrap() {
   // Likewise for JWT_SECRET: without a strong secret (≥32 chars, not a placeholder) the
   // session tokens would be forgeable → fail-fast at startup.
   assertJwtSecret();
+
+  // Opt-in OpenTelemetry GenAI traces (no-op unless an OTLP endpoint is set).
+  initGenAiTracing();
 
   // cors is NOT passed to NestFactory.create — configured below with enableCors().
   // Double configuration (cors:true + enableCors) causes duplicate headers → the browser rejects it.

@@ -5,7 +5,7 @@ The required attributions and license notices are listed below.
 
 > Generated on 2026-06-14. Covers the runtime/build dependencies of the Node
 > components (`backend`, `frontend`, `bridge`, `executor`), the Python services
-> (`embedding-service`, `whisper-service`, `ocr-service` — added 2026-09-30) and the ML models.
+> (`embedding-service`, `whisper-service`, `ocr-service` — added 2026-09-30; `piper-service` — added 2026-10-07) and the ML models.
 > To regenerate the Node list: `npx license-checker --production` in each workspace.
 
 ## License summary
@@ -15,7 +15,10 @@ BSD-2/3-Clause, Apache-2.0, and similar). The only third-party copyleft is
 `lightningcss` (**MPL-2.0**, a build-time CSS transformer; weak, file-level copyleft,
 not part of the runtime). The only third-party **AGPL** component is **PyMuPDF** in the
 `ocr-service` (dual AGPL-3.0 / Artifex commercial, used under **AGPL-3.0** — the same
-license as Arkimede, see below). No third-party GPL/LGPL is included. Dual-licensed
+license as Arkimede, see below). The only third-party **GPL** component is **piper-tts** in the `piper-service`
+(**GPL-3.0-or-later**, with the espeak-ng phonemizer it embeds, GPL-3.0): GPL-3.0 and AGPL-3.0 may be combined (section 13
+of both licences), and the service is distributed with its source in this repository (`piper-service/`). No LGPL is
+included. Dual-licensed
 components (e.g. `jszip`, `oracledb`) are used under the permissive option (MIT and
 Apache-2.0 respectively).
 
@@ -50,6 +53,7 @@ an explicit patent grant:
 - `xlsx` (SheetJS Community Edition) — https://github.com/SheetJS/sheetjs
 - `ssh2-sftp-client` — https://github.com/theophilusx/ssh2-sftp-client
 - `oracledb` — `Apache-2.0 OR UPL-1.0`, used under Apache-2.0 — https://github.com/oracle/node-oracledb
+- `@opentelemetry/*` (`api`, `sdk-trace-base`, `sdk-trace-node`, `resources`, `exporter-trace-otlp-proto`, `exporter-trace-otlp-http`) — https://github.com/open-telemetry/opentelemetry-js
 
 Full license text: https://www.apache.org/licenses/LICENSE-2.0
 
@@ -86,6 +90,16 @@ Full license text: https://www.apache.org/licenses/LICENSE-2.0
 
 (CTranslate2, the backend of `faster-whisper`, is distributed under MIT.)
 
+### piper-service (`requirements.txt`)
+
+| Package | License |
+|---|---|
+| fastapi | MIT |
+| uvicorn | BSD-3-Clause |
+| piper-tts | **GPL-3.0-or-later** — https://github.com/OHF-Voice/piper1-gpl (embeds espeak-ng, GPL-3.0) |
+| onnxruntime (dependency of piper-tts) | MIT |
+| pathvalidate (dependency of piper-tts) | MIT |
+
 ### ocr-service (`requirements.txt`, `requirements-structured.txt`)
 
 | Package | License |
@@ -113,25 +127,32 @@ on 2026-09-30 (116 distributions): all permissive except `pymupdf` (above) and
 ## Machine Learning models
 
 The models are **downloaded** from their respective sources (at runtime, or at image
-build time for the ocr-service) and are not redistributed with this software's source.
+build time for the ocr-service and the piper-service default voice) and are not redistributed with this software's source.
 The only models used are:
 
 | Model | Use | License |
 |---|---|---|
+| `BAAI/bge-m3` | Text embedding (embedding-service, default) | **MIT** |
 | `mixedbread-ai/mxbai-embed-large-v1` | Text embedding (embedding-service) | **Apache-2.0** |
 | OpenAI **Whisper** (via faster-whisper / CTranslate2) | Audio transcription (whisper-service) | **MIT** |
+| Piper voice `it_IT-serena-medium` | Default text-to-speech voice (piper-service; baked into the image at build time) | **CC-BY-4.0** |
 | `docling-project/docling-layout-heron` | Page layout analysis (ocr-service, structured level) | **Apache-2.0** |
 | `docling-project/docling-models` (TableFormer) | Table structure (ocr-service, structured level) | **CDLA-Permissive-2.0 / Apache-2.0** |
 | PaddleOCR PP-OCR models (via RapidOCR, ONNX) | Text detection/recognition (ocr-service, structured level) | **Apache-2.0** |
 | Tesseract `tessdata` (eng, ita, …) | OCR (ocr-service, fast level) | **Apache-2.0** |
 
+- bge-m3: https://huggingface.co/BAAI/bge-m3 — MIT
 - mxbai-embed-large-v1: https://huggingface.co/mixedbread-ai/mxbai-embed-large-v1 — Apache-2.0
 - Whisper: https://github.com/openai/whisper — MIT (weights and code released by OpenAI under MIT)
+- Piper voice `it_IT-serena-medium`: https://huggingface.co/rhasspy/piper-voices/tree/main/it/it_IT/serena/medium
+  (model card `MODEL_CARD`), trained on the dataset https://huggingface.co/datasets/committa/serena-synthetic-it-27h —
+  **CC-BY-4.0** (attribution required: this notice). Used as the default voice of the bundled piper-service
+  (`PIPER_VOICE`); other voices are downloaded on demand from the same repository under their own model cards.
 
 - Docling models: https://huggingface.co/docling-project — Apache-2.0 / CDLA-Permissive-2.0
 - PaddleOCR / RapidOCR: https://github.com/PaddlePaddle/PaddleOCR, https://github.com/RapidAI/RapidOCR — Apache-2.0
 
-All these licenses are permissive and allow commercial use.
+All these licenses are permissive and allow commercial use (CC-BY-4.0 with attribution).
 
 ---
 

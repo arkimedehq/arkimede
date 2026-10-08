@@ -1,4 +1,6 @@
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 faster-whisper>=1.1.0
+# PyAV 19 dropped open(metadata_errors=…), which faster-whisper 1.2.1 still passes: every transcription fails.
+av>=11,<19
 python-multipart>=0.0.12

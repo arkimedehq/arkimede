@@ -76,7 +76,7 @@ The two things an organization actually needs — **multi-tenant governance** an
 
 > Requires Docker + Docker Compose. This spins up the full stack (Postgres, Qdrant, Redis, embedding & whisper services, skill executor, backend, frontend).
 >
-> **Footprint:** the full stack idles at **~2 GB RAM** — the two ML services dominate (embedding `mxbai-embed-large` ~1 GB, Whisper `small`/`int8` ~0.4 GB); everything else combined is under 550 MB. **4 GB RAM is a comfortable minimum**; 8 GB is recommended for real use (concurrent users, active RAG). CPU-only by default — no GPU needed. Plan ~10 GB disk for images, models and the persistent Nix store. Drop the embedding service (−1 GB) if you don't need RAG, or Whisper (−0.4 GB) if you don't need voice input.
+> **Footprint:** the full stack idles at **~2.5 GB RAM** — the two ML services dominate (embedding `bge-m3` ~1.4 GB, Whisper `small`/`int8` ~0.4 GB); everything else combined is under 550 MB. **4 GB RAM is a comfortable minimum**; 8 GB is recommended for real use (concurrent users, active RAG). CPU-only by default — no GPU needed. Plan ~10 GB disk for images, models and the persistent Nix store. Drop the embedding service (−1 GB) if you don't need RAG, or Whisper (−0.4 GB) if you don't need voice input.
 
 ```bash
 git clone https://github.com/arkimedehq/arkimede.git

@@ -66,6 +66,27 @@ interface McpToolsListResult {
   tools: McpTool[];
 }
 
+interface McpResource {
+  uri: string;
+  name?: string;
+  description?: string;
+  mimeType?: string;
+}
+
+interface McpResourceTemplate {
+  uriTemplate: string;
+  name?: string;
+  description?: string;
+  mimeType?: string;
+}
+
+/** What a remote server offers: tools plus (when it declares the capability) resources. */
+interface McpCatalog {
+  tools: McpTool[];
+  resources: McpResource[];
+  templates: McpResourceTemplate[];
+}
+
 // ── Bridge registry ───────────────────────────────────────────────────────────
 
 /**
@@ -370,6 +391,7 @@ export class McpServersService implements OnModuleDestroy {
       this.localProcesses.delete(id);
     }
     this.startingProcesses.delete(id);
+    this.remoteDiscovery.delete(id);
     await this.serverRepo.remove(server);
     this.logger.log(`MCP server deleted: "${server.name}" (user: ${userId})`);
     await this.audit.record({
@@ -389,6 +411,8 @@ export class McpServersService implements OnModuleDestroy {
   }
 
   async upsertSecrets(serverId: string, secrets: Record<string, string>): Promise<void> {
+    // New credentials may fix a failing server: drop any discovery backoff.
+    this.remoteDiscovery.delete(serverId);
     for (const [keyName, plaintext] of Object.entries(secrets)) {
       if (!plaintext) continue;
       const encryptedValue = encrypt(plaintext);
@@ -441,16 +465,18 @@ export class McpServersService implements OnModuleDestroy {
 
     if (servers.length === 0) return [];
 
-    const allTools: DynamicStructuredTool[] = [];
-
-    for (const server of servers) {
+    // Servers are loaded concurrently (one slow server must not add up with the
+    // others); per-server lists are concatenated in the original order so the
+    // tool set stays stable across requests (prompt-cache friendly).
+    const perServer = await Promise.all(servers.map(async (server) => {
+      const allTools: DynamicStructuredTool[] = [];
       try {
         const serverSlug = server.name.toLowerCase().replace(/\W+/g, '_');
 
         // ── http / sse ────────────────────────────────────────────────────
         if (server.transport === 'http' || server.transport === 'sse') {
           const secrets  = await this.loadSecrets(server.id);
-          const mcpTools = await this.fetchMcpTools(server, secrets);
+          const { tools: mcpTools, resources, templates } = await this.discoverRemoteCatalog(server, secrets);
 
           for (const mcpTool of mcpTools) {
             const schema   = this.buildZodSchema(mcpTool);
@@ -473,7 +499,21 @@ export class McpServersService implements OnModuleDestroy {
             }));
           }
 
-          this.logger.log(`MCP server "${server.name}" (${server.transport}): ${mcpTools.length} tools loaded`);
+          // Resources (read-only context the server exposes) are surfaced to the
+          // agent as one extra tool per server, since the agent only calls tools.
+          if (resources.length || templates.length) {
+            const toolName = `mcp_${serverSlug}_read_resource`;
+            if (allTools.some((t) => t.name === toolName)) {
+              this.logger.warn(`MCP server "${server.name}": tool name ${toolName} already taken, resources not exposed`);
+            } else {
+              allTools.push(this.buildReadResourceTool(server, secrets, toolName, resources, templates, userId));
+            }
+          }
+
+          this.logger.log(
+            `MCP server "${server.name}" (${server.transport}): ${mcpTools.length} tools loaded` +
+            (resources.length || templates.length ? `, ${resources.length} resources + ${templates.length} templates` : ''),
+          );
 
         // ── local: direct stdio process ────────────────────────────────
         } else if (server.transport === 'local') {
@@ -542,9 +582,10 @@ export class McpServersService implements OnModuleDestroy {
       } catch (err: any) {
         this.logger.warn(`Error loading tools for MCP server "${server.name}": ${err.message}`);
       }
-    }
+      return allTools;
+    }));
 
-    return allTools;
+    return perServer.flat();
   }
 
   private interpolate(template: string, secrets: Record<string, string>): string {
@@ -593,6 +634,8 @@ export class McpServersService implements OnModuleDestroy {
     ok: boolean;
     transport: McpTransport;
     tools: { name: string; description?: string }[];
+    /** Resources and URI templates (exposed to the agent via read_resource). */
+    resources?: { uri: string; name?: string; template?: boolean }[];
     latencyMs: number;
     sessionMode?: 'streamable' | 'plain' | 'legacy-sse';
     error?: string;
@@ -608,12 +651,19 @@ export class McpServersService implements OnModuleDestroy {
     const done = (partial: {
       ok: boolean;
       tools?: { name: string; description?: string }[];
+      resources?: { resources: McpResource[]; templates: McpResourceTemplate[] };
       sessionMode?: 'streamable' | 'plain' | 'legacy-sse';
       error?: string;
     }) => ({
       ok: partial.ok,
       transport: server.transport,
       tools: (partial.tools ?? []).map((t) => ({ name: t.name, description: t.description })),
+      ...(partial.resources && (partial.resources.resources.length || partial.resources.templates.length)
+        ? { resources: [
+            ...partial.resources.resources.map((r) => ({ uri: r.uri, name: r.name })),
+            ...partial.resources.templates.map((t) => ({ uri: t.uriTemplate, name: t.name, template: true })),
+          ] }
+        : {}),
       latencyMs: Date.now() - startedAt,
       ...(partial.sessionMode ? { sessionMode: partial.sessionMode } : {}),
       ...(partial.error ? { error: partial.error } : {}),
@@ -623,12 +673,19 @@ export class McpServersService implements OnModuleDestroy {
       if (server.transport === 'sse') {
         const secrets = await this.loadSecrets(server.id);
         const target  = await this.buildHttpTarget(server, secrets);
-        const result: McpToolsListResult = await withLegacySseSession(
+        const result = await withLegacySseSession(
           target,
-          (client) => client.request('tools/list', {}, 10_000),
+          async (client) => {
+            const rpc = (method: string) => client.request(method, {}, 10_000);
+            const listed: McpToolsListResult = await rpc('tools/list');
+            const resources = client.serverCapabilities?.resources ? await this.listResources(rpc) : undefined;
+            return { tools: listed?.tools ?? [], resources };
+          },
           { clientName: process.env.APP_NAME ?? 'arkimede' },
         );
-        return done({ ok: true, tools: result?.tools ?? [], sessionMode: 'legacy-sse' });
+        // A successful test clears any discovery backoff: the next chat probes live.
+        this.remoteDiscovery.delete(server.id);
+        return done({ ok: true, tools: result.tools, resources: result.resources, sessionMode: 'legacy-sse' });
       }
       if (server.transport === 'http') {
         const secrets = await this.loadSecrets(server.id);
@@ -637,9 +694,14 @@ export class McpServersService implements OnModuleDestroy {
         this.httpSessions.delete(server.id);
         const session = await this.getOrInitHttpSession(server, target, { forceNew: true });
         const result: McpToolsListResult = await mcpRpc(target, session, 'tools/list', {}, { timeoutMs: 10_000 });
+        const resources = session.capabilities?.resources
+          ? await this.listResources((method) => mcpRpc(target, session, method, {}, { timeoutMs: 10_000 }))
+          : undefined;
+        this.remoteDiscovery.delete(server.id);
         return done({
           ok: true,
           tools: result?.tools ?? [],
+          resources,
           sessionMode: session.sessionId ? 'streamable' : 'plain',
         });
       }
@@ -732,6 +794,187 @@ export class McpServersService implements OnModuleDestroy {
   private async fetchMcpTools(server: McpServer, secrets: Record<string, string>): Promise<McpTool[]> {
     const result: McpToolsListResult = await this.httpRpc(server, secrets, 'tools/list', {}, { timeoutMs: 10_000 });
     return result?.tools ?? [];
+  }
+
+  private static readonly EMPTY_CATALOG: McpCatalog = { tools: [], resources: [], templates: [] };
+
+  /**
+   * tools/list plus, only when the server declares the `resources` capability
+   * in its initialize result, resources/list and resources/templates/list.
+   * Servers without the capability cost exactly what they did before.
+   */
+  private async fetchMcpCatalog(server: McpServer, secrets: Record<string, string>): Promise<McpCatalog> {
+    if (server.transport === 'sse') {
+      // Legacy transport: one session per exchange → do the whole discovery in one.
+      const target = await this.buildHttpTarget(server, secrets);
+      return withLegacySseSession(target, async (client) => {
+        const rpc = (method: string) => client.request(method, {}, 10_000);
+        const tools: McpTool[] = (await rpc('tools/list'))?.tools ?? [];
+        const res = client.serverCapabilities?.resources
+          ? await this.listResources(rpc)
+          : { resources: [], templates: [] };
+        return { tools, ...res };
+      }, { clientName: process.env.APP_NAME ?? 'arkimede' });
+    }
+    const tools = await this.fetchMcpTools(server, secrets);
+    const capabilities = this.httpSessions.get(server.id)?.session.capabilities;
+    const res = capabilities?.resources
+      ? await this.listResources((method) => this.httpRpc(server, secrets, method, {}, { timeoutMs: 10_000 }))
+      : { resources: [], templates: [] };
+    return { tools, ...res };
+  }
+
+  /** resources/list + resources/templates/list; each is optional on the server side. */
+  private async listResources(
+    rpc: (method: string) => Promise<any>,
+  ): Promise<{ resources: McpResource[]; templates: McpResourceTemplate[] }> {
+    const [resources, templates] = await Promise.all([
+      rpc('resources/list').then((r) => r?.resources ?? [], () => []),
+      rpc('resources/templates/list').then((r) => r?.resourceTemplates ?? [], () => []),
+    ]);
+    return {
+      resources: resources.filter((r: any) => typeof r?.uri === 'string'),
+      templates: templates.filter((t: any) => typeof t?.uriTemplate === 'string'),
+    };
+  }
+
+  /** Max resources/templates listed in the read_resource tool description. */
+  private static readonly RESOURCE_LIST_MAX = 40;
+
+  /**
+   * One tool per server that reads any of its resources by URI. The description
+   * lists the concrete resources and the URI templates (the model fills the
+   * {placeholders}), so the agent can discover what to read without a round trip.
+   */
+  private buildReadResourceTool(
+    server: McpServer,
+    secrets: Record<string, string>,
+    toolName: string,
+    resources: McpResource[],
+    templates: McpResourceTemplate[],
+    userId: string,
+  ): DynamicStructuredTool {
+    const line = (uri: string, name?: string, description?: string) => {
+      const text = [name, description].filter(Boolean).join(': ').replace(/\s+/g, ' ').slice(0, 200);
+      return `- ${uri}${text ? ` — ${text}` : ''}`;
+    };
+    const max = McpServersService.RESOURCE_LIST_MAX;
+    const sections = [
+      `Reads a resource (read-only data) from the MCP server "${server.name}"` +
+        (server.description ? ` (${server.description})` : '') + '.',
+    ];
+    if (resources.length) {
+      sections.push('Resources:\n' + resources.slice(0, max).map((r) => line(r.uri, r.name, r.description)).join('\n') +
+        (resources.length > max ? `\n… (${resources.length - max} more)` : ''));
+    }
+    if (templates.length) {
+      sections.push('URI templates (replace each {placeholder} with a value):\n' +
+        templates.slice(0, max).map((t) => line(t.uriTemplate, t.name, t.description)).join('\n'));
+    }
+
+    return new DynamicStructuredTool<any>({
+      name: toolName,
+      description: sections.join('\n\n'),
+      schema: z.object({
+        uri: z.string().describe('URI of the resource to read, from the list above or built from a URI template'),
+      }),
+      func: async ({ uri }: { uri: string }) => {
+        this.logger.log(`MCP ${server.transport} "${toolName}": ${uri}`);
+        try {
+          const result = await this.httpRpc(server, secrets, 'resources/read', { uri }, { timeoutMs: 30_000 });
+          return await this.sanitizeMcpResult(this.renderResourceContents(result), userId);
+        } catch (err: any) {
+          this.logger.error(`MCP "${toolName}" error: ${err.message}`);
+          return `MCP error: ${err.message}`;
+        }
+      },
+    });
+  }
+
+  /** resources/read result → text: text contents verbatim, binary blobs omitted. */
+  private renderResourceContents(result: any): string {
+    const contents: any[] = Array.isArray(result?.contents) ? result.contents : [];
+    if (!contents.length) return 'Empty resource';
+    const many = contents.length > 1;
+    return contents.map((c) => {
+      const body = typeof c?.text === 'string'
+        ? c.text
+        : `[binary resource omitted${c?.mimeType ? ` (${c.mimeType})` : ''}]`;
+      return many ? `### ${c?.uri ?? ''}\n${body}` : body;
+    }).join('\n\n');
+  }
+
+  /**
+   * Discovery state per remote (http/sse) server: the last tool list obtained
+   * and a backoff window after failures. Lets an intermittently offline server
+   * (e.g. a device that is often switched off) cost nothing on the request path.
+   */
+  private readonly remoteDiscovery = new Map<string, {
+    version: number;
+    catalog?: McpCatalog;
+    failures: number;
+    retryAt: number;
+    probing: boolean;
+  }>();
+  private static readonly DISCOVERY_BACKOFF_MIN_MS = 30_000;
+  private static readonly DISCOVERY_BACKOFF_MAX_MS = 5 * 60_000;
+
+  /**
+   * tools/list with failure backoff:
+   *   - healthy server → live discovery, as before;
+   *   - server that just failed → no network until the backoff expires; the
+   *     last known tool list (if any) is exposed, so calls fail fast with a
+   *     clear error and the tool set stays stable;
+   *   - backoff expired → re-probe in the background, request not delayed.
+   * The state is reset when the server config changes (updatedAt).
+   */
+  private async discoverRemoteCatalog(server: McpServer, secrets: Record<string, string>): Promise<McpCatalog> {
+    const version = server.updatedAt?.getTime() ?? 0;
+    let state = this.remoteDiscovery.get(server.id);
+    if (state && state.version !== version) {
+      this.remoteDiscovery.delete(server.id);
+      state = undefined;
+    }
+
+    if (state && state.failures > 0) {
+      if (Date.now() >= state.retryAt && !state.probing) {
+        state.probing = true;
+        void this.fetchAndRecord(server, secrets, version)
+          .catch(() => undefined)
+          .finally(() => { const s = this.remoteDiscovery.get(server.id); if (s) s.probing = false; });
+      }
+      return state.catalog ?? McpServersService.EMPTY_CATALOG;
+    }
+
+    try {
+      return await this.fetchAndRecord(server, secrets, version);
+    } catch (err: any) {
+      if (!state?.catalog) throw err;
+      this.logger.warn(`MCP server "${server.name}" unreachable (${err.message}): using the last known tool list`);
+      return state.catalog;
+    }
+  }
+
+  /** Live tools/list; records success (fresh list) or failure (next backoff step). */
+  private async fetchAndRecord(server: McpServer, secrets: Record<string, string>, version: number): Promise<McpCatalog> {
+    const prev = this.remoteDiscovery.get(server.id);
+    try {
+      const catalog = await this.fetchMcpCatalog(server, secrets);
+      if (prev?.failures) this.logger.log(`MCP server "${server.name}" reachable again`);
+      this.remoteDiscovery.set(server.id, { version, catalog, failures: 0, retryAt: 0, probing: false });
+      return catalog;
+    } catch (err) {
+      const failures = (prev?.failures ?? 0) + 1;
+      const delay = Math.min(
+        McpServersService.DISCOVERY_BACKOFF_MAX_MS,
+        McpServersService.DISCOVERY_BACKOFF_MIN_MS * 2 ** (failures - 1),
+      );
+      this.remoteDiscovery.set(server.id, {
+        version, catalog: prev?.catalog, failures, retryAt: Date.now() + delay, probing: prev?.probing ?? false,
+      });
+      this.logger.debug(`MCP server "${server.name}": discovery failed (${failures}x), next probe in ${Math.round(delay / 1000)}s`);
+      throw err;
+    }
   }
 
   // ── Build LangChain tools ─────────────────────────────────────────────────

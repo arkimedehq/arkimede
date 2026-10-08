@@ -24,6 +24,7 @@ export interface UpsertAgentData {
   toolFilter?: AgentToolFilter;
   maxIterations?: number | null;
   exposeAsTool?: boolean;
+  memoryContext?: boolean;
   scope?: AgentScope;
   teamId?: string | null;
 }
@@ -72,6 +73,7 @@ export class AgentsService {
       toolFilter: data.toolFilter ?? { mode: 'all' },
       maxIterations: data.maxIterations ?? null,
       exposeAsTool: data.exposeAsTool ?? false,
+      memoryContext: data.memoryContext ?? false,
       scope: data.scope ?? 'personal',
       teamId: data.scope === 'team' ? (data.teamId ?? null) : null,
     });
@@ -95,6 +97,7 @@ export class AgentsService {
     if (data.toolFilter !== undefined) agent.toolFilter = data.toolFilter;
     if (data.maxIterations !== undefined) agent.maxIterations = data.maxIterations;
     if (data.exposeAsTool !== undefined) agent.exposeAsTool = data.exposeAsTool;
+    if (data.memoryContext !== undefined) agent.memoryContext = data.memoryContext;
     if (data.scope !== undefined) {
       agent.scope = data.scope;
       agent.teamId = data.scope === 'team' ? (data.teamId ?? agent.teamId ?? null) : null;

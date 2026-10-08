@@ -12,7 +12,7 @@ COPY main.py .
 
 # Pre-download the default voice into the image (avoids a download on first
 # startup; /models is seeded into the named volume on its first mount).
-ARG PIPER_VOICE=it_IT-paola-medium
+ARG PIPER_VOICE=it_IT-serena-medium
 RUN python -c "from main import ensure_voice; ensure_voice('${PIPER_VOICE}')"
 
 ENV PIPER_VOICE=${PIPER_VOICE}

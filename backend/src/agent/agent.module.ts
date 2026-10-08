@@ -18,6 +18,7 @@ import { FlowsModule } from '../flows/flows.module';
 import { AgentsModule } from '../agents/agents.module';
 import { SchedulingModule } from '../scheduling/scheduling.module';
 import { SandboxModule } from '../sandbox/sandbox.module';
+import { RecordareModule } from '../recordare/recordare.module';
 import { User } from '../users/users.entity';
 import { Project } from '../projects/projects.entity';
 import { Chat } from '../chats/chats.entity';
@@ -36,6 +37,7 @@ import { Chat } from '../chats/chats.entity';
     AgentsModule,        // agenti/team esposti come tool (exposeAsTool)
     SchedulingModule,
     SandboxModule,
+    RecordareModule,     // Recordare recall tools (episodic memory, opt-in)
     TypeOrmModule.forFeature([User, Project, Chat]),
   ],
   providers: [AgentService, ToolSelectionService],

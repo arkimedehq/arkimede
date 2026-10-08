@@ -6,5 +6,7 @@
   "lastAdminProtected": "Operation denied: at least one active administrator must remain.",
   "cannotRemoveOwnAdmin": "You cannot remove your own administrator role.",
   "cannotDisableOwnAccount": "You cannot disable your own account.",
-  "cannotDeleteOwnAccount": "You cannot delete your own account."
+  "cannotDeleteOwnAccount": "You cannot delete your own account.",
+  "memoryNotEmpty": "The memory type can only be changed while the memory is empty.",
+  "episodicMemoryOff": "Turn on episodic memory first."
 }

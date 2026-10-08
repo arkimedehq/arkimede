@@ -97,9 +97,11 @@
     "hint": "Esegue il handshake MCP reale sulla configurazione salvata e recupera i tool.",
     "ok": "OK — {{count}} tool in {{ms}}ms",
     "fail": "Test fallito",
-    "noTools": "Connessione riuscita, ma il server non espone alcun tool.",
+    "noTools": "Connessione riuscita, ma il server non espone alcun tool né resource.",
     "modeStreamable": "sessione streamable",
     "modePlain": "JSON-RPC semplice",
-    "modeLegacySse": "SSE legacy"
+    "modeLegacySse": "SSE legacy",
+    "resourcesCount": "{{count}} resource",
+    "resourcesTitle": "Resources (l'agente le legge con il tool read_resource del server)"
   }
 }

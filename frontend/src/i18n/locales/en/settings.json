@@ -22,7 +22,8 @@
     "users": "Users",
     "teams": "Teams",
     "audit": "Audit",
-    "backup": "Backup"
+    "backup": "Backup",
+    "diary": "Diary"
   },
   "profile": {
     "title": "Profile",
@@ -73,7 +74,19 @@
     "mergeProposal": "Merge: will replace the original notes",
     "graphView": "Graph",
     "listView": "List",
-    "graphHint": "Hover a node to read the note. Links come from the evolution job."
+    "graphHint": "Hover a node to read the note. Links come from the evolution job.",
+    "episodicTitle": "Episodic memory (Recordare)",
+    "episodicIntro": "If enabled, your chats are also sent to Recordare, the installation's episodic memory service: it remembers what happened and when (events, plans, changes) and the assistant can search it. Independent of the persistent memory above.",
+    "episodicToggle": "Episodic memory",
+    "episodicHint": "Recordare stores and extracts memories only after its administrator has enabled your diary there.",
+    "episodicWaiting": "Waiting for activation by the Recordare administrator",
+    "episodicKind": "Memory type",
+    "episodicKindPersonal": "Personal",
+    "episodicKindShared": "Shared",
+    "episodicKindHint": "Personal: the memories are yours. Shared: for an account several people use (e.g. the home voice assistant); whoever introduces themselves (\"I'm Andrea\") signs their own memories. It can only be changed while the memory is empty.",
+    "episodicSharedNotice": "Shared memory: everyone using this account reads and writes all its memories. Do not use it for private matters.",
+    "episodicAtlas": "Open Recordare Atlas",
+    "episodicAtlasHint": "The live view of the memory (admins only: it shows every person's activity)."
   },
   "usage": {
     "title": "Usage",

@@ -56,6 +56,14 @@ export class Agent {
   @Column({ type: 'boolean', default: false })
   exposeAsTool: boolean;
 
+  /**
+   * Before each answer, the user's memories relevant to the message from Recordare
+   * (episodic memory), appended to the system prompt. Off by default: useful where
+   * latency matters (voice) — the agent may answer without calling a recall tool.
+   */
+  @Column({ type: 'boolean', default: false })
+  memoryContext: boolean;
+
   @Column({ type: 'varchar', length: 16, default: 'personal' })
   scope: AgentScope;
 

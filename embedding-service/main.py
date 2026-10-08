@@ -14,7 +14,7 @@ from sentence_transformers import SentenceTransformer
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-MODEL_NAME = os.getenv("EMBEDDING_MODEL", "mixedbread-ai/mxbai-embed-large-v1")
+MODEL_NAME = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
 DEVICE     = os.getenv("EMBEDDING_DEVICE", "cpu")
 BATCH_SIZE = int(os.getenv("EMBEDDING_BATCH_SIZE", "32"))
 # Optional cap on input length in tokens (empty = the model's own limit). Bounds RAM and

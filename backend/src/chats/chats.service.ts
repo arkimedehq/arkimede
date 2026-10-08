@@ -6,6 +6,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Chat } from './chats.entity';
 import { ProjectsService } from '../projects/projects.service';
+import { enqueueRecordareConversationDelete } from '../recordare/recordare-outbox';
 
 @Injectable()
 export class ChatsService {
@@ -124,6 +125,9 @@ export class ChatsService {
 
   async remove(id: string, userId: string) {
     await this.findOneAsAuthor(id, userId);
+    // Recordare (opt-in): enqueue the conversation purge BEFORE the row goes
+    // (the owner is read from it). Outbox only; never throws.
+    await enqueueRecordareConversationDelete(this.repo.manager, id);
     await this.repo.delete(id);
     return { deleted: true };
   }

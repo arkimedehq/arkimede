@@ -1,0 +1,80 @@
+{
+  "title": "Diary",
+  "subtitle": "What the episodic memory (Recordare) remembers about you: you can correct, forget and confirm.",
+  "off": "The Diary shows your episodic memory: turn it on in Memory → Episodic memory.",
+  "tabs": {
+    "timeline": "Timeline",
+    "digests": "Diary",
+    "profile": "Who you are",
+    "plans": "Plans",
+    "pending": "To confirm"
+  },
+  "search": "Search your memories…",
+  "find": "Search",
+  "more": "Show more",
+  "error": "Error",
+  "kind": {
+    "event": "event",
+    "plan": "plan",
+    "state_change": "change"
+  },
+  "status": {
+    "open": "planned",
+    "confirmed": "done",
+    "cancelled": "cancelled",
+    "rescheduled": "moved",
+    "unresolved": "outcome unknown"
+  },
+  "inferred": "inferred",
+  "corrected": "corrected",
+  "place": "Place",
+  "opinion": "Opinion",
+  "evidence": "Where it comes from",
+  "otherClient": "from another platform",
+  "history": "Earlier versions",
+  "outcome": "How it went",
+  "role": {
+    "user": "you",
+    "assistant": "assistant",
+    "tool": "tool",
+    "other": "another person"
+  },
+  "correct": "Correct",
+  "forget": "Forget",
+  "save": "Save correction",
+  "cancel": "Cancel",
+  "forgetConfirm": "Forget this memory? It will be removed and never come back.",
+  "level": {
+    "day": "day",
+    "month": "month"
+  },
+  "facts": "Facts",
+  "notes": "Tastes, habits and more",
+  "since": "since",
+  "now": "now",
+  "unknown": "unknown",
+  "category": {
+    "preference": "preference",
+    "habit": "habit",
+    "value": "value",
+    "relationship": "relationship",
+    "knowledge": "knowledge",
+    "profile": "profile",
+    "constraint": "constraint"
+  },
+  "pin": "Pin",
+  "unpin": "Unpin",
+  "delete": "Delete",
+  "deleteConfirm": "Delete this item from the memory?",
+  "confirm": "Confirm",
+  "reject": "Reject",
+  "pendingHint": "Things the memory only inferred, or that others said about you: confirm or reject them.",
+  "empty": {
+    "timeline": "No memories yet.",
+    "digests": "The diary is written at night: no page yet.",
+    "facts": "No facts.",
+    "notes": "No notes.",
+    "plans": "No open plans.",
+    "pending": "Nothing to confirm."
+  }
+}

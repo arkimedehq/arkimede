@@ -40,7 +40,7 @@
 - **LLM/embedding API keys:** entered from the **admin UI** after startup (Settings → AI System), not via env. Keep the API key of the provider you'll use handy (Anthropic, OpenAI, Gemini, etc.).
 - **Optional:**
   - Electron + npm — only for MCP transport `remote`
-- **Hardware:** the full stack idles at **~2 GB RAM**. The two ML services dominate — embedding (`mxbai-embed-large`, ~1 GB) and Whisper (`small`/`int8`, ~0.4 GB); everything else combined is under 550 MB. Budget **4 GB RAM as a comfortable minimum**, 8 GB for real use (concurrent users, active RAG). CPU-only by default (no GPU needed; `EMBEDDING_DEVICE=cuda` is opt-in). Plan ~10 GB disk for images, downloaded models and the persistent Nix store. You can drop the embedding service (−1 GB, no RAG) or Whisper (−0.4 GB, no voice input) to lower the footprint.
+- **Hardware:** the full stack idles at **~2.5 GB RAM**. The two ML services dominate — embedding (`bge-m3`, ~1.4 GB) and Whisper (`small`/`int8`, ~0.4 GB); everything else combined is under 550 MB. Budget **4 GB RAM as a comfortable minimum**, 8 GB for real use (concurrent users, active RAG). CPU-only by default (no GPU needed; `EMBEDDING_DEVICE=cuda` is opt-in). Plan ~10 GB disk for images, downloaded models and the persistent Nix store. You can drop the embedding service (−1 GB, no RAG) or Whisper (−0.4 GB, no voice input) to lower the footprint.
 
 ---
 
@@ -213,7 +213,7 @@ To move a running deployment to a newer version:
 
 It backs up your data, `git pull`s, rebuilds, and restarts — preserving your volumes and `.env`. Flags: `--yes` (no prompt), `--no-backup`.
 
-Under the hood it does, in order: **backup** (`scripts/backup.sh`) → **`git pull --ff-only`** → flags any **new `.env.example` variables** missing from your `.env` → **rebuilds the broker job images** (`pa-runner` / `pa-egress-proxy`) *only if* your profile uses them and `runner/` or `egress-proxy/` changed → **`docker compose up -d --build`** → **health check**.
+Under the hood it does, in order: **backup** (`scripts/backup.sh`) → **`git pull --ff-only`** → flags any **new `.env.example` variables** missing from your `.env` → **rebuilds the broker job images** (`pa-runner` / `pa-egress-proxy`) *only if* your profile uses them and `runner/` or `egress-proxy/` changed → **`docker compose up -d --build`** → **Postgres collation check** (`scripts/postgres-to-pgvector.sh`, see below) → **health check**.
 
 Four things make this safe, and are worth understanding if you upgrade by hand instead:
 
@@ -221,6 +221,11 @@ Four things make this safe, and are worth understanding if you upgrade by hand i
 - **Migrations are automatic.** The backend runs pending migrations on boot (`migrationsRun: true`) — there is no manual DB step.
 - **`git pull` is mandatory and separate.** `install.sh` and `update.sh` build from the working tree as-is; neither `install.sh` nor a bare `up --build` fetches new code. Only `git pull` does. (`.env`, `scripts/compose.sh` and `scripts/.compose-profile` are gitignored, so the pull never clobbers them.)
 - **The broker images are not rebuilt by `up --build`.** `pa-runner` (L2/L3) and `pa-egress-proxy` (L3) are referenced by image name, not `build:`. If `runner/` or `egress-proxy/` changed, rebuild them explicitly: `docker build -t pa-runner ./runner` and, for L3, `docker build -t pa-egress-proxy ./egress-proxy`. `update.sh` does this for you when their source changed.
+
+> **Upgrading an install created before October 2026** — two one-time points:
+>
+> - **Postgres image.** The default moved from `postgres:16-alpine` to `pgvector/pgvector:pg16`. Same major version and data directory, but a different C library: text indexes built under alpine must be rebuilt once, or lookups on text columns can silently return wrong results. `update.sh` runs `./scripts/postgres-to-pgvector.sh` for you (backup, `REINDEX`, verification; it does nothing on an install that does not need it). **If you upgrade by hand, run it yourself** after `up -d --build`. Until then the backend logs a *collation version mismatch* warning at start-up.
+> - **Embedding model.** The default moved from `mixedbread-ai/mxbai-embed-large-v1` to `BAAI/bge-m3`. Both have 1024 dimensions, but their vectors are not interchangeable: the RAG collections are **not** rebuilt automatically and search quality collapses if the model changes under existing vectors. If your `.env` sets `EMBEDDING_MODEL` (every `.env` seeded from `.env.example` does), nothing changes. If it does not, either add `EMBEDDING_MODEL=mixedbread-ai/mxbai-embed-large-v1` to keep the old model, or keep bge-m3 and run the admin re-embed (`GET /api/admin/vector-db/reembed/plan`, then `POST /api/admin/vector-db/reembed`). The backend warns at start-up when the running model differs from the one that indexed the vectors. The first build downloads ~2.3 GB of model weights.
 
 **Manual / unattended equivalent** (no `update.sh`):
 
@@ -232,6 +237,7 @@ diff <(grep -oE '^[A-Z_]+=' .env.example | sort) <(grep -oE '^[A-Z_]+=' .env | s
 docker build -t pa-runner ./runner                    # only if using L2/L3 and runner/ changed
 docker build -t pa-egress-proxy ./egress-proxy        # only if using L3 and egress-proxy/ changed
 ./scripts/compose.sh up -d --build                    # rebuild + restart; migrations run on boot
+./scripts/postgres-to-pgvector.sh                     # idempotent: rebuilds text indexes once after the alpine → pgvector switch
 curl -s localhost:3000/api/health                     # verify
 ```
 
@@ -641,7 +647,7 @@ When a file is deleted from the UI, the corresponding vectors are automatically 
 
 Some models require different prefixes for queries vs documents:
 - Example nomic-embed-text: `search_query: ` for queries, `search_document: ` for docs
-- For `mxbai-embed-large-v1`: prefixes not needed
+- For `BAAI/bge-m3` (default) and `mxbai-embed-large-v1`: prefixes not needed
 
 ---
 
@@ -1408,6 +1414,10 @@ Arkimede can expose the configured STT/TTS providers over the Wyoming protocol
   → pick the new STT/TTS in the Assist pipeline.
 
 Works with any provider chosen in the panel (internal Whisper/Piper or cloud).
+The internal Piper speaks with `it_IT-serena-medium` by default (`PIPER_VOICE`, or a
+voice set in the panel, wins). Installs that relied on the previous default
+(`it_IT-paola-medium`) switch to serena at the next image rebuild; set
+`PIPER_VOICE=it_IT-paola-medium` to keep paola.
 Pick a **conversation user** (and optionally one of their agents) in the same
 card and the hub also gets Arkimede as its conversation agent: the whole voice
 pipeline runs on Arkimede with no extra component on the hub.

@@ -6,5 +6,7 @@
   "lastAdminProtected": "Operazione negata: deve restare almeno un amministratore attivo.",
   "cannotRemoveOwnAdmin": "Non puoi rimuovere il tuo stesso ruolo di amministratore.",
   "cannotDisableOwnAccount": "Non puoi disabilitare il tuo stesso account.",
-  "cannotDeleteOwnAccount": "Non puoi eliminare il tuo stesso account."
+  "cannotDeleteOwnAccount": "Non puoi eliminare il tuo stesso account.",
+  "memoryNotEmpty": "Il tipo di memoria si può cambiare solo finché la memoria è vuota.",
+  "episodicMemoryOff": "Attiva prima la memoria episodica."
 }

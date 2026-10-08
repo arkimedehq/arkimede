@@ -100,6 +100,19 @@ function ScopeControl({ current, pending, isAdmin, onApply }: {
   );
 }
 
+/** Whether the owner has the skill switched on: shown to everyone, so a user of a shared skill knows if it works. */
+function EnabledBadge({ enabled }: { enabled: boolean | undefined }) {
+  const { t } = useTranslation('skills');
+  const on = enabled !== false;
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[10px]
+      ${on ? 'border-emerald-800/40 bg-emerald-900/20 text-emerald-400' : 'border-gray-700 bg-gray-800/60 text-gray-400'}`}
+      title={on ? t('enabledBadge.onHint') : t('enabledBadge.offHint')}>
+      <Power size={9} /> {on ? t('enabledBadge.on') : t('enabledBadge.off')}
+    </span>
+  );
+}
+
 function ScopeBadge({ scope }: { scope: SkillScope }) {
   const { t } = useTranslation('skills');
   if (scope === 'org') return (
@@ -420,6 +433,7 @@ function SkillDrawer({
             </div>
             <div className="flex items-center gap-2 mt-2 flex-wrap">
               <StatusBadge status={current.status} />
+              <EnabledBadge enabled={current.enabled} />
               <ScopeBadge scope={current.scope} />
               {current.scope === 'org' && !current.isApproved && (
                 <span className="px-2 py-0.5 rounded-md border border-amber-700/50 bg-amber-900/30 text-amber-300 text-xs">
@@ -2298,6 +2312,7 @@ function SkillCard({
             {isOwn && <SkillToggle skill={skill} />}
             <div className="flex flex-col items-end gap-1">
               <StatusBadge status={skill.status} />
+              {!isOwn && <EnabledBadge enabled={skill.enabled} />}
               <ScopeBadge scope={skill.scope} />
             </div>
           </div>
@@ -3438,6 +3453,7 @@ function SharedSkillCard({ skill, onClick }: { skill: Skill; onClick: () => void
         </div>
         <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
           <StatusBadge status={skill.status} />
+          <EnabledBadge enabled={skill.enabled} />
           {/* Visibility badge */}
           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border
             border-indigo-800/40 bg-indigo-900/30 text-indigo-400 text-[10px]">

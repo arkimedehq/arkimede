@@ -112,6 +112,19 @@ export class User {
   @Column({ type: 'int', nullable: true, default: null })
   memoryThreshold: number | null;
 
+  /**
+   * Episodic memory in Recordare (external service, src/recordare/): if true, the
+   * user's chats are sent to Recordare and its recall tools are offered to the
+   * agent. Separate from autoMemoryEnabled (A-MEM, unchanged). Default false.
+   * Consent inside Recordare is given by its admin, not by this switch.
+   */
+  @Column({ type: 'boolean', default: false })
+  episodicMemoryEnabled: boolean;
+
+  /** The user's ownerId in Recordare (GET api/v1/me), cached; null = not provisioned yet. */
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  recordareOwnerId: string | null;
+
   @OneToMany(() => Project, (p) => p.user)
   projects: Project[];
 

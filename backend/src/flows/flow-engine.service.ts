@@ -244,7 +244,8 @@ export class FlowEngineService {
   private async executeNode(node: FlowNode, state: FlowRunState, userId: string, opts: RunOptions, def: FlowDefinition): Promise<NodeResult> {
     switch (node.type) {
       case 'tool':      return this.execTool(node, state, userId);
-      case 'llm':       return this.execLlm(node, state);
+      // The flow runs for this user: its llm nodes are attributed to them.
+      case 'llm':       return runWithLlmCallContext({ userId }, () => this.execLlm(node, state));
       case 'condition': return this.execCondition(node, state);
       case 'http':      return this.execHttp(node, state);
       case 'skill':     return this.execSkill(node, state, userId);

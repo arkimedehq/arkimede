@@ -50,6 +50,9 @@ import {SchedulingService} from '../scheduling/scheduling.service';
 import {SandboxService} from '../sandbox/sandbox.service';
 import {LlmUsage, sumUsageFromMessages} from '../common/llm-usage.util';
 import {runWithLlmCallContext} from '../usage/llm-call-context';
+import {withAgentSpan} from '../observability/genai-tracing';
+import {RecordareMcpService} from '../recordare/recordare-mcp.service';
+import {APP_NAME} from '../config/app.config';
 
 /**
  * Optional per-call overrides for streamResponse. Used by headless callers
@@ -68,6 +71,8 @@ export interface StreamResponseOptions {
   origin?: 'chat' | 'voice';
   /** LLM config override (Agent.llmConfigId): run on that model instead of the default. */
   llmConfigId?: string;
+  /** Agent.memoryContext: append the user's relevant memories from Recordare to the system prompt. */
+  memoryContext?: boolean;
 }
 
 @Injectable()
@@ -124,6 +129,7 @@ export class AgentService implements OnModuleInit {
     @Inject(MultiAgentService)          private readonly multiAgentService:  MultiAgentService,
     @Inject(SchedulingService)          private readonly schedulingService:  SchedulingService,
     @Inject(SandboxService)             private readonly sandboxService:     SandboxService,
+    @Optional() @Inject(RecordareMcpService) private readonly recordareMcp: RecordareMcpService | null = null,
   ) {}
 
   /**
@@ -201,7 +207,7 @@ export class AgentService implements OnModuleInit {
     const isReasoning = opts?.llmConfigId
       ? (await this.llmProviderService.getModelBundleForConfigId(opts.llmConfigId)).isReasoning
       : await this.llmProviderService.isReasoningModel();
-    const { agent, contextBreakdown, effectiveMaxHistoryTokens, model, effectiveHistory, provider, modelName } = await this.resolveAgent(userId, projectId, userInput, history, chatId, opts?.toolOverride, opts?.agentPromptOverride, opts?.llmConfigId);
+    const { agent, contextBreakdown, effectiveMaxHistoryTokens, model, effectiveHistory, provider, modelName } = await this.resolveAgent(userId, projectId, userInput, history, chatId, opts?.toolOverride, opts?.agentPromptOverride, opts?.llmConfigId, opts?.memoryContext);
     const messages = await this.buildMessages(userInput, effectiveHistory, attachments, inlineContents, attachmentBlocks, isReasoning, effectiveMaxHistoryTokens, model, provider);
 
     // ── Context breakdown log ─────────────────────────────────────────────────
@@ -250,7 +256,9 @@ export class AgentService implements OnModuleInit {
       // Scheduling class + attribution (P1-F2): the whole graph consumption runs
       // inside the call context — the dispatcher and the metrics handler read it
       // when each model call actually fires during the iteration below.
-      await runWithLlmCallContext({ priority: 'interactive', userId, origin: opts?.origin ?? 'chat' }, async () => {
+      // invoke_agent span (OpenTelemetry, opt-in; pass-through when off).
+      await withAgentSpan({ name: APP_NAME, userId, conversationId: chatId }, () =>
+      runWithLlmCallContext({ priority: 'interactive', userId, origin: opts?.origin ?? 'chat' }, async () => {
       const stream = await agent.stream(
         { messages },
         {
@@ -358,7 +366,7 @@ export class AgentService implements OnModuleInit {
           lastToolCalled = undefined;  // reset: the next step starts clean
         }
       }
-      }); // end runWithLlmCallContext
+      })); // end runWithLlmCallContext / withAgentSpan
     } catch (err: any) {
       // AbortError = intentional interruption by the client → not an error
       if (err?.name === 'AbortError' || signal?.aborted) {
@@ -514,13 +522,15 @@ export class AgentService implements OnModuleInit {
     const { agent, effectiveMaxHistoryTokens, model, effectiveHistory, provider, modelName } = await this.resolveAgent(userId, projectId, userInput, history, undefined, toolFilter);
     const messages = await this.buildMessages(userInput, effectiveHistory, [], [], [], isReasoning, effectiveMaxHistoryTokens, model, provider);
     // Headless runs (automations) never compete with interactive traffic (P1-F2).
-    const result   = await runWithLlmCallContext({ priority: 'background', userId, origin: 'automation' }, () =>
+    const run      = () => runWithLlmCallContext({ priority: 'background', userId, origin: 'automation' }, () =>
       agent.invoke({ messages }, {
         recursionLimit: AgentService.AGENT_RECURSION_LIMIT,
         // Same LangGraph quirk as streamResponse: instance callbacks don't fire
         // inside the graph → re-pass the serving-metrics handler via config.
         callbacks: Array.isArray((model as any).callbacks) ? (model as any).callbacks : undefined,
       }));
+    // invoke_agent span (OpenTelemetry, opt-in; pass-through when off).
+    const result   = await withAgentSpan<Awaited<ReturnType<typeof run>>>({ name: APP_NAME, userId }, run);
     const lastMsg  = result.messages[result.messages.length - 1];
     const text = typeof lastMsg.content === 'string' ? lastMsg.content : JSON.stringify(lastMsg.content);
     return { text, usage: sumUsageFromMessages(result.messages), provider: provider ?? null, model: modelName ?? null };
@@ -915,6 +925,8 @@ export class AgentService implements OnModuleInit {
     agentPromptOverride?: string,
     /** LLM config override (Agent.llmConfigId): null/undefined = platform default. */
     llmConfigOverride?: string,
+    /** Agent.memoryContext: the user's relevant memories from Recordare, appended to the system prompt. */
+    memoryContext?: boolean,
   ): Promise<{ agent: any; contextBreakdown: ContextBreakdown; effectiveMaxHistoryTokens: number; model: any; effectiveHistory: Message[]; provider: string; modelName: string | null }> {
     // Per-agent model override: resolved once (cached per config id), BEFORE the
     // parallel loads so the bundle is not built twice concurrently.
@@ -934,7 +946,7 @@ export class AgentService implements OnModuleInit {
       userId
         ? this.userRepo.findOne({
             where: { id: userId },
-            select: { id: true, role: true, systemPrompt: true, language: true, toolLoadingStrategy: true, toolLoadingMaxTools: true, toolSchemaFormat: true, maxHistoryTokens: true, autoMemoryEnabled: true },
+            select: { id: true, role: true, systemPrompt: true, language: true, toolLoadingStrategy: true, toolLoadingMaxTools: true, toolSchemaFormat: true, maxHistoryTokens: true, autoMemoryEnabled: true, episodicMemoryEnabled: true },
           })
         : Promise.resolve(null),
       projectId
@@ -962,10 +974,11 @@ export class AgentService implements OnModuleInit {
     // every provider allows only one system/systemInstruction, so this is the
     // only safe cross-provider location — no extra messages nor non-alternating
     // roles. With compaction off or without a chatId it is a no-op.
-    const { summary, effectiveHistory } = await this.compactHistory(
+    // Compaction summarizes this user's chat: attribute its LLM call to the user.
+    const { summary, effectiveHistory } = await runWithLlmCallContext(userId ? { userId } : {}, () => this.compactHistory(
       chatId, history, effectiveMaxHistoryTokens,
       globalToolConfig.historyCompactionEnabled, globalToolConfig.historyCompactionThreshold,
-    );
+    ));
 
     // ── Convert tools into manifests for ToolSelectionService ─────────────────
     const fullManifests: ToolManifest[] = [
@@ -1143,8 +1156,17 @@ export class AgentService implements OnModuleInit {
     // blocks because it changes on every request (like summary/feedback).
     const nowTextBlock = nowBlock(isoWithOffset(new Date(), DEFAULT_TIMEZONE), DEFAULT_TIMEZONE);
 
-    // Extra non-cached blocks (change per request): date/time + summary + feedback + memory.
-    const extraBlocks = [nowTextBlock, summaryTextBlock, feedbackTextBlock, memoryTextBlock].filter((b): b is string => !!b);
+    // ── Recordare memory context (Agent.memoryContext) ────────────────────────
+    // The user's memories relevant to this message, as Recordare's fenced block
+    // (data, not instructions). Per-query → NON-cached, last; bounded wait, never
+    // fails the answer. Recordare applies consent and the viewer rule.
+    const recordareContextBlock = memoryContext && user?.episodicMemoryEnabled && userId && chatId && userInput?.trim() && this.recordareMcp?.enabled
+      ? await this.recordareMcp.contextBlock(userId, chatId, userInput)
+      : null;
+
+    // Extra non-cached blocks (change per request): date/time + summary + feedback + memory + Recordare context.
+    const extraBlocks = [nowTextBlock, summaryTextBlock, feedbackTextBlock, memoryTextBlock, recordareContextBlock]
+      .filter((b): b is string => !!b);
 
     // ── Prompt caching: build the messageModifier based on the provider ───────
     //
@@ -1194,11 +1216,19 @@ export class AgentService implements OnModuleInit {
       ? this.sandboxService.buildSandboxTools(userId, projectId, chatId)
       : [];
 
+    // Episodic memory in Recordare (opt-in per user, separate from A-MEM above):
+    // recordare_* tools bound to this user and chat (the conversation is the
+    // viewer context — no chat id, no tools).
+    const recordareTools = user?.episodicMemoryEnabled && userId && chatId && this.recordareMcp?.enabled
+      ? await this.recordareMcp.buildTools(userId, chatId)
+      : [];
+
     const allTools = [
       ...this.builtInTools,
       ...optimizedExtraTools,
       ...schedulingTools,
       ...memoryTools,
+      ...recordareTools,
       ...sandboxTools,
       ...(deferredMetaTool ? [deferredMetaTool] : []),
     ];

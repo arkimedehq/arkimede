@@ -22,7 +22,8 @@
     "users": "Utenti",
     "teams": "Team",
     "audit": "Audit",
-    "backup": "Backup"
+    "backup": "Backup",
+    "diary": "Diario"
   },
   "profile": {
     "title": "Profilo",
@@ -73,7 +74,19 @@
     "mergeProposal": "Fusione: sostituirà le note originali",
     "graphView": "Grafo",
     "listView": "Elenco",
-    "graphHint": "Passa sopra un nodo per leggere la nota. I collegamenti vengono dal job di evoluzione."
+    "graphHint": "Passa sopra un nodo per leggere la nota. I collegamenti vengono dal job di evoluzione.",
+    "episodicTitle": "Memoria episodica (Recordare)",
+    "episodicIntro": "Se attiva, le tue chat vengono inviate anche a Recordare, il servizio di memoria episodica dell'installazione: ricorda cosa è successo e quando (eventi, piani, cambiamenti) e l'assistente può interrogarlo. Indipendente dalla memoria persistente qui sopra.",
+    "episodicToggle": "Memoria episodica",
+    "episodicHint": "Recordare conserva ed estrae ricordi solo dopo che il suo amministratore ha attivato lì il tuo diario.",
+    "episodicWaiting": "In attesa di attivazione da parte dell'amministratore di Recordare",
+    "episodicKind": "Tipo di memoria",
+    "episodicKindPersonal": "Personale",
+    "episodicKindShared": "Condivisa",
+    "episodicKindHint": "Personale: i ricordi sono tuoi. Condivisa: per un account usato da più persone (es. l'assistente vocale di casa); chi si presenta (\"sono Andrea\") firma i propri ricordi. Si può cambiare solo finché la memoria è vuota.",
+    "episodicSharedNotice": "Memoria condivisa: chiunque usi questo account legge e scrive tutti i suoi ricordi. Non usarla per cose private.",
+    "episodicAtlas": "Apri Recordare Atlas",
+    "episodicAtlasHint": "La vista dal vivo della memoria (solo amministratori: mostra l'attività di tutte le persone)."
   },
   "usage": {
     "title": "Consumi",

@@ -3,8 +3,8 @@
 
 import { BadRequestException, ConflictException, Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
@@ -15,6 +15,7 @@ import { Feedback } from '../feedback/feedback.entity';
 import { MEMORY_COLLECTION, memoryIndexText, memoryVectorPayload } from '../user-memory/memory-index';
 import { FEEDBACK_COLLECTION, feedbackIndexText } from '../feedback/feedback-index';
 import type { ScrolledPoint } from './vector-store.types';
+import { embeddingIdentity, recordIndexedEmbedding } from './embedding-model.check';
 
 /**
  * Admin re-embed: recomputes every vector of the selected collections with the ACTIVE
@@ -101,6 +102,7 @@ export class ReembedService {
     @InjectRepository(UserMemory) private readonly memoryRepo: Repository<UserMemory>,
     @InjectRepository(Feedback)   private readonly feedbackRepo: Repository<Feedback>,
     private readonly config: ConfigService,
+    @InjectDataSource() private readonly ds: DataSource,
   ) {}
 
   /** Last (or running) report. */
@@ -129,13 +131,30 @@ export class ReembedService {
     };
     this.current = report;
     this.logger.log(`Re-embed started by ${actor}: ${collections.length} collection(s) → ${targetModel}`);
-    void this.run(report).catch((err) => {
+    const fullRun = !only?.length;
+    void this.run(report).then(() => (fullRun ? this.recordModel() : undefined)).catch((err) => {
       report.status = 'failed';
       report.error = err?.message ?? String(err);
       report.finishedAt = new Date().toISOString();
       this.logger.error(`Re-embed failed: ${report.error}`);
     });
     return report;
+  }
+
+  /**
+   * After a complete run (all collections): the stored vectors now come from the
+   * active model — record it for the start-up check (embedding-model.check.ts).
+   * Best effort: a failure here leaves the report "done" and logs a warning.
+   */
+  private async recordModel(): Promise<void> {
+    try {
+      const active = await this.embedding.getActive();
+      if (!active.confirmed) return;
+      await recordIndexedEmbedding(this.ds, embeddingIdentity(active));
+      this.logger.log(`Embedding model of the stored vectors recorded: ${embeddingIdentity(active)}`);
+    } catch (err: any) {
+      this.logger.warn(`Could not record the embedding model after the re-embed: ${err?.message ?? err}`);
+    }
   }
 
   // ── Run ──────────────────────────────────────────────────────────────────────

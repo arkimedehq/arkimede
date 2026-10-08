@@ -16,6 +16,8 @@ import { initReactI18next } from 'react-i18next';
 import LanguageDetector from 'i18next-browser-languagedetector';
 
 import enCommon from './locales/en/common.json';
+import enDiary from './locales/en/diary.json';
+import itDiary from './locales/it/diary.json';
 import itCommon from './locales/it/common.json';
 import enSettings from './locales/en/settings.json';
 import itSettings from './locales/it/settings.json';
@@ -64,8 +66,8 @@ i18n
   .use(initReactI18next)
   .init({
     resources: {
-      en: { common: enCommon, settings: enSettings, tools: enTools, agents: enAgents, chat: enChat, flows: enFlows, mcp: enMcp, skills: enSkills, users: enUsers, teams: enTeams, datasources: enDatasources, feedback: enFeedback, automations: enAutomations, audit: enAudit, activity: enActivity, auth: enAuth, projects: enProjects, files: enFiles, notifications: enNotifications, backup: enBackup },
-      it: { common: itCommon, settings: itSettings, tools: itTools, agents: itAgents, chat: itChat, flows: itFlows, mcp: itMcp, skills: itSkills, users: itUsers, teams: itTeams, datasources: itDatasources, feedback: itFeedback, automations: itAutomations, audit: itAudit, activity: itActivity, auth: itAuth, projects: itProjects, files: itFiles, notifications: itNotifications, backup: itBackup },
+      en: { common: enCommon, settings: enSettings, tools: enTools, agents: enAgents, chat: enChat, flows: enFlows, mcp: enMcp, skills: enSkills, users: enUsers, teams: enTeams, datasources: enDatasources, feedback: enFeedback, automations: enAutomations, audit: enAudit, activity: enActivity, diary: enDiary, auth: enAuth, projects: enProjects, files: enFiles, notifications: enNotifications, backup: enBackup },
+      it: { common: itCommon, settings: itSettings, tools: itTools, agents: itAgents, chat: itChat, flows: itFlows, mcp: itMcp, skills: itSkills, users: itUsers, teams: itTeams, datasources: itDatasources, feedback: itFeedback, automations: itAutomations, audit: itAudit, activity: itActivity, diary: itDiary, auth: itAuth, projects: itProjects, files: itFiles, notifications: itNotifications, backup: itBackup },
     },
     fallbackLng: 'en',
     supportedLngs: SUPPORTED_LANGUAGES as unknown as string[],

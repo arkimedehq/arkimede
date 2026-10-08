@@ -63,7 +63,12 @@ piper-service/
   "response_format": "wav" }`.
   - `voice`: a Piper voice id (e.g. `it_IT-paola-medium`,
     `en_US-lessac-medium`). Default from env `PIPER_VOICE`
-    (default `it_IT-paola-medium`).
+    (default `it_IT-serena-medium`; it was `it_IT-paola-medium` until
+    2026-10 — an install that set `PIPER_VOICE` or a voice in the admin
+    panel keeps it, one that relied on the default switches to serena at
+    the next image rebuild: set `PIPER_VOICE=it_IT-paola-medium` to keep
+    paola. With `PIPER_OFFLINE=1` and serena not on disk the service falls
+    back to a voice already in the models volume).
   - Response: raw audio bytes with correct `Content-Type`
     (`audio/wav`). Support `wav` first; `mp3` optional later (needs
     ffmpeg — skip in v1, return 400 for unsupported formats).
@@ -91,7 +96,7 @@ dev (mirroring whisper's `9000:9000` at :33-35). Add
 (mirroring `TRANSCRIPTION_BASE_URL` at :175).
 
 `.env.example`: new block next to the whisper one (:147-153):
-`PIPER_VOICE=it_IT-paola-medium`, `TTS_PROVIDER=internal`,
+`PIPER_VOICE=it_IT-serena-medium`, `TTS_PROVIDER=internal`,
 `TTS_BASE_URL=http://localhost:9100/v1` (dev default), `TTS_API_KEY=`
 (empty for internal).
 

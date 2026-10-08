@@ -7,9 +7,10 @@ import { User } from './users.entity';
 import { UsersService } from './users.service';
 import { UsersController } from './users.controller';
 import { AdminUsersController } from './admin-users.controller';
+import { RecordareModule } from '../recordare/recordare.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([User])],
+  imports: [TypeOrmModule.forFeature([User]), RecordareModule],
   controllers: [UsersController, AdminUsersController],
   providers: [UsersService],
   exports: [UsersService],

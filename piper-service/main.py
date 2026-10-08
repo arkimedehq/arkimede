@@ -34,7 +34,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 MODELS_DIR    = Path(os.getenv("PIPER_MODELS_DIR", "/models"))
-DEFAULT_VOICE = os.getenv("PIPER_VOICE", "it_IT-paola-medium")
+DEFAULT_VOICE = os.getenv("PIPER_VOICE", "it_IT-serena-medium")
 OFFLINE       = os.getenv("PIPER_OFFLINE", "0") == "1"
 
 # HuggingFace layout: <lang>/<lang_REGION>/<name>/<quality>/<voice-id>.onnx[.json]
@@ -99,9 +99,20 @@ def synthesize_wav(voice: PiperVoice, text: str) -> bytes:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global ready
+    global ready, DEFAULT_VOICE
     with _load_lock:
-        load_voice(DEFAULT_VOICE)
+        try:
+            load_voice(DEFAULT_VOICE)
+        except HTTPException:
+            # The default voice cannot be fetched (PIPER_OFFLINE=1 or no network), e.g.
+            # after the built-in default changed on an install whose models volume
+            # predates it: keep serving with a voice already on disk instead of failing.
+            local = sorted(p.stem for p in MODELS_DIR.glob("*.onnx")) if MODELS_DIR.is_dir() else []
+            if not local:
+                raise
+            logger.warning(f"Default voice {DEFAULT_VOICE} not available: using local voice {local[0]}")
+            DEFAULT_VOICE = local[0]
+            load_voice(DEFAULT_VOICE)
     ready = True
     logger.info(f"Piper default voice ready: {DEFAULT_VOICE}")
     yield

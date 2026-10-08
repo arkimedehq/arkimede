@@ -652,6 +652,7 @@ function McpTestPanel({ serverId }: { serverId: string }) {
         {r && r.ok && (
           <span className="text-xs text-emerald-400">
             {t('test.ok', { count: r.tools.length, ms: r.latencyMs })}
+            {!!r.resources?.length && <> · {t('test.resourcesCount', { count: r.resources.length })}</>}
             {r.sessionMode && (
               <span className="text-gray-500"> · {t(
                 r.sessionMode === 'streamable' ? 'test.modeStreamable'
@@ -670,7 +671,7 @@ function McpTestPanel({ serverId }: { serverId: string }) {
           <p className="text-xs text-red-300 break-all">{r.error}</p>
         </div>
       )}
-      {r?.ok && r.tools.length === 0 && (
+      {r?.ok && r.tools.length === 0 && !r.resources?.length && (
         <p className="text-xs text-amber-500 dark:text-amber-400">{t('test.noTools')}</p>
       )}
       {r?.ok && r.tools.length > 0 && (
@@ -683,6 +684,19 @@ function McpTestPanel({ serverId }: { serverId: string }) {
               )}
             </div>
           ))}
+        </div>
+      )}
+      {r?.ok && !!r.resources?.length && (
+        <div className="space-y-1">
+          <p className="text-[11px] text-gray-500">{t('test.resourcesTitle')}</p>
+          <div className="max-h-40 overflow-y-auto space-y-1 rounded-lg border border-gray-800 bg-gray-900/50 p-2.5">
+            {r.resources.map((res) => (
+              <div key={res.uri} className="text-xs leading-snug">
+                <span className="font-mono text-gray-200">{res.uri}</span>
+                {res.name && <span className="text-gray-500"> — {res.name}</span>}
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

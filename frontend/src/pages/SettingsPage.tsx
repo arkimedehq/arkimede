@@ -11,7 +11,7 @@ import {
   FolderOpen, Brain, Download, Trash2, Search, Wrench, Plug, UserCircle,
   Save, Eye, EyeOff, KeyRound, Cpu, Wifi, WifiOff, Boxes, Pencil, Plus,
   Star, Server, FileStack, X, Sparkles, Eraser, Zap, Filter, Package, ThumbsUp, BarChart3,
-  Users, UsersRound, Workflow, Network, CalendarClock, Activity, ShieldAlert, Mic, Terminal, Check, Copy, DatabaseBackup, Volume2, Radio, AlertTriangle, ScanText,
+  Users, UsersRound, Workflow, Network, CalendarClock, Activity, ShieldAlert, Mic, Terminal, Check, Copy, DatabaseBackup, Volume2, Radio, AlertTriangle, ScanText, ExternalLink, BookOpen,
 } from 'lucide-react';
 import type { LlmProvider, EmbeddingProvider, EmbeddingConfig, ToolLoadingConfig, ToolLoadingStrategy, ToolSchemaFormat, TranscriptionProvider, TtsProvider, SandboxNetwork, SandboxExecMode } from '../api/appConfig';
 import { apiKeysApi } from '../api/apiKeys';
@@ -40,14 +40,16 @@ import { AgentsSection, AgentTeamsSection } from './AgentsPage';
 import { AutomationsSection } from './AutomationsPage';
 import { ActivitySection } from './ActivityPage';
 import { AuditSection } from './AuditPage';
+import { DiarySection } from './DiaryPage';
 import { BackupSection } from './BackupPage';
 import { copyText } from '../utils/clipboard';
 
 // ── Settings sections ──────────────────────────────────────────────────────────
 // `id` also acts as the i18n key: t(`settings:nav.${id}`)
-const SECTIONS: { id: string; icon: React.ElementType; adminOnly?: boolean; disabled?: boolean }[] = [
+const SECTIONS: { id: string; icon: React.ElementType; adminOnly?: boolean; disabled?: boolean; recordare?: boolean }[] = [
   { id: 'profile',  icon: UserCircle },
   { id: 'memory',   icon: BrainCircuit },
+  { id: 'diary',    icon: BookOpen, recordare: true },
   { id: 'ai',       icon: Bot },
   { id: 'tools',    icon: Wrench },
   { id: 'mcp',      icon: Plug },
@@ -69,7 +71,7 @@ const SECTIONS: { id: string; icon: React.ElementType; adminOnly?: boolean; disa
   { id: 'backup',   icon: DatabaseBackup, adminOnly: true },
 ];
 
-type SectionId = 'profile' | 'memory' | 'ai' | 'tools' | 'mcp' | 'skills' | 'flows' | 'agents' | 'agentteams' | 'automations' | 'activity' | 'files' | 'database' | 'usage' | 'vectordb' | 'voice' | 'feedback' | 'users' | 'teams' | 'audit' | 'backup';
+type SectionId = 'profile' | 'memory' | 'diary' | 'ai' | 'tools' | 'mcp' | 'skills' | 'flows' | 'agents' | 'agentteams' | 'automations' | 'activity' | 'files' | 'database' | 'usage' | 'vectordb' | 'voice' | 'feedback' | 'users' | 'teams' | 'audit' | 'backup';
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function SettingsPage() {
@@ -78,8 +80,10 @@ export default function SettingsPage() {
   const user = useStore((s) => s.user);
   const isAdmin = user?.role === 'admin';
 
-  // Filter the visible sections based on the role
-  const visibleSections = SECTIONS.filter((s) => !s.adminOnly || isAdmin);
+  // Filter the visible sections based on the role (the Diary only when Recordare is configured)
+  const profileQuery = useQuery({ queryKey: ['profile'], queryFn: profileApi.get, staleTime: 60_000 });
+  const recordare = profileQuery.data?.episodicMemoryAvailable === true;
+  const visibleSections = SECTIONS.filter((s) => (!s.adminOnly || isAdmin) && (!s.recordare || recordare));
 
   return (
     <div className="flex flex-col md:flex-row h-full min-w-0 bg-gray-950">
@@ -113,6 +117,7 @@ export default function SettingsPage() {
         <div className={activeSection === 'flows' ? 'h-full px-4 py-5' : 'max-w-4xl mx-auto px-4 sm:px-8 py-6 sm:py-8'}>
         {activeSection === 'profile'  && <div className="space-y-6"><ProfileSection /><ApiKeysCard /></div>}
         {activeSection === 'memory'   && <MemorySection />}
+        {activeSection === 'diary'    && <DiarySection enabled={profileQuery.data?.episodicMemoryEnabled === true} />}
         {activeSection === 'ai'       && <AiSection />}
         {activeSection === 'tools'    && <ToolsSection />}
         {activeSection === 'mcp'      && <McpSection />}
@@ -656,6 +661,107 @@ function MemorySection() {
         memoryThreshold={profileQuery.data?.memoryThreshold ?? null}
         loading={profileQuery.isLoading}
       />
+      {profileQuery.data?.episodicMemoryAvailable && (
+        <EpisodicMemoryCard
+          enabledInitial={profileQuery.data.episodicMemoryEnabled ?? false}
+          status={profileQuery.data.episodicMemoryStatus ?? 'off'}
+          kind={profileQuery.data.episodicMemoryKind ?? null}
+          atlasUrl={profileQuery.data.recordareAtlasUrl ?? null}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Episodic memory (Recordare) card ───────────────────────────────────────
+// Shown only when the installation has Recordare configured. Gates Arkimede's
+// side (ingest + recall tools); consent inside Recordare stays with its admin.
+// The kind (personal / shared by everyone using the account) is the user's choice,
+// accepted by Recordare only while the memory is empty. Admins get the Atlas link.
+function EpisodicMemoryCard({ enabledInitial, status, kind, atlasUrl }: {
+  enabledInitial: boolean;
+  status: 'off' | 'waiting_activation' | 'active' | 'unknown';
+  kind: 'human' | 'entity' | null;
+  atlasUrl: string | null;
+}) {
+  const { t } = useTranslation('settings');
+  const qc = useQueryClient();
+  const [enabled, setEnabled] = useState(enabledInitial);
+  useEffect(() => { setEnabled(enabledInitial); }, [enabledInitial]);
+  const toggleMutation = useMutation({
+    mutationFn: (val: boolean) => profileApi.update({ episodicMemoryEnabled: val }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['profile'] }),
+  });
+  const [kindError, setKindError] = useState<string | null>(null);
+  const kindMutation = useMutation({
+    mutationFn: (val: 'human' | 'entity') => profileApi.update({ episodicMemoryKind: val }),
+    onMutate: () => setKindError(null),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['profile'] }),
+    onError: (e: any) => setKindError(e?.response?.data?.message ?? e.message),
+  });
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
+      <div>
+        <h3 className="text-sm font-semibold text-gray-100 flex items-center gap-2">
+          <BrainCircuit size={14} className="text-gray-400" />
+          {t('memory.episodicTitle')}
+        </h3>
+        <p className="text-sm text-gray-500 mt-1">{t('memory.episodicIntro')}</p>
+      </div>
+      <div className="flex items-center justify-between py-2 border-t border-gray-800">
+        <div>
+          <p className="text-sm text-gray-200">{t('memory.episodicToggle')}</p>
+          <p className="text-xs text-gray-500 mt-0.5">{t('memory.episodicHint')}</p>
+          {enabled && status === 'waiting_activation' && (
+            <p className="text-xs text-amber-400 mt-1">{t('memory.episodicWaiting')}</p>
+          )}
+        </div>
+        <button
+          role="switch"
+          aria-checked={enabled}
+          disabled={toggleMutation.isPending}
+          onClick={() => { const next = !enabled; setEnabled(next); toggleMutation.mutate(next); }}
+          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors
+            disabled:opacity-50 focus:outline-none ${enabled ? 'bg-blue-600' : 'bg-gray-700'}`}
+        >
+          <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform
+            ${enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+        </button>
+      </div>
+      {enabled && kind && (
+        <div className="py-2 border-t border-gray-800 space-y-2">
+          <p className="text-sm text-gray-200">{t('memory.episodicKind')}</p>
+          <div className="flex gap-2">
+            {(['human', 'entity'] as const).map((k) => (
+              <button
+                key={k}
+                disabled={kindMutation.isPending || k === kind}
+                onClick={() => kindMutation.mutate(k)}
+                className={`px-3 py-1.5 rounded-lg text-xs border transition-colors disabled:cursor-default
+                  ${k === kind ? 'bg-blue-600/20 border-blue-500 text-blue-200' : 'border-gray-700 text-gray-400 hover:border-gray-500'}`}
+              >
+                {t(k === 'human' ? 'memory.episodicKindPersonal' : 'memory.episodicKindShared')}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-gray-500">{t('memory.episodicKindHint')}</p>
+          {kind === 'entity' && (
+            <p className="text-xs text-amber-400 flex items-start gap-1.5">
+              <UsersRound size={12} className="mt-0.5 shrink-0" />{t('memory.episodicSharedNotice')}
+            </p>
+          )}
+          {kindError && <p className="text-xs text-red-400">{kindError}</p>}
+        </div>
+      )}
+      {atlasUrl && (
+        <div className="pt-2 border-t border-gray-800">
+          <a href={atlasUrl} target="_blank" rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-sm text-blue-400 hover:text-blue-300">
+            <ExternalLink size={13} />{t('memory.episodicAtlas')}
+          </a>
+          <p className="text-xs text-gray-500 mt-0.5">{t('memory.episodicAtlasHint')}</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -5137,7 +5243,7 @@ const TTS_PROVIDERS: {
     descKey: 'tts.providerInternalDesc',
     needsKey: false, needsUrl: false,
     defaultModels: [], internal: true,
-    defaultVoices: ['it_IT-paola-medium', 'it_IT-serena-medium', 'it_IT-riccardo-x_low', 'en_US-lessac-medium', 'en_GB-alba-medium', 'de_DE-thorsten-medium', 'fr_FR-siwis-medium', 'es_ES-davefx-medium'],
+    defaultVoices: ['it_IT-serena-medium', 'it_IT-paola-medium', 'it_IT-riccardo-x_low', 'en_US-lessac-medium', 'en_GB-alba-medium', 'de_DE-thorsten-medium', 'fr_FR-siwis-medium', 'es_ES-davefx-medium'],
   },
   {
     value: 'openai', label: 'OpenAI',

@@ -43,11 +43,13 @@ interface EmbeddingRuntimeConfig {
   docPrefix:    string;
   chunkSize:    number;
   chunkOverlap: number;
+  /** `internal` only: true when model/dims come from probing the running service (not a fallback). */
+  probed?: boolean;
 }
 
 /** Model defaults when not specified in the DB. */
 const MODEL_DEFAULTS: Record<EmbeddingProvider, string> = {
-  internal:           'mixedbread-ai/mxbai-embed-large-v1',
+  internal:           'BAAI/bge-m3',
   openai:             'text-embedding-3-small',
   voyage:             'voyage-multilingual-2',
   ollama:             'nomic-embed-text',
@@ -134,9 +136,13 @@ export class EmbeddingProviderService {
    * Provider, model and dimension actually in use (for `internal`: probed from the
    * embedding service, i.e. the model it has loaded).
    */
-  async getActive(): Promise<{ provider: string; model: string; vectorSize: number }> {
+  async getActive(): Promise<{ provider: string; model: string; vectorSize: number; confirmed: boolean }> {
     const { config } = await this.getClient();
-    return { provider: config.provider, model: config.model, vectorSize: config.vectorSize };
+    return {
+      provider: config.provider, model: config.model, vectorSize: config.vectorSize,
+      // `internal` with the service not answering: model/dims are a fallback, not the truth.
+      confirmed: config.provider !== 'internal' || config.probed === true,
+    };
   }
 
   /**
@@ -212,6 +218,7 @@ export class EmbeddingProviderService {
             docPrefix:   '',
             chunkSize:   dbConfig.embeddingChunkSize,
             chunkOverlap: dbConfig.embeddingChunkOverlap,
+            probed:      !!probed,
           };
         }
 

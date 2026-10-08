@@ -5,6 +5,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Message } from './messages.entity';
+import { enqueueRecordareMessageDeletes } from '../recordare/recordare-outbox';
 
 @Injectable()
 export class MessagesService {
@@ -51,6 +52,8 @@ export class MessagesService {
 
     const toDelete = msgs.slice(idx).map((m) => m.id);
     await this.repo.delete({ id: In(toDelete) });
+    // Recordare (opt-in): propagate the rewind to the episodic memory (outbox; never throws).
+    await enqueueRecordareMessageDeletes(this.repo.manager, chatId, toDelete);
     return toDelete;
   }
 }

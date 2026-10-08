@@ -1,0 +1,80 @@
+{
+  "title": "Diario",
+  "subtitle": "Cosa ricorda di te la memoria episodica (Recordare): puoi correggere, dimenticare e confermare.",
+  "off": "Il Diario mostra la tua memoria episodica: attivala in Memoria → Memoria episodica.",
+  "tabs": {
+    "timeline": "Linea del tempo",
+    "digests": "Diario",
+    "profile": "Chi sei",
+    "plans": "Piani",
+    "pending": "Da confermare"
+  },
+  "search": "Cerca nei ricordi…",
+  "find": "Cerca",
+  "more": "Mostra altri",
+  "error": "Errore",
+  "kind": {
+    "event": "evento",
+    "plan": "piano",
+    "state_change": "cambiamento"
+  },
+  "status": {
+    "open": "in programma",
+    "confirmed": "fatto",
+    "cancelled": "annullato",
+    "rescheduled": "spostato",
+    "unresolved": "non so com'è andato"
+  },
+  "inferred": "dedotto",
+  "corrected": "corretto",
+  "place": "Luogo",
+  "opinion": "Opinione",
+  "evidence": "Da dove viene",
+  "otherClient": "da un'altra piattaforma",
+  "history": "Versioni precedenti",
+  "outcome": "Com'è andata",
+  "role": {
+    "user": "tu",
+    "assistant": "assistente",
+    "tool": "strumento",
+    "other": "altra persona"
+  },
+  "correct": "Correggi",
+  "forget": "Dimentica",
+  "save": "Salva correzione",
+  "cancel": "Annulla",
+  "forgetConfirm": "Dimenticare questo ricordo? Verrà rimosso e non tornerà più.",
+  "level": {
+    "day": "giorno",
+    "month": "mese"
+  },
+  "facts": "Fatti",
+  "notes": "Gusti, abitudini e altro",
+  "since": "dal",
+  "now": "oggi",
+  "unknown": "non noto",
+  "category": {
+    "preference": "preferenza",
+    "habit": "abitudine",
+    "value": "valore",
+    "relationship": "relazione",
+    "knowledge": "conoscenza",
+    "profile": "profilo",
+    "constraint": "vincolo"
+  },
+  "pin": "Fissa",
+  "unpin": "Togli dai fissati",
+  "delete": "Elimina",
+  "deleteConfirm": "Eliminare questo elemento dalla memoria?",
+  "confirm": "Conferma",
+  "reject": "Rifiuta",
+  "pendingHint": "Cose che la memoria ha solo dedotto o che altri hanno detto di te: confermale o rifiutale.",
+  "empty": {
+    "timeline": "Nessun ricordo ancora.",
+    "digests": "Il diario si scrive di notte: ancora nessuna pagina.",
+    "facts": "Nessun fatto.",
+    "notes": "Nessuna nota.",
+    "plans": "Nessun piano aperto.",
+    "pending": "Niente da confermare."
+  }
+}

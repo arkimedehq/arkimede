@@ -36,6 +36,8 @@ export interface McpHttpSession {
   sessionId?: string;
   /** Negotiated protocol version (echoed via the MCP-Protocol-Version header). */
   protocolVersion: string;
+  /** Server capabilities from the initialize result (undefined when unparsable). */
+  capabilities?: Record<string, unknown>;
 }
 
 /**
@@ -115,17 +117,21 @@ export async function mcpInitialize(
 
   const sessionId = resp.headers.get('mcp-session-id') ?? undefined;
   let negotiated = MCP_PROTOCOL_VERSION;
+  let capabilities: Record<string, unknown> | undefined;
   try {
     const body = await readRpcBody(resp, 1);
     if (body?.error) throw new Error(`MCP initialize error: ${JSON.stringify(body.error)}`);
     if (typeof body?.result?.protocolVersion === 'string') {
       negotiated = body.result.protocolVersion;
     }
+    if (body?.result?.capabilities && typeof body.result.capabilities === 'object') {
+      capabilities = body.result.capabilities;
+    }
   } catch (err: any) {
     if (String(err?.message).startsWith('MCP initialize error')) throw err;
     // Unparsable initialize body: keep the requested version (plain servers).
   }
-  const session: McpHttpSession = { sessionId, protocolVersion: negotiated };
+  const session: McpHttpSession = { sessionId, protocolVersion: negotiated, capabilities };
 
   // Required by the spec before using the session; plain servers may reject the
   // notification (e.g. 404/405) — tolerated, the session simply stays "plain".
@@ -222,6 +228,8 @@ export class McpLegacySseClient {
   private nextId = 1;
   private readonly pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
   private streamDone: Promise<void> = Promise.resolve();
+  /** Server capabilities from the initialize result. */
+  serverCapabilities?: Record<string, unknown>;
 
   constructor(private readonly target: McpHttpTarget) {}
 
@@ -327,11 +335,14 @@ export class McpLegacySseClient {
 
   /** Full handshake on an open stream: initialize + notifications/initialized. */
   async initialize(clientName = 'arkimede'): Promise<void> {
-    await this.request('initialize', {
+    const result = await this.request('initialize', {
       protocolVersion: MCP_PROTOCOL_VERSION,
       capabilities: { tools: {} },
       clientInfo: { name: clientName, version: '1.0.0' },
     });
+    if (result?.capabilities && typeof result.capabilities === 'object') {
+      this.serverCapabilities = result.capabilities;
+    }
     await this.notify('notifications/initialized');
   }
 

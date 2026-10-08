@@ -18,6 +18,8 @@
 #      alone never rebuilds these (they are referenced by image name, not build:).
 #   5. docker compose up -d --build  (backend/frontend/etc.; DB migrations run
 #      automatically on backend boot — migrationsRun: true).
+#   5b. Runs scripts/postgres-to-pgvector.sh (idempotent): after the switch from the
+#      alpine Postgres image to pgvector's, rebuilds text indexes once (backup first).
 #   6. Health-checks the result.
 #
 # Volumes (Postgres, uploads, skills, Qdrant) persist across the rebuild, and
@@ -153,6 +155,13 @@ fi
 step "Rebuild and restart the stack"
 dc up -d --build
 ok "stack up (DB migrations apply automatically on backend boot)"
+
+# ── 5b. Postgres on a new C library (alpine → pgvector image): rebuild text indexes ──
+# Idempotent: "nothing to do" unless the data dir was created under another libc.
+step "Postgres collation check"
+if ! ./scripts/postgres-to-pgvector.sh; then
+  err "postgres-to-pgvector.sh failed — the stack is up; re-run it by hand and check its output"
+fi
 
 # ── 6. Health check ───────────────────────────────────────────────────────────
 step "Health check"

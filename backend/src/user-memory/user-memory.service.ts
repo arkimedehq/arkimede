@@ -244,7 +244,7 @@ export class UserMemoryService {
     let enriched = 0;
     for (const note of notes) {
       if (!note.tags?.length && !note.context) {
-        await this.enrichNote(note.id, note.content);  // sequential: gentle on the summarizer
+        await this.enrichNote(note.id, note.content, userId);  // sequential: gentle on the summarizer
         enriched++;
       }
     }
@@ -361,7 +361,7 @@ export class UserMemoryService {
     const saved = await this.repo.save(fact);
     await this.pruneConfirmed(userId);
     // Fire-and-forget: the note is valid even if enrichment fails (fields stay empty).
-    void this.enrichNote(saved.id, saved.content);
+    void this.enrichNote(saved.id, saved.content, userId);
     // Evolution round (F3): the job delay lets the enrichment land first.
     this.evolution?.enqueue(saved.id);
     return saved;
@@ -383,7 +383,7 @@ export class UserMemoryService {
     const fact = await this.repo.save(this.repo.create({
       userId, content: text, status: 'pending', sourceChatId: sourceChatId ?? null,
     }));
-    void this.enrichNote(fact.id, fact.content);
+    void this.enrichNote(fact.id, fact.content, userId);
     return fact;
   }
 
@@ -519,7 +519,7 @@ export class UserMemoryService {
     if (fact.userId !== userId) throw new ForbiddenException();
     fact.content = content.trim().slice(0, MAX_FACT_LEN);
     const saved = await this.repo.save(fact);
-    void this.enrichNote(saved.id, saved.content);
+    void this.enrichNote(saved.id, saved.content, userId);
     return saved;
   }
 
@@ -616,7 +616,8 @@ export class UserMemoryService {
       });
       const existingNorm = new Set(existing.map((e) => this.norm(e.content)));
 
-      const notes = await this.extractNotes(fresh, existing.map((e) => e.content));
+      // Extraction works on this user's turns: attribute the LLM call to the user.
+      const notes = await runWithLlmCallContext({ userId }, () => this.extractNotes(fresh, existing.map((e) => e.content)));
 
       // Filter out empty, too long, and duplicate ones (against existing memory and among themselves)
       const seen = new Set<string>(existingNorm);
@@ -680,7 +681,9 @@ export class UserMemoryService {
    * updates the row. Fire-and-forget by contract: never throws, the note is
    * valid with empty metadata.
    */
-  private async enrichNote(id: string, content: string): Promise<void> {
+  private async enrichNote(id: string, content: string, userId?: string): Promise<void> {
+    // The note's owner, when the caller knows it: the LLM call is attributed to them.
+    if (userId) return runWithLlmCallContext({ userId }, () => this.enrichNote(id, content));
     try {
       const model = await this.llmProvider.getSummarizerModel();
       const prompt =

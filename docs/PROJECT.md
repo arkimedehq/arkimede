@@ -1289,6 +1289,134 @@ VITE_APP_NAME=Arkimede
 # VITE_WS_URL=ws://localhost:3000
 ```
 
+### Postgres image and embedding model — defaults and upgrades
+
+**Postgres image `pgvector/pgvector:pg16`** (was `postgres:16-alpine`). Same major, env vars, healthcheck and data path
+(`/var/lib/postgresql/data`); it adds the `vector` extension, so a service co-hosted on the same Postgres (e.g.
+Recordare, with its own database and user) can use it. Nothing changes for Arkimede itself.
+- **Fresh installs**: nothing to do.
+- **Existing installs whose data dir was created by the alpine image**: alpine is musl, pgvector's image is
+  Debian/glibc, and `en_US.utf8` sorts text differently under the two C libraries, so B-tree indexes on text columns
+  must be rebuilt once. `./scripts/update.sh` does it automatically (step 5b); by hand:
+  `./scripts/postgres-to-pgvector.sh` (repo root, stack up, after pulling the new compose file). It takes a backup
+  (`scripts/backup.sh`), recreates only the postgres container on the new image if needed (data volume kept),
+  runs `REINDEX DATABASE` and records the new collation version for every affected database, then verifies with
+  `amcheck` (`bt_index_check`). Idempotent: on a migrated or fresh install it reports "nothing to do". The REINDEX
+  briefly blocks writes on each table: run it in a quiet moment.
+- The backend logs a warning at start-up while any database's recorded collation version differs from the C
+  library's (`pg_database.datcollversion` vs `pg_database_collation_actual_version`), pointing to the script; it
+  never blocks the start.
+
+**Embedding model `BAAI/bge-m3`** (was `mixedbread-ai/mxbai-embed-large-v1`): both 1024 dimensions, but their vectors are
+**not interchangeable**. Installs whose `.env` already sets `EMBEDDING_MODEL` (every install seeded from
+`.env.example`) keep their model. Changing the model of an install that has vectors = run the admin re-embed job
+(`GET /api/admin/vector-db/reembed/plan`, then `POST /api/admin/vector-db/reembed`). The model that produced the stored
+vectors is recorded in `app_config.embeddingIndexedModel` (`provider|model|dims`) by the re-embed job and on an empty
+vector store; at start-up the backend compares it with the running model and logs a warning when they differ, or —
+for vectors indexed before this was recorded — that the model is unknown (until a re-embed records it). The
+`embedding` image pre-downloads the model at build time: bge-m3 weighs ~2.3 GB (vs ~0.7 GB) and uses ~1.4 GB RAM.
+
+### Recordare — episodic memory (optional)
+
+Recordare is a separate memory / digital-twin service. Arkimede can use it
+as its users' **episodic memory** (what happened and when), next to — not instead of — A-MEM, which is unchanged
+(`autoMemoryEnabled`, `save_memory` / `search_memory`, `search_conversations`). Code: `backend/src/recordare/`, on
+Recordare's **client library** (`backend/src/recordare/client/`, a copy synced from Recordare's `packages/client` —
+never edited here): official MCP SDK, RFC 9457 errors, `Retry-After`, W3C trace context; requests go through
+`safeFetch`.
+
+```bash
+RECORDARE_URL=http://recordare:8080   # off unless both are set
+RECORDARE_API_KEY=rk_...              # Recordare client key (scopes ingest + mcp + read + write), secret
+RECORDARE_OUTBOX_POLL_MS=3000         # optional
+```
+
+- **Per-user switch** `users.episodicMemoryEnabled` (default off; Settings → Memory, shown only when Recordare is
+  configured; `PATCH /api/users/me {episodicMemoryEnabled}`). It gates Arkimede's side only: **consent inside
+  Recordare is given by the Recordare admin** (`episodicEnabled` per person). `GET api/v1/me` reports it; Arkimede
+  caches it (5 min, re-checked when the switch changes and on every profile read) and exposes
+  `episodicMemoryStatus`: `off | waiting_activation | active | unknown` (Recordare unreachable). With the switch on
+  and consent not given, Settings shows "Waiting for activation by the Recordare administrator".
+- **Identity**: on first use `GET api/v1/me` with `X-Recordare-User: <Arkimede user id>` (Recordare auto-provisions
+  the person), the `ownerId` is stored in `users.recordareOwnerId` and the person's name follows the Arkimede
+  profile (`PATCH api/v1/me {displayName}`, synced on every lookup). The kind of memory — personal, or shared by everyone
+  using the account (Recordare's entity, e.g. the voice user) — is chosen in Settings while the memory is empty; admins
+  get the Recordare Atlas link there. Tracing spans carry `recordare.owner_id` when it is known (cached value only).
+- **Ingest via an outbox**: a TypeORM subscriber on `Message` writes a `recordare_outbox` row in the same transaction
+  as every persisted message (savepoint-protected: an outbox failure never fails the chat), for chats whose owner has
+  the switch on. **Nothing is buffered before consent**: owners whose consent is known to be off are skipped in the
+  same statement (unknown → enqueued; Recordare answers `stored: false` and the row is dropped). The chat's error
+  turns (the "⚠️ …" messages saved on failures, inside `withoutRecordareIngest`) are never sent. A background worker sends them to `POST api/v1/ingest/messages` (conversation = chat id, message
+  externalId = message id → idempotent; tool calls as `tool` messages; other users of a shared chat as `other`
+  participants), with the library's delivery policy (exponential back-off with jitter, Recordare's `Retry-After`
+  honoured); after 12 attempts (or a 400/413/422) the row is parked (`parkedAt`,
+  `lastError`, warning in the log). Rewinds and chat deletions are propagated (`DELETE …/messages/{id}`,
+  `DELETE …/conversations/{id}`). The request path never waits on Recordare.
+- **Recall tools** (only for users with the switch on, in a persisted chat, and not while consent is known off):
+  `recordare_search_episodes`, `recordare_search_memory`, `recordare_resolve_period`, `recordare_remember`,
+  `recordare_correct_episode`, `recordare_forget_episode` (no `log_episode`: the ingest already captures the
+  conversation, logging on top would duplicate) — built from the tools Recordare lists over MCP (its names,
+  descriptions and JSON Schemas, prefixed `recordare_`), called through the client library (`/mcp`, streamable HTTP, one
+  session per user and chat). Every request carries `X-Recordare-User` and
+  `X-Recordare-Conversation: <chat id>`, bound in code (the viewer context: without it Recordare returns nothing).
+  Pending outbox rows of the chat are flushed (≤3 s) before a call.
+- **Memory context** (agent option `memoryContext`, Agents → agent, off by default): before each answer the agent gets
+  the user's memories relevant to the message from Recordare (`POST api/v1/context`, a fenced `<memory-context>` block
+  marked as data) at the end of the system prompt — non-cached, after the other per-request blocks; bounded wait (2.5 s,
+  the current turn flushed first), never fails the answer. Useful where latency matters (the voice agent): the agent may
+  answer without a recall tool round. Measured in Recordare's WORK_PLAN 5.7.
+- **Diary** (Settings → Diary, shown when Recordare is configured): what Recordare remembers about the user — timeline
+  (search, detail with the original messages and earlier versions, correct, forget), the nightly day / month diary, who
+  they are (facts with history, notes: pin, delete), plans, and what awaits confirmation (inferred facts and notes:
+  confirm / reject). Backend proxy `api/recordare/diary/*` over Recordare's read API, always for the logged-in user (the
+  browser never sees Recordare's key); the key needs the `write` scope for the edits.
+
+### OpenTelemetry GenAI traces (optional)
+
+The backend can emit OpenTelemetry traces of its agent work, following the
+[GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) (`backend/src/observability/`).
+**Off unless an OTLP endpoint is set**: no SDK, no exporter, no callback handler — zero cost, no behaviour change.
+
+```bash
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://collector:4318/v1/traces  # or OTEL_EXPORTER_OTLP_ENDPOINT (base URL)
+OTEL_EXPORTER_OTLP_TRACES_HEADERS=Authorization=Bearer <token>      # optional
+OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf                    # default; http/json also supported
+OTEL_SERVICE_NAME=arkimede                                          # default
+```
+
+Spans: `invoke_agent {agent}` around each chat turn (agent name = `APP_NAME`, `gen_ai.conversation.id` = chat id),
+headless automation, multi-agent agent run and team run (sub-agents and agents/teams delegated as tools nest under
+the calling span); `chat {model}` for every LLM call (`gen_ai.request.model`, `gen_ai.response.model`,
+`gen_ai.provider.name`, `gen_ai.usage.input_tokens` / `output_tokens`); `execute_tool {tool}` for every tool run.
+`user.id` = the Arkimede user id. Errors set status ERROR with `error.type` only. Export is batched in the background
+(BatchSpanProcessor): the request path never waits on the network.
+
+Voice spans (the GenAI conventions define no speech operation): `transcription {model}` around every speech-to-text
+call and `speech {model}` around every text-to-speech call, opened in one place each (`TranscriptionService.transcribe`,
+`TtsService` synthesis), so every path is covered — chat microphone (`POST /api/transcription`), chat read-aloud and
+voice satellites (`POST /api/openai/v1/audio/transcriptions`, `/audio/speech`), the Wyoming server (asr / tts) and
+the admin TTS test. Kind CLIENT (the engines are remote services). Attributes: `voice.operation` = `transcription` |
+`speech`; `gen_ai.request.model` (STT model; TTS model, or the voice id for the internal Piper);
+`gen_ai.provider.name` when known (`whisper` / `piper` for the bundled services, `openai`, `groq`; omitted for
+OpenAI-compatible endpoints); `voice.audio_seconds` (STT input / TTS output length, only when the audio is WAV — read
+from its header); `voice.characters` (TTS input length, a count); `user.id` and `recordare.owner_id` when a user is
+known (Wyoming asr / tts requests from Home Assistant act for the Wyoming conversation user when one is configured,
+else they carry none). A voice span nests under the active span when there is one;
+the HTTP routes and the Wyoming protocol (one request per connection: asr, handle and tts arrive separately) make
+each voice call its own trace, while the Wyoming `handle` turn is an `invoke_agent` trace of its own.
+
+**Metadata only — hard rule.** Spans carry names, models, providers, token counts, audio lengths, character counts,
+durations, status and ids. Prompts, messages, system instructions, completions, tool arguments and tool results,
+transcripts, text to speak and audio are never recorded (no `gen_ai.input.messages`, `gen_ai.output.messages`,
+`gen_ai.system_instructions`, `gen_ai.tool.call.arguments`, `gen_ai.tool.call.result`), not even behind a flag.
+
+Example — Recordare Atlas as the viewer:
+
+```bash
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://<atlas host>:5175/v1/traces
+OTEL_EXPORTER_OTLP_TRACES_HEADERS=Authorization=Bearer <ATLAS_INGEST_TOKEN>
+```
+
 ---
 
 ## 13. Development Startup
@@ -1919,6 +2047,7 @@ config. Reference: [CLI.md](CLI.md).
 | ~~CRON, one-off activations~~    | ✅ Done   | Merged into the `cron`/`scheduled` triggers of the [Flows](#flows) and into [Auto-Scheduling](#auto-scheduling-design) (BullMQ + Redis)                                                                                                                                                                            |
 | ~~Multilingual~~                 | ✅ Done   | **IT + EN** across three axes: frontend UI (react-i18next, ~20 namespaces, 100% coverage), backend errors (nestjs-i18n + global filter `i18n-exception.filter`, 18 per-module namespaces), assistant's response language. Persistence on `User.language`; default = browser auto-detect, fallback `en`. Conventions in `I18N_CONVENTIONS.md`                                                                                       |
 | ~~Multi Agent~~                  | ✅ Done   | **Implemented (Level 2)** → [dedicated section](#multi-agent-level-2). Module `agents/`: reusable agents + teams (supervisor/sequential/parallel), `chats.agentTeamId`, Agents/Agent teams UI. Only Option 4 remains (literal StateGraph)                                                                         |
+| System monitoring skill          | TODO     | Owner's request 2026-10-08, after a 175 GB Kodi log filled a server's disk and stopped Postgres and Redis. A skill (Linux first) that watches the whole host — disk, memory, swap, load, containers, runaway logs — and sends alerts (Telegram / notification) by thresholds the user sets. **Before building it, search whether an existing skill or MCP server already does this** (skill registries, MCP servers, tools such as Netdata / Glances) and reuse it if its licence allows. It replaces a private stop-gap script on that server |
 
 ---
 
@@ -1961,6 +2090,7 @@ sentence-transformers Apache-2.0, torch BSD-3, faster-whisper MIT, CTranslate2 M
 
 | Model | Use | License |
 |---|---|---|
+| `BAAI/bge-m3` | Text embedding (default) | MIT |
 | `mixedbread-ai/mxbai-embed-large-v1` | Text embedding | Apache-2.0 |
 | OpenAI Whisper (via faster-whisper) | Audio transcription | MIT |
 
