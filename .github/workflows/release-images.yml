@@ -19,9 +19,11 @@ name: Release Images
 #    (see their Dockerfiles), so a published image carries the DEFAULT model. Overriding
 #    EMBEDDING_MODEL/WHISPER_MODEL at runtime still works — it just re-downloads on first
 #    start instead of using the baked copy.
-#  - The ML images (embedding, whisper, piper, ocr) build linux/amd64 only: cross-building torch + a model download
-#    under QEMU is slow/fragile. On arm64 hosts they run under emulation. The lightweight
-#    images are multi-arch (amd64 + arm64).
+#  - The ML images (embedding, whisper, piper, ocr) are linux/amd64 only (torch + model
+#    downloads); on arm64 hosts they run under emulation. The other images are multi-arch.
+#  - Every architecture builds NATIVELY on its own runner (ubuntu-latest for amd64,
+#    ubuntu-24.04-arm for arm64) and is pushed by digest; the `merge` job then creates the
+#    tagged multi-arch manifest. No QEMU: emulated arm64 builds of the backend took hours.
 
 on:
   push:
@@ -39,71 +41,110 @@ permissions:
   packages: write # push to ghcr.io/<owner>/*
 
 jobs:
-  images:
+  build:
+    name: build ${{ matrix.service }}${{ matrix.tag-suffix }} (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { service: backend, context: ./backend, arch: amd64, runner: ubuntu-latest, tag-suffix: '' }
+          - { service: backend, context: ./backend, arch: arm64, runner: ubuntu-24.04-arm, tag-suffix: '' }
+          - { service: frontend, context: ./frontend, arch: amd64, runner: ubuntu-latest, tag-suffix: '', build-args: "VITE_API_URL=/api\nVITE_APP_NAME=Arkimede" }
+          - { service: frontend, context: ./frontend, arch: arm64, runner: ubuntu-24.04-arm, tag-suffix: '', build-args: "VITE_API_URL=/api\nVITE_APP_NAME=Arkimede" }
+          - { service: executor, context: ./executor, arch: amd64, runner: ubuntu-latest, tag-suffix: '' }
+          - { service: executor, context: ./executor, arch: arm64, runner: ubuntu-24.04-arm, tag-suffix: '' }
+          - { service: broker, context: ./broker, arch: amd64, runner: ubuntu-latest, tag-suffix: '' }
+          - { service: broker, context: ./broker, arch: arm64, runner: ubuntu-24.04-arm, tag-suffix: '' }
+          - { service: runner, context: ./runner, arch: amd64, runner: ubuntu-latest, tag-suffix: '' }
+          - { service: runner, context: ./runner, arch: arm64, runner: ubuntu-24.04-arm, tag-suffix: '' }
+          - { service: egress-proxy, context: ./egress-proxy, arch: amd64, runner: ubuntu-latest, tag-suffix: '' }
+          - { service: egress-proxy, context: ./egress-proxy, arch: arm64, runner: ubuntu-24.04-arm, tag-suffix: '' }
+          - { service: whisper, context: ./whisper-service, arch: amd64, runner: ubuntu-latest, tag-suffix: '' }
+          - { service: piper, context: ./piper-service, arch: amd64, runner: ubuntu-latest, tag-suffix: '' }
+          - { service: embedding, context: ./embedding-service, arch: amd64, runner: ubuntu-latest, tag-suffix: '', build-args: "EMBEDDING_DEVICE=cpu" }
+          - { service: embedding, context: ./embedding-service, arch: amd64, runner: ubuntu-latest, tag-suffix: '-cuda', build-args: "EMBEDDING_DEVICE=cuda" }
+          - { service: ocr, context: ./ocr-service, arch: amd64, runner: ubuntu-latest, tag-suffix: '', build-args: "OCR_STRUCTURED=1" }
+          - { service: ocr, context: ./ocr-service, arch: amd64, runner: ubuntu-latest, tag-suffix: '-light', build-args: "OCR_STRUCTURED=0" }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image name
+        id: meta
+        run: |
+          OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          echo "image=ghcr.io/${OWNER}/arkimede-${{ matrix.service }}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          platforms: linux/${{ matrix.arch }}
+          build-args: ${{ matrix.build-args }}
+          outputs: type=image,name=${{ steps.meta.outputs.image }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.service }}${{ matrix.tag-suffix }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}${{ matrix.tag-suffix }}-${{ matrix.arch }}
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.service }}${{ matrix.tag-suffix }}-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: publish ${{ matrix.service }}${{ matrix.tag-suffix }}
+    needs: build
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - service: backend
-            context: ./backend
-            platforms: linux/amd64,linux/arm64
-          - service: frontend
-            context: ./frontend
-            platforms: linux/amd64,linux/arm64
-            build-args: |
-              VITE_API_URL=/api
-              VITE_APP_NAME=Arkimede
-          - service: executor
-            context: ./executor
-            platforms: linux/amd64,linux/arm64
-          - service: broker
-            context: ./broker
-            platforms: linux/amd64,linux/arm64
-          - service: runner
-            context: ./runner
-            platforms: linux/amd64,linux/arm64
-          - service: egress-proxy
-            context: ./egress-proxy
-            platforms: linux/amd64,linux/arm64
-          - service: whisper
-            context: ./whisper-service
-            platforms: linux/amd64
-          - service: piper
-            context: ./piper-service
-            platforms: linux/amd64
-          # ocr — the full image (Docling + RapidOCR, "structured" level) is the default
-          # tag; `-light` is Tesseract only ("fast" level, ~0.5 GB instead of ~4 GB).
-          - service: ocr
-            context: ./ocr-service
-            platforms: linux/amd64
-            tag-suffix: ''
-            build-args: |
-              OCR_STRUCTURED=1
-          - service: ocr
-            context: ./ocr-service
-            platforms: linux/amd64
-            tag-suffix: '-light'
-            build-args: |
-              OCR_STRUCTURED=0
-          # embedding — cpu is the default tag (no suffix); cuda is a separate tag.
-          - service: embedding
-            context: ./embedding-service
-            platforms: linux/amd64
-            tag-suffix: ''
-            build-args: |
-              EMBEDDING_DEVICE=cpu
-          - service: embedding
-            context: ./embedding-service
-            platforms: linux/amd64
-            tag-suffix: '-cuda'
-            build-args: |
-              EMBEDDING_DEVICE=cuda
+          - { service: backend, tag-suffix: '', archs: 2 }
+          - { service: frontend, tag-suffix: '', archs: 2 }
+          - { service: executor, tag-suffix: '', archs: 2 }
+          - { service: broker, tag-suffix: '', archs: 2 }
+          - { service: runner, tag-suffix: '', archs: 2 }
+          - { service: egress-proxy, tag-suffix: '', archs: 2 }
+          - { service: whisper, tag-suffix: '', archs: 1 }
+          - { service: piper, tag-suffix: '', archs: 1 }
+          - { service: embedding, tag-suffix: '', archs: 1 }
+          - { service: embedding, tag-suffix: '-cuda', archs: 1 }
+          - { service: ocr, tag-suffix: '', archs: 1 }
+          - { service: ocr, tag-suffix: '-light', archs: 1 }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-${{ matrix.service }}${{ matrix.tag-suffix }}-*
+          merge-multiple: true
 
-      - name: Compute version and image ref
-        id: meta
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create the tagged (multi-arch) manifest
+        working-directory: /tmp/digests
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
             VERSION="${GITHUB_REF_NAME#v}"
@@ -113,31 +154,12 @@ jobs:
           OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
           IMAGE="ghcr.io/${OWNER}/arkimede-${{ matrix.service }}"
           SUFFIX="${{ matrix.tag-suffix }}"
-          {
-            echo "tags<<EOF"
-            echo "${IMAGE}:${VERSION}${SUFFIX}"
-            # `latest` moves only with a release tag: a manual (e.g. `edge`) build must
-            # not replace what `latest` deployments pull.
-            if [ "${{ github.event_name }}" = "push" ]; then echo "${IMAGE}:latest${SUFFIX}"; fi
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: ${{ matrix.context }}
-          platforms: ${{ matrix.platforms }}
-          push: true
-          build-args: ${{ matrix.build-args }}
-          tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=gha,scope=${{ matrix.service }}${{ matrix.tag-suffix }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.service }}${{ matrix.tag-suffix }}
+          TAGS=(-t "${IMAGE}:${VERSION}${SUFFIX}")
+          # `latest` moves only with a release tag: a manual (e.g. `edge`) build must
+          # not replace what `latest` deployments pull.
+          if [ "${{ github.event_name }}" = "push" ]; then TAGS+=(-t "${IMAGE}:latest${SUFFIX}"); fi
+          # Every architecture of this image must have built: never publish a partial manifest.
+          got="$(ls -1 | wc -l)"
+          [ "$got" -eq "${{ matrix.archs }}" ] || { echo "expected ${{ matrix.archs }} architecture(s), got $got: a build failed"; exit 1; }
+          docker buildx imagetools create "${TAGS[@]}" $(printf "${IMAGE}@sha256:%s " *)
+          docker buildx imagetools inspect "${IMAGE}:${VERSION}${SUFFIX}"

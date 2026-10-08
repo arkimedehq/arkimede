@@ -1,6 +1,9 @@
 # Structured level (layout analysis + table structure → markdown). Heavy: pulls
 # PyTorch (CPU wheels, see Dockerfile) and the layout/table models.
-docling>=2.100.0
+# Pinned to a tested pair: newer docling releases expect rapidocr APIs (PP_OCRV6_LANGS)
+# that rapidocr 3.10 does not expose → the image build fails at the model download.
+docling==2.135.0
+rapidocr==3.9.2
 # Runtime of the RapidOCR models (PaddleOCR in ONNX) used by the structured level:
 # far better than Tesseract on scanned tables.
 onnxruntime>=1.18.0
