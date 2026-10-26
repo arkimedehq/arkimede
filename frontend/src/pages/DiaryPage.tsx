@@ -5,16 +5,20 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  BookOpen, CalendarDays, Check, ChevronDown, ChevronRight, Loader2, Pencil, Pin, PinOff, Search, Trash2, UserRound, X,
+  BookOpen, CalendarDays, Check, ChevronDown, ChevronRight, Copy, CopyCheck, Loader2, Pencil, Pin, PinOff, Search, Trash2, UserRound, X,
 } from 'lucide-react';
-import { diaryApi, type DiaryEpisode, type DiaryFact, type DiaryNote, type PlanStatus } from '../api/diary';
+import { diaryApi, NOTE_CATEGORIES, type DiaryCopy, type DiaryEpisode, type DiaryFact, type DiaryNote, type PlanStatus } from '../api/diary';
+import { profileApi } from '../api/profile';
+import { ScopeSelector } from '../components/ScopeSelector';
+import { useStore } from '../store/useStore';
 
 /**
  * Settings → Diary: what Recordare (the episodic memory) remembers about the user —
  * timeline, the nightly diary, who they are (facts and notes), plans and what awaits
  * their confirmation — with their own edits: correct or forget a memory, pin or delete
- * a note, confirm or reject what was only inferred. Read through the backend proxy:
- * always the logged-in user's own memory.
+ * a note, confirm or reject what was only inferred, copy a note into the persistent
+ * memory (A-MEM, Recordare D34: by hand, or by kind with the copy rule). Read through the
+ * backend proxy: always the logged-in user's own memory.
  */
 type Tab = 'timeline' | 'digests' | 'profile' | 'plans' | 'pending';
 const TABS: Tab[] = ['timeline', 'digests', 'profile', 'plans', 'pending'];
@@ -240,6 +244,9 @@ function Profile() {
   const refresh = () => qc.invalidateQueries({ queryKey: ['diary'] });
   const remove = useMutation({ mutationFn: (v: { what: 'notes' | 'facts'; id: string }) => diaryApi.remove(v.what, v.id), onSuccess: refresh });
   const pin = useMutation({ mutationFn: (n: DiaryNote) => diaryApi.pin(n.id, !n.pinned), onSuccess: refresh });
+  const copies = useQuery({ queryKey: ['diary', 'copies'], queryFn: diaryApi.copies });
+  const copied = new Set((copies.data ?? []).map((c) => c.recordareNoteId));
+  const [copying, setCopying] = useState<string | null>(null);
   return (
     <div className="space-y-6">
       <section>
@@ -252,25 +259,91 @@ function Profile() {
       </section>
       <section>
         <h3 className="text-sm font-semibold text-gray-200 mb-2">{t('notes')}</h3>
+        <CopyRule />
         {notes.isLoading ? <Loading /> : notes.error ? <Failed error={notes.error} /> : !notes.data?.length ? <Empty text={t('empty.notes')} /> : (
           <ul className="divide-y divide-gray-800 bg-gray-900 border border-gray-800 rounded-xl">
             {notes.data.map((n) => (
-              <li key={n.id} className="px-4 py-2.5 flex items-start gap-3">
-                <div className="flex-1">
-                  <p className="text-sm text-gray-200">{n.content}</p>
-                  <p className="text-xs text-gray-500">{t(`category.${n.category}`, n.category)}{n.inferred ? ` · ${t('inferred')}` : ''}</p>
+              <li key={n.id} className="px-4 py-2.5">
+                <div className="flex items-start gap-3">
+                  <div className="flex-1">
+                    <p className="text-sm text-gray-200">{n.content}</p>
+                    <p className="text-xs text-gray-500">{t(`category.${n.category}`, n.category)}{n.inferred ? ` · ${t('inferred')}` : ''}</p>
+                  </div>
+                  {copied.has(n.id) ? (
+                    <span title={t('copied')} className="text-emerald-400"><CopyCheck size={14} /></span>
+                  ) : (
+                    <button title={t('copy')} onClick={() => setCopying(copying === n.id ? null : n.id)}
+                      className={copying === n.id ? 'text-blue-400' : 'text-gray-500 hover:text-gray-300'}><Copy size={14} /></button>
+                  )}
+                  <button title={n.pinned ? t('unpin') : t('pin')} onClick={() => pin.mutate(n)}
+                    className={n.pinned ? 'text-blue-400' : 'text-gray-500 hover:text-gray-300'}>
+                    {n.pinned ? <Pin size={14} /> : <PinOff size={14} />}
+                  </button>
+                  <button title={t('delete')} onClick={() => { if (window.confirm(t('deleteConfirm'))) remove.mutate({ what: 'notes', id: n.id }); }}
+                    className="text-gray-500 hover:text-red-400"><Trash2 size={14} /></button>
                 </div>
-                <button title={n.pinned ? t('unpin') : t('pin')} onClick={() => pin.mutate(n)}
-                  className={n.pinned ? 'text-blue-400' : 'text-gray-500 hover:text-gray-300'}>
-                  {n.pinned ? <Pin size={14} /> : <PinOff size={14} />}
-                </button>
-                <button title={t('delete')} onClick={() => { if (window.confirm(t('deleteConfirm'))) remove.mutate({ what: 'notes', id: n.id }); }}
-                  className="text-gray-500 hover:text-red-400"><Trash2 size={14} /></button>
+                {copying === n.id && <CopyNote id={n.id} onDone={() => setCopying(null)} />}
               </li>
             ))}
           </ul>
         )}
       </section>
+    </div>
+  );
+}
+
+/** Copies one note into the persistent memory: personal, a team of the user's, or the org (admins). */
+function CopyNote({ id, onDone }: { id: string; onDone: () => void }) {
+  const { t } = useTranslation('diary');
+  const qc = useQueryClient();
+  const isAdmin = useStore((s) => s.user?.role === 'admin');
+  const [scope, setScope] = useState<DiaryCopy['scope']>('personal');
+  const [teamId, setTeamId] = useState<string | null>(null);
+  const copy = useMutation({
+    mutationFn: () => diaryApi.copy(id, scope, teamId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['diary', 'copies'] });
+      qc.invalidateQueries({ queryKey: ['user-memory'] });
+      onDone();
+    },
+  });
+  return (
+    <div className="mt-2 ml-1 flex flex-wrap items-center gap-2">
+      <span className="text-xs text-gray-400">{t('copyTo')}</span>
+      <ScopeSelector scope={scope} teamId={teamId} onScope={setScope} onTeam={setTeamId} allowOrg={isAdmin} />
+      <button onClick={() => copy.mutate()} disabled={copy.isPending || (scope === 'team' && !teamId)}
+        className="p-1 rounded text-emerald-400 hover:bg-emerald-500/15 disabled:opacity-50" title={t('copy')}><Check size={14} /></button>
+      <button onClick={onDone} className="p-1 rounded text-gray-400 hover:bg-gray-700"><X size={14} /></button>
+      {copy.error && <span className="text-xs text-red-400">{errorText(copy.error)}</span>}
+    </div>
+  );
+}
+
+/** The copy rule: notes of the chosen kinds go into the personal persistent memory by themselves. */
+function CopyRule() {
+  const { t } = useTranslation('diary');
+  const qc = useQueryClient();
+  const profile = useQuery({ queryKey: ['profile'], queryFn: profileApi.get, staleTime: 60_000 });
+  const chosen = profile.data?.recordareCopyCategories ?? [];
+  const save = useMutation({
+    mutationFn: (categories: string[]) => profileApi.update({ recordareCopyCategories: categories }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['profile'] }),
+  });
+  const toggle = (c: string) => save.mutate(chosen.includes(c) ? chosen.filter((x) => x !== c) : [...chosen, c]);
+  return (
+    <div className="mb-3 bg-gray-900 border border-gray-800 rounded-xl px-4 py-3 space-y-2">
+      <p className="text-xs font-medium text-gray-300">{t('copyRule')}</p>
+      <div className="flex flex-wrap gap-1.5">
+        {NOTE_CATEGORIES.map((c) => (
+          <button key={c} onClick={() => toggle(c)} disabled={save.isPending || profile.isLoading}
+            className={`px-2.5 py-1 text-xs rounded-lg border transition-colors disabled:opacity-50
+              ${chosen.includes(c) ? 'bg-blue-600 text-white border-blue-500' : 'border-gray-700 text-gray-400 hover:text-gray-200'}`}>
+            {t(`category.${c}`)}
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-gray-500">{t('copyRuleHint')}</p>
+      {chosen.length > 0 && <p className="text-xs text-gray-600">{t('copyFull')}</p>}
     </div>
   );
 }

@@ -17,6 +17,13 @@ export type UserRole = 'admin' | 'user';
 /** User account status. */
 export type UserStatus = 'active' | 'disabled';
 
+/** Grammatical gender of the user in gendered languages (e.g. Italian); also the first person of their memory. */
+export type UserGender = 'masculine' | 'feminine' | 'neutral';
+/** The categories of Recordare's notes, for the copy rule (D34). */
+export const RECORDARE_NOTE_CATEGORIES = ['preference', 'habit', 'value', 'relationship', 'knowledge', 'profile', 'constraint'] as const;
+
+export const USER_GENDERS: UserGender[] = ['masculine', 'feminine', 'neutral'];
+
 @Entity('users')
 export class User {
   @PrimaryGeneratedColumn('uuid')
@@ -59,6 +66,13 @@ export class User {
    */
   @Column({ type: 'varchar', length: 5, nullable: true, default: null })
   language: string | null;
+
+  /**
+   * Grammatical gender ('masculine' | 'feminine' | 'neutral'). null = not set → masculine.
+   * Sent to Recordare as the gender of the memory's first person (its D50, `PATCH /me {gender}`).
+   */
+  @Column({ type: 'varchar', length: 10, nullable: true, default: null })
+  gender: UserGender | null;
 
   /**
    * Per-user override of the tool selection strategy (Axis 1).
@@ -106,6 +120,13 @@ export class User {
   autoMemoryEnabled: boolean;
 
   /**
+   * Use the team and organisation notes (A-MEM F4) in the user's chats — pinned, retrieved, searched — apart from the
+   * personal memory above (Recordare D34: the toggle split). Default false.
+   */
+  @Column({ type: 'boolean', default: false })
+  sharedMemoryEnabled: boolean;
+
+  /**
    * Per-user override of the memory extraction threshold (number of new messages
    * since the last extraction). null = use the global default (app_config.autoMemoryThreshold).
    */
@@ -116,14 +137,25 @@ export class User {
    * Episodic memory in Recordare (external service, src/recordare/): if true, the
    * user's chats are sent to Recordare and its recall tools are offered to the
    * agent. Separate from autoMemoryEnabled (A-MEM, unchanged). Default false.
-   * Consent inside Recordare is given by its admin, not by this switch.
+   * Recordare has no consent flag of its own (its D50): this switch is the only on/off.
    */
   @Column({ type: 'boolean', default: false })
   episodicMemoryEnabled: boolean;
 
-  /** The user's ownerId in Recordare (GET api/v1/me), cached; null = not provisioned yet. */
+  /** The user's memoryId in Recordare (GET api/v1/me), cached; null = not provisioned yet. */
   @Column({ type: 'varchar', length: 64, nullable: true, default: null })
-  recordareOwnerId: string | null;
+  recordareMemoryId: string | null;
+
+  /**
+   * The copy rule (Recordare D34): Recordare notes of these categories are copied into the personal A-MEM, and the
+   * copies follow them (updated, corrected, removed). Empty = only the notes the user copies by hand.
+   */
+  @Column({ type: 'jsonb', default: () => "'[]'" })
+  recordareCopyCategories: string[];
+
+  /** How far the user's Recordare notes change feed has been followed (its `next`). */
+  @Column({ type: 'bigint', default: 0, select: false })
+  recordareNotesCursor: string;
 
   @OneToMany(() => Project, (p) => p.user)
   projects: Project[];

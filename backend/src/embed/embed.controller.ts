@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright © 2026 Andrea Genovese
 
-import { Controller, Post, Delete, Get, Param, Body, UseGuards, Inject, HttpCode, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Controller, Post, Delete, Get, Patch, Param, Body, UseGuards, Inject, HttpCode, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiBody } from '@nestjs/swagger';
 import { IsOptional, IsString, IsIn } from 'class-validator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -58,6 +58,17 @@ export class IngestDatasourceDto {
   @IsOptional()
   @IsIn(OCR_LEVELS as unknown as string[])
   ocrLevel?: OcrLevel;
+}
+
+export class DocScopeDto {
+  /** New visibility of the indexed document: universal (company) | project | personal. */
+  @IsIn(['universal', 'project', 'personal'])
+  scope: DocScope;
+
+  /** Project of the document (required if scope='project'). */
+  @IsOptional()
+  @IsString()
+  projectId?: string;
 }
 
 @ApiTags('embed')
@@ -124,6 +135,26 @@ export class EmbedController {
       userId: user.id, fileId: file.id, filename: file.originalName,
       collection: body.collection, scope: body.scope, projectId, ocrLevel: body.ocrLevel,
     });
+  }
+
+  @Patch(':fileId/scope')
+  @ApiOperation({
+    summary: 'Change the visibility of an indexed file (universal|project|personal) — owner or admin',
+    description: 'Updates the scope its chunks carry in every collection, without re-embedding.',
+  })
+  @ApiBody({ type: DocScopeDto })
+  async setScope(@Param('fileId') fileId: string, @CurrentUser() user: any, @Body() body: DocScopeDto) {
+    const file = await this.filesService.findOneReadable(fileId, user.id);
+    if (file.userId !== user.id && user.role !== 'admin') throw new ForbiddenException('embed.scopeOwnerOnly');
+    if (!file.vectorized) throw new BadRequestException('embed.notIndexed');
+    let projectId: string | null = null;
+    if (body.scope === 'project') {
+      projectId = body.projectId ?? file.projectId ?? null;
+      if (!projectId) throw new BadRequestException('embed.projectIdRequired');
+      if (!(await this.projects.canWrite(projectId, user.id))) throw new ForbiddenException('embed.projectReadOnly');
+    }
+    await this.embedService.setFileScope(file, body.scope, projectId);
+    return { scope: body.scope, projectId };
   }
 
   @Delete(':fileId')

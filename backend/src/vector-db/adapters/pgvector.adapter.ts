@@ -177,7 +177,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
     }));
   }
 
-  async deleteByFilter(collection: string, filter: Record<string, any>): Promise<void> {
+  async deleteByFilter(collection: string, filter: Record<string, any>, except?: Record<string, any>): Promise<void> {
     const table = this.tableName(collection);
     const conditions: string[] = [];
     const params: any[] = [];
@@ -189,8 +189,27 @@ export class PgVectorAdapter implements VectorStoreAdapter {
 
     if (conditions.length === 0) return;
 
+    Object.entries(except ?? {}).forEach(([key, value]) => {
+      params.push(value);
+      conditions.push(`payload->>'${key}' IS DISTINCT FROM $${params.length}`);
+    });
+
     await this.pool.query(
       `DELETE FROM "${table}" WHERE ${conditions.join(' AND ')}`,
+      params,
+    );
+  }
+
+  async updatePayloadByFilter(collection: string, filter: Record<string, any>, patch: Record<string, any>): Promise<void> {
+    const table = this.tableName(collection);
+    const params: any[] = [JSON.stringify(patch)];
+    const conditions = Object.entries(filter).map(([key, value]) => {
+      params.push(value);
+      return `payload->>'${key}' = $${params.length}`;
+    });
+    if (conditions.length === 0) return;
+    await this.pool.query(
+      `UPDATE "${table}" SET payload = payload || $1::jsonb WHERE ${conditions.join(' AND ')}`,
       params,
     );
   }

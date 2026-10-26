@@ -13,12 +13,9 @@
  *   - messages are enqueued only for chats whose OWNER has episodicMemoryEnabled
  *     (the gate is part of the INSERT … SELECT: one statement, no extra read);
  *   - deletions are enqueued when the owner has the switch on OR was ever
- *     provisioned in Recordare (recordareOwnerId set), so turning the switch off
+ *     provisioned in Recordare (recordareMemoryId set), so turning the switch off
  *     does not leave deleted messages behind in Recordare;
- *   - no message is buffered before consent: owners whose Recordare consent is
- *     KNOWN to be off (cached by RecordareIdentityService) are skipped in the
- *     same statement; when unknown, the message is enqueued (Recordare answers
- *     stored:false and the row is dropped);
+ *   - Recordare has no consent flag (its D50): the user's switch is the only gate;
  *   - error turns saved by the chat (inside withoutRecordareIngest) are skipped;
  *   - an enqueue failure is logged and swallowed: it must never fail the chat.
  *     Inside a transaction it runs under a SAVEPOINT, so a failed INSERT cannot
@@ -37,28 +34,21 @@ const ENQUEUE_MESSAGE_SQL = `
   INSERT INTO "recordare_outbox" ("userId", "chatId", "messageId", "op")
   SELECT c."userId", c."id", $1::uuid, 'message'
     FROM "chats" c JOIN "users" u ON u."id" = c."userId"
-   WHERE c."id" = $2 AND u."episodicMemoryEnabled" = true AND NOT (c."userId" = ANY($3::uuid[]))`;
+   WHERE c."id" = $2 AND u."episodicMemoryEnabled" = true`;
 
 const ENQUEUE_MESSAGE_DELETES_SQL = `
   INSERT INTO "recordare_outbox" ("userId", "chatId", "messageId", "op")
   SELECT c."userId", c."id", m.id, 'delete_message'
     FROM "chats" c JOIN "users" u ON u."id" = c."userId", unnest($2::uuid[]) AS m(id)
-   WHERE c."id" = $1 AND (u."episodicMemoryEnabled" = true OR u."recordareOwnerId" IS NOT NULL)`;
+   WHERE c."id" = $1 AND (u."episodicMemoryEnabled" = true OR u."recordareMemoryId" IS NOT NULL)`;
 
 const ENQUEUE_CONVERSATION_DELETE_SQL = `
   INSERT INTO "recordare_outbox" ("userId", "chatId", "op")
   SELECT c."userId", c."id", 'delete_conversation'
     FROM "chats" c JOIN "users" u ON u."id" = c."userId"
-   WHERE c."id" = $1 AND (u."episodicMemoryEnabled" = true OR u."recordareOwnerId" IS NOT NULL)`;
+   WHERE c."id" = $1 AND (u."episodicMemoryEnabled" = true OR u."recordareMemoryId" IS NOT NULL)`;
 
 let savepointSeq = 0;
-
-/** User ids whose Recordare consent is known to be off (registered by RecordareIdentityService). */
-let consentOffProvider: () => string[] = () => [];
-
-export function setConsentOffProvider(fn: (() => string[]) | null): void {
-  consentOffProvider = fn ?? (() => []);
-}
 
 /** Marks message saves that must not reach Recordare (the chat's error turns). */
 const skipIngest = new AsyncLocalStorage<true>();
@@ -100,9 +90,7 @@ export async function enqueueRecordareMessage(
 ): Promise<void> {
   if (!recordareConfig() || !message?.id || !message.chatId || message.role === 'system') return;
   if (skipIngest.getStore()) return;
-  let consentOff: string[] = [];
-  try { consentOff = consentOffProvider(); } catch { /* unknown → enqueue as usual */ }
-  await enqueueSafely(runner, ENQUEUE_MESSAGE_SQL, [message.id, message.chatId, consentOff]);
+  await enqueueSafely(runner, ENQUEUE_MESSAGE_SQL, [message.id, message.chatId]);
 }
 
 /** Messages of a chat were deleted (rewind / truncate). */

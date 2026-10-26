@@ -53,8 +53,16 @@ export interface DiaryNote {
   pinned: boolean;
   pending: boolean;
   inferred: boolean;
+  /** A recurring pattern the memory drew from its episodes. */
+  pattern?: boolean;
   authorRole: string;
 }
+
+/** Where a Recordare note was copied in the persistent memory (A-MEM, D34). */
+export interface DiaryCopy { recordareNoteId: string; scope: 'personal' | 'team' | 'org'; teamId: string | null }
+
+/** The categories of Recordare's notes (the copy rule). */
+export const NOTE_CATEGORIES = ['preference', 'habit', 'value', 'relationship', 'knowledge', 'profile', 'constraint'] as const;
 
 const base = '/recordare/diary';
 
@@ -69,6 +77,10 @@ export const diaryApi = {
   facts: (includePending = false): Promise<DiaryFact[]> => api.get(`${base}/facts`, { params: { includePending } }).then((r) => r.data),
   notes: (includePending = false): Promise<DiaryNote[]> => api.get(`${base}/notes`, { params: { includePending } }).then((r) => r.data),
   plans: (): Promise<DiaryEpisode[]> => api.get(`${base}/plans`).then((r) => r.data),
+  copies: (): Promise<DiaryCopy[]> => api.get(`${base}/copies`).then((r) => r.data),
+  /** Copies a note into the persistent memory (A-MEM): personal, a team, or the org (admins). */
+  copy: (id: string, scope: DiaryCopy['scope'], teamId: string | null): Promise<void> =>
+    api.post(`${base}/notes/${id}/copy`, { scope, teamId }).then(() => undefined),
   pin: (id: string, pinned: boolean): Promise<void> => api.patch(`${base}/notes/${id}`, { pinned }).then(() => undefined),
   remove: (what: 'notes' | 'facts', id: string): Promise<void> => api.delete(`${base}/${what}/${id}`).then(() => undefined),
   decide: (what: 'notes' | 'facts', id: string, decision: 'confirm' | 'reject'): Promise<void> =>

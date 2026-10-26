@@ -8,10 +8,10 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, Not, Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
-import { User, UserRole, UserStatus } from './users.entity';
+import { User, UserGender, UserRole, UserStatus } from './users.entity';
 import { ToolLoadingStrategy, ToolSchemaFormat } from '../app-config/app-config.entity';
 import { recordareConfig } from '../recordare/recordare.config';
-import { type EpisodicMemoryKind, RecordareIdentityService, RecordareMemoryNotEmptyError } from '../recordare/recordare-identity.service';
+import { type EpisodicMemoryMode, RecordareIdentityService, RecordareMemoryNotEmptyError } from '../recordare/recordare-identity.service';
 
 export type SafeUser = Omit<User, 'password' | 'projects' | 'chats' | 'files'>;
 
@@ -63,32 +63,35 @@ export class UsersService {
         role: true,
         systemPrompt: true,
         language: true,
+        gender: true,
         toolLoadingStrategy: true,
         toolLoadingMaxTools: true,
         toolSchemaFormat: true,
         maxHistoryTokens: true,
         showTokenCount: true,
         autoMemoryEnabled: true,
+        sharedMemoryEnabled: true,
         memoryThreshold: true,
         episodicMemoryEnabled: true,
+        recordareCopyCategories: true,
         createdAt: true,
         updatedAt: true,
       },
     });
     if (!user) throw new NotFoundException('users.notFound');
     // Episodic memory (Recordare): available = configured on this installation (the UI
-    // shows the switch only then); status = off | waiting_activation | active | unknown
+    // shows the switch only then); status = off | active | unknown
     // (re-checked with Recordare on every profile read, bounded wait).
     const episodicMemoryAvailable = recordareConfig() !== null;
     const episodicMemoryStatus = this.recordare && episodicMemoryAvailable
       ? await this.recordare.status(id, user.episodicMemoryEnabled)
       : 'off';
-    // Kind: personal or shared by everyone using the account. Atlas shows every person's
-    // activity, so its address is given to admins only.
+    // Mode: personal (the account holder is "I") or entity (a shared agent). Atlas shows
+    // every memory's activity, so its address is given to admins only.
     const details = this.recordare && episodicMemoryStatus !== 'off' ? this.recordare.details(id) : null;
     return {
       ...user, episodicMemoryAvailable, episodicMemoryStatus,
-      episodicMemoryKind: details?.kind ?? null,
+      episodicMemoryMode: details?.mode ?? null,
       recordareAtlasUrl: user.role === 'admin' ? (details?.atlasUrl ?? null) : null,
     } as SafeUser;
   }
@@ -100,6 +103,8 @@ export class UsersService {
       email?: string;
       systemPrompt?: string | null;
       language?: string | null;
+      /** null = not set (masculine) */
+      gender?: UserGender | null;
       /** null = reset to the global default */
       toolLoadingStrategy?: ToolLoadingStrategy | null;
       toolLoadingMaxTools?: number | null;
@@ -108,9 +113,11 @@ export class UsersService {
       maxHistoryTokens?: number | null;
       showTokenCount?: boolean;
       autoMemoryEnabled?: boolean;
+      sharedMemoryEnabled?: boolean;
       memoryThreshold?: number | null;
       episodicMemoryEnabled?: boolean;
-      episodicMemoryKind?: EpisodicMemoryKind;
+      episodicMemoryMode?: EpisodicMemoryMode;
+      recordareCopyCategories?: string[];
     },
   ): Promise<SafeUser> {
     const user = await this.repo.findOne({ where: { id } });
@@ -125,22 +132,31 @@ export class UsersService {
     if (dto.name                !== undefined) user.name                = dto.name;
     if (dto.systemPrompt        !== undefined) user.systemPrompt        = dto.systemPrompt ?? null;
     if (dto.language            !== undefined) user.language            = dto.language ?? null;
+    const genderChanged = dto.gender !== undefined && (dto.gender ?? null) !== user.gender;
+    if (dto.gender              !== undefined) user.gender              = dto.gender ?? null;
     if (dto.toolLoadingStrategy !== undefined) user.toolLoadingStrategy = dto.toolLoadingStrategy ?? null;
     if (dto.toolLoadingMaxTools !== undefined) user.toolLoadingMaxTools = dto.toolLoadingMaxTools ?? null;
     if (dto.toolSchemaFormat    !== undefined) user.toolSchemaFormat    = dto.toolSchemaFormat ?? null;
     if (dto.maxHistoryTokens    !== undefined) user.maxHistoryTokens    = dto.maxHistoryTokens ?? null;
     if (dto.showTokenCount      !== undefined) user.showTokenCount      = dto.showTokenCount;
     if (dto.autoMemoryEnabled   !== undefined) user.autoMemoryEnabled   = dto.autoMemoryEnabled;
+    if (dto.sharedMemoryEnabled !== undefined) user.sharedMemoryEnabled = dto.sharedMemoryEnabled;
     if (dto.memoryThreshold     !== undefined) user.memoryThreshold     = dto.memoryThreshold ?? null;
     if (dto.episodicMemoryEnabled !== undefined) user.episodicMemoryEnabled = dto.episodicMemoryEnabled;
+    // A category added to the copy rule: follow the Recordare notes feed again from the start, so the notes already
+    // there are copied too (copies are never made twice).
+    const addedCategory = dto.recordareCopyCategories?.some((c) => !(user.recordareCopyCategories ?? []).includes(c));
+    if (dto.recordareCopyCategories !== undefined) user.recordareCopyCategories = [...new Set(dto.recordareCopyCategories)];
 
     await this.repo.save(user);
-    // Switch or name changed: forget the cached Recordare state, getProfile re-checks it (and syncs the name).
-    if (dto.episodicMemoryEnabled !== undefined || dto.name !== undefined) this.recordare?.invalidate(id);
-    if (dto.episodicMemoryKind !== undefined) {
+    if (addedCategory) await this.repo.update(id, { recordareNotesCursor: '0' });
+    // Switch, name or gender changed: forget the cached Recordare state, getProfile re-checks it
+    // (and syncs the name and the gender of the memory's first person).
+    if (dto.episodicMemoryEnabled !== undefined || dto.name !== undefined || genderChanged) this.recordare?.invalidate(id);
+    if (dto.episodicMemoryMode !== undefined) {
       if (!user.episodicMemoryEnabled || !this.recordare) throw new BadRequestException('users.episodicMemoryOff');
       try {
-        await this.recordare.setKind(id, dto.episodicMemoryKind);
+        await this.recordare.setMode(id, dto.episodicMemoryMode);
       } catch (err) {
         if (err instanceof RecordareMemoryNotEmptyError) throw new ConflictException('users.memoryNotEmpty');
         throw err;

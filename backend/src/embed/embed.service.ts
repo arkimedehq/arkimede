@@ -14,7 +14,7 @@
  * This lets the agent's RAG tool filter by user and run contextualized semantic searches.
  */
 import { splitIntoChunks } from './chunking';
-import {Inject, Injectable, Logger, Optional} from '@nestjs/common';
+import {Inject, Injectable, Logger, OnModuleInit, Optional} from '@nestjs/common';
 import {v4 as uuidv4} from 'uuid';
 import {lookup as mimeLookup} from 'mime-types';
 import {FilesService} from '../files/files.service';
@@ -35,7 +35,7 @@ export interface IngestOptions {
 }
 
 @Injectable()
-export class EmbedService {
+export class EmbedService implements OnModuleInit {
   /** Cap on the bytes read into memory for indexing a datasource file. */
   static readonly MAX_INGEST_BYTES = 50 * 1024 * 1024;
   private readonly logger = new Logger(EmbedService.name);
@@ -47,6 +47,11 @@ export class EmbedService {
     @Optional() @Inject(VectorDbService) private readonly vectorDbService: VectorDbService | null,
     @Optional() @Inject(VectorStoreProviderService) private readonly vectorStore: VectorStoreProviderService | null,
   ) {}
+
+  /** A deleted file takes its chunks with it (FilesService cannot import this module: it is imported by it). */
+  onModuleInit(): void {
+    this.filesService.onRemove((fileId) => this.deleteFileVectors(fileId));
+  }
 
   /**
    * Ensures the Qdrant collection exists with the correct vector dimension.
@@ -111,6 +116,7 @@ export class EmbedService {
       return { chunks: 0, collection: collectionName };
     }
 
+    const indexRun = uuidv4();
     const count = await this.embedTextIntoCollection(text, collectionName, {
       source:    file.originalName,
       fileId:    file.id,
@@ -119,10 +125,14 @@ export class EmbedService {
       projectId: docProjectId, // set only for scope='project'
       mimeType:  file.mimeType,
       createdAt: file.createdAt?.toISOString(),
+      indexRun,               // this indexing: the file's older chunks are removed below
     });
+    // A re-index replaces the previous one (its chunks, and the scope they carried — a narrower scope must not leave
+    // the wider copy visible): in this collection and in the one the file was indexed into before.
+    await this.removeOlderChunks({ fileId: file.id }, indexRun, [collectionName, file.vectorCollectionId]);
 
     // Marks the file as indexed in the DB (prevents automatic re-ingest)
-    await this.filesService.markVectorized(file.id, collectionName);
+    await this.filesService.markVectorized(file.id, collectionName, scope, docProjectId);
 
     this.logger.log(`File ${file.originalName} indexed: ${count} chunks → collection "${collectionName}"`);
     return { chunks: count, collection: collectionName };
@@ -159,6 +169,7 @@ export class EmbedService {
       return { chunks: 0, collection: collectionName };
     }
 
+    const indexRun = uuidv4();
     const count = await this.embedTextIntoCollection(text, collectionName, {
       source:         filename,
       datasourceId:   source,
@@ -168,7 +179,10 @@ export class EmbedService {
       projectId:      docProjectId,
       mimeType:       mime,
       createdAt:      new Date().toISOString(),
+      indexRun,
     });
+    // Indexing the same datasource file again replaces its previous chunks in this collection.
+    await this.removeOlderChunks({ datasourceId: source, datasourcePath: filePath }, indexRun, [collectionName]);
 
     this.logger.log(`Datasource file "${filename}" (source=${source}) indexed: ${count} chunks → collection "${collectionName}"`);
     return { chunks: count, collection: collectionName };
@@ -221,14 +235,55 @@ export class EmbedService {
    * @param fileId - ID of the file to de-index
    */
   async deleteFileVectors(fileId: string) {
-    const collectionName = await this.resolveDefaultCollectionName();
     const vs = this.vectorStore;
     if (!vs) { this.logger.warn('VectorStore not available'); return; }
-    try {
-      await vs.deleteByFilter(collectionName, { fileId });
-    } catch (err) {
-      this.logger.warn(`Error deleting vectors: ${err.message}`);
+    // Every collection: a file may have been indexed into one other than the default.
+    for (const collection of await this.collectionsOrDefault()) {
+      try {
+        await vs.deleteByFilter(collection, { fileId });
+      } catch (err) {
+        this.logger.warn(`Error deleting vectors of file ${fileId} in "${collection}": ${err.message}`);
+      }
     }
+  }
+
+  /**
+   * Changes the visibility of an indexed file's chunks without re-embedding them (in every collection), and records it
+   * on the file.
+   */
+  async setFileScope(file: File, scope: DocScope, projectId: string | null): Promise<void> {
+    const vs = this.vectorStore;
+    if (!vs) throw new Error('VectorStoreProviderService not available');
+    const docProjectId = scope === 'project' ? projectId : null;
+    for (const collection of await this.collectionsOrDefault()) {
+      await vs.updatePayloadByFilter(collection, { fileId: file.id }, { scope, projectId: docProjectId });
+    }
+    await this.filesService.markVectorized(file.id, file.vectorCollectionId, scope, docProjectId);
+    this.logger.log(`File ${file.originalName}: document scope → ${scope}`);
+  }
+
+  /** Removes the chunks matching `filter` written by an indexing other than `indexRun`, in the given collections. */
+  private async removeOlderChunks(filter: Record<string, string>, indexRun: string, collections: Array<string | null | undefined>): Promise<void> {
+    const vs = this.vectorStore;
+    if (!vs) return;
+    for (const collection of new Set(collections.filter((c): c is string => !!c))) {
+      try {
+        await vs.deleteByFilter(collection, filter, { indexRun });
+      } catch (err) {
+        this.logger.warn(`Error removing previous chunks in "${collection}": ${err.message}`);
+      }
+    }
+  }
+
+  /** The vector store's collections; the default one when they cannot be listed. */
+  private async collectionsOrDefault(): Promise<string[]> {
+    try {
+      const all = await this.vectorStore?.listCollections();
+      if (all?.length) return all;
+    } catch (err) {
+      this.logger.warn(`Cannot list vector collections: ${err.message}`);
+    }
+    return [await this.resolveDefaultCollectionName()];
   }
 
   /**

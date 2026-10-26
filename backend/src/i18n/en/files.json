@@ -8,5 +8,7 @@
   "relRequired": "Provide ?rel=<relative-path>",
   "relInvalid": "Invalid relative path",
   "streamTokenInvalid": "Invalid or expired streaming token",
-  "streamParamsRequired": "Specify the file 'source' and 'path' to stream"
+  "streamParamsRequired": "Specify the file 'source' and 'path' to stream",
+  "teamRequired": "Choose the team to share the file with",
+  "teamNotMember": "You can only share with a team you belong to"
 }

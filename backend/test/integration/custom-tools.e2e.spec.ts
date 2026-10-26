@@ -142,6 +142,6 @@ describe('SSRF wiring + error reported to the user (§13.2)', () => {
     // (throwOnError in the dry-run → success=false + message in `error`).
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(false);
-    expect(res.body.error).toMatch(/Internal destination not allowed/);
+    expect(res.body.error).toMatch(/Metadata\/link-local destination always blocked/);
   });
 });

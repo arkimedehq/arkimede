@@ -19,6 +19,9 @@ export interface FileRecord {
   vectorized: boolean;
   /** Name of the vector collection the file was indexed into, if vectorized=true */
   vectorCollectionId?: string;
+  /** Visibility of the indexed document; null when indexed before it was recorded. */
+  vectorScope?: DocScope | null;
+  vectorProjectId?: string | null;
   projectId?: string;
   scope?: FileScope;
   teamId?: string | null;
@@ -53,6 +56,12 @@ export const filesApi = {
 
   setScope: (id: string, scope: FileScope, teamId?: string | null) =>
     api.patch<FileRecord>(`/files/${id}/scope`, { scope, teamId: teamId ?? null }).then((r) => r.data),
+
+  /** Changes the visibility of an indexed file without re-indexing it (owner or admin). */
+  setDocScope: (fileId: string, scope: DocScope, projectId?: string | null) =>
+    api.patch<{ scope: DocScope; projectId: string | null }>(`/embed/${fileId}/scope`, {
+      scope, ...(projectId ? { projectId } : {}),
+    }).then((r) => r.data),
 
   /** Queues the indexing (async): the user is notified when it completes. */
   ingest: (fileId: string, opts: { scope: DocScope; collection?: string; projectId?: string; ocrLevel?: OcrLevel }) =>

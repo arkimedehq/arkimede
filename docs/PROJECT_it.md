@@ -425,7 +425,12 @@ interface RagExecutorConfig {
 ```
 
 **Scope del documento & visibilità dinamica.** Lo scope è una proprietà del **documento** (scelta all'embed:
-`universal | project | personal`), salvata nel payload del vettore (`scope`, `userId`, `projectId`). La ricerca filtra
+`universal | project | personal`), salvata nel payload del vettore (`scope`, `userId`, `projectId`) e registrata sul
+file (`files.vectorScope`). Una reindicizzazione sostituisce i chunk precedenti del file (ogni indicizzazione marca i
+suoi chunk con `indexRun`; i più vecchi vengono rimossi, nella collezione di destinazione e in quella dove il file era),
+così uno scope più ristretto non lascia mai visibile la copia più ampia; il pannello file cambia lo scope sul posto,
+senza reindicizzare (`PATCH /api/embed/:fileId/scope`, proprietario o admin); eliminare un file ne rimuove i chunk da
+tutte le collezioni. La ricerca filtra
 **dinamicamente in base al contesto** della chat, senza bisogno di un tool per progetto:
 
 | `searchScope` | Cosa ritorna |
@@ -786,7 +791,10 @@ lunghe e produceva `GraphRecursionError`. Flusso completo con diagrammi e tabell
 
 **Memoria utente persistente / auto-memory** (`UserMemoryService`, modulo `user-memory/`):
 
-- Opt-in **per-utente**: toggle `User.autoMemoryEnabled` (default OFF) attivato da Impostazioni→Profilo
+- Opt-in **per-utente**, due interruttori indipendenti (Impostazioni → Memoria): `User.autoMemoryEnabled` (default OFF;
+  la memoria personale: estrazione + uso) e `User.sharedMemoryEnabled` (default OFF; uso delle note di team /
+  organizzazione). Le note di Recordare si possono copiare dentro, a mano o per categoria (`docs/MEMORY.md`, Copies from
+  Recordare)
 - Tabella `user_memory`: una riga = un fatto durevole sull'utente, stato `pending` (proposto) → `confirmed` (attivo),
   con `sourceChatId`
 - **Estrazione a soglia** (non per messaggio): a fine turno, se si sono accumulati ≥ soglia messaggi nuovi dall'ultima
@@ -919,6 +927,8 @@ users
   ├── toolSchemaFormat (nullable)
   ├── maxHistoryTokens (integer, nullable) ← budget storia per-utente (null = usa globale)
   ├── autoMemoryEnabled (boolean, default false)  ← memoria utente persistente (opt-in)
+  ├── sharedMemoryEnabled (boolean, default false)  ← uso delle note di team / organizzazione (opt-in)
+  ├── recordareCopyCategories (jsonb), recordareNotesCursor (bigint)  ← copie delle note di Recordare (regola, cursore del feed)
   ├── memoryThreshold (integer, nullable)  ← override soglia estrazione (null = usa globale)
   ├── user_memory              (content, status pending|confirmed, sourceChatId)  ← fatti durevoli sull'utente
   ├── projects   # userId = OWNER (nullable, ON DELETE SET NULL → progetto del team sopravvive all'eliminazione owner)
@@ -1015,7 +1025,7 @@ POST   /api/auth/login
 
 # Profilo utente
 GET    /api/users/me
-PATCH  /api/users/me             ← include systemPrompt utente, autoMemoryEnabled, memoryThreshold
+PATCH  /api/users/me             ← include systemPrompt utente, autoMemoryEnabled, sharedMemoryEnabled, memoryThreshold, recordareCopyCategories
 POST   /api/users/me/change-password
 
 # Gestione utenti (admin)
@@ -1063,6 +1073,7 @@ GET    /api/files/raw?rel=<path>        ← download autenticato (whitelist UPLO
 POST   /api/embed/:fileId               ← body { scope: universal|project|personal, collection?, projectId?, ocrLevel? } → in coda (asincrono, notifica al termine)
 GET    /api/ocr/levels                  ← livelli OCR: default/massimo admin + disponibilità (vedi docs/OCR_it.md)
 GET|PATCH /api/admin/config/ocr         ← admin: livello OCR predefinito e massimo
+PATCH  /api/embed/:fileId/scope         ← body { scope: universal|project|personal, projectId? } → visibilità cambiata sul posto (proprietario o admin)
 DELETE /api/embed/:fileId
 GET    /api/embed/collections
 
@@ -1321,7 +1332,9 @@ avviso se differiscono, oppure — per vettori indicizzati prima di questa regis
 
 Recordare è un servizio separato di memoria / gemello digitale. Arkimede
 può usarlo come **memoria episodica** dei suoi utenti (cosa è successo e quando), accanto — non al posto — di A-MEM,
-che resta invariata (`autoMemoryEnabled`, `save_memory` / `search_memory`, `search_conversations`). Codice:
+che resta invariata (`autoMemoryEnabled` / `sharedMemoryEnabled`, `save_memory` / `search_memory`,
+`search_conversations`); l'utente può copiare le note di Recordare in A-MEM, a mano o per categoria, e le copie le
+seguono (`docs/MEMORY.md`). Codice:
 `backend/src/recordare/`, sulla **libreria client** di Recordare (`backend/src/recordare/client/`, copia sincronizzata
 dal `packages/client` di Recordare — mai modificata qui): SDK MCP ufficiale, errori RFC 9457, `Retry-After`, contesto
 di traccia W3C; le richieste passano da `safeFetch`.
@@ -1333,38 +1346,48 @@ RECORDARE_OUTBOX_POLL_MS=3000         # opzionale
 ```
 
 - **Interruttore per utente** `users.episodicMemoryEnabled` (default spento; Impostazioni → Memoria, visibile solo
-  se Recordare è configurato; `PATCH /api/users/me {episodicMemoryEnabled}`). Governa solo il lato Arkimede: **il
-  consenso dentro Recordare lo dà l'amministratore di Recordare** (`episodicEnabled` per persona). `GET api/v1/me` lo
-  riporta; Arkimede lo tiene in cache (5 min, ricontrollato quando cambia l'interruttore e a ogni lettura del profilo)
-  ed espone `episodicMemoryStatus`: `off | waiting_activation | active | unknown` (Recordare non raggiungibile). Con
-  l'interruttore acceso e il consenso non dato, le Impostazioni mostrano "In attesa di attivazione da parte
-  dell'amministratore di Recordare".
-- **Identità**: al primo uso `GET api/v1/me` con `X-Recordare-User: <id utente Arkimede>` (Recordare crea la persona
-  in automatico), l'`ownerId` viene salvato in `users.recordareOwnerId` e il nome della persona segue il profilo di
-  Arkimede (`PATCH api/v1/me {displayName}`, sincronizzato a ogni controllo). Il tipo di memoria — personale, o
-  condivisa da chi usa l'account (l'entità di Recordare, es. l'utente voice) — si sceglie nelle Impostazioni finché la
-  memoria è vuota; gli admin trovano lì il link a Recordare Atlas. Gli span di tracing portano `recordare.owner_id` quando è noto (solo valore in
-  cache).
+  se Recordare è configurato; `PATCH /api/users/me {episodicMemoryEnabled}`). È l'**unico interruttore**: Recordare
+  non ha un consenso suo (D50 di Recordare) e conserva tutto ciò che Arkimede invia. Arkimede tiene in cache
+  l'identità Recordare dell'utente (5 min, ricontrollata quando cambia l'interruttore e a ogni lettura del profilo) ed
+  espone `episodicMemoryStatus`: `off | active | unknown` (Recordare non raggiungibile).
+- **Memoria dell'agente** (D50 di Recordare): **un account Arkimede = un agente = una memoria**. Al primo uso
+  `GET api/v1/me` con `X-Recordare-User: <id utente Arkimede>` (Recordare crea la memoria in automatico), l'`memoryId`
+  viene salvato in `users.recordareMemoryId` e il nome della memoria segue il profilo di Arkimede (`PATCH api/v1/me
+  {displayName}`, sincronizzato a ogni controllo). Gli admin trovano nelle Impostazioni il link a Recordare Atlas. Gli
+  span di tracing portano `recordare.memory_id` quando è noto (solo valore in cache).
+  - **Modalità** (Impostazioni → Memoria, `PATCH /api/users/me {episodicMemoryMode}`, campo del profilo
+    `episodicMemoryMode`; inoltrata come `PATCH api/v1/me {mode}`, accettata solo finché la memoria è vuota —
+    altrimenti 409 → `users.memoryNotEmpty`): **personale** (predefinita) — quello che l'utente dice diventa la memoria
+    dell'agente stesso, in prima persona (un gemello digitale indiretto del titolare dell'account); **entità** — un
+    agente condiviso (es. l'account voice usato dalla famiglia): chi parla senza essere identificato è "qualcuno", le
+    persone identificate vengono ricordate per nome.
+  - **Genere** (`users.gender` `masculine | feminine | neutral`, null = non impostato → maschile; Impostazioni →
+    Memoria, `PATCH /api/users/me {gender}`): il genere grammaticale della prima persona della memoria nelle lingue con
+    il genere, inviato come `PATCH api/v1/me {gender}` dal `PersonDirectory` della libreria client quando quello
+    di Recordare è diverso, a ogni lookup (non inviato finché non è impostato: il default di Recordare è maschile).
+  - **Partecipanti**: gli altri utenti Arkimede che scrivono in una chat condivisa vengono inviati come partecipanti
+    `other` con `identity: {externalUserId: <il loro id utente>}` — Recordare li riconosce come **contatti dentro la
+    memoria del proprietario della chat** (mai come memorie proprie lì). I turni del proprietario della chat sono
+    dell'account (`user`, partecipante `owner`). Le chat vocali (Wyoming) appartengono all'account dell'utente voice
+    come qualsiasi altra chat (di solito una memoria di entità); per ora nulla è marcato `own` (Arkimede oggi non ha
+    input percepiti da un dispositivo).
 - **Ingest tramite outbox**: un subscriber TypeORM su `Message` scrive una riga `recordare_outbox` nella stessa
   transazione di ogni messaggio salvato (protetta da savepoint: un errore dell'outbox non fa mai fallire la chat), per
-  le chat il cui proprietario ha l'interruttore acceso. **Nulla viene accumulato prima del consenso**: i proprietari
-  con consenso noto come spento sono esclusi nella stessa istruzione (sconosciuto → accodato; Recordare risponde
-  `stored: false` e la riga viene scartata). I turni di errore della chat (i messaggi "⚠️ …" salvati sui fallimenti,
+  le chat il cui proprietario ha l'interruttore acceso. I turni di errore della chat (i messaggi "⚠️ …" salvati sui fallimenti,
   dentro `withoutRecordareIngest`) non vengono mai inviati. Un worker in background le invia a
   `POST api/v1/ingest/messages` (conversazione = id chat, externalId = id messaggio → idempotente; chiamate ai tool
-  come messaggi `tool`; altri utenti di una chat condivisa come partecipanti `other`), con la politica di consegna
+  come messaggi `tool`; altri utenti di una chat condivisa come partecipanti `other` con il loro id utente), con la politica di consegna
   della libreria (back-off esponenziale con jitter, `Retry-After` di Recordare rispettato); dopo
   12 tentativi (o un 400/413/422) la riga viene parcheggiata (`parkedAt`, `lastError`, avviso nel log). Rewind ed
   eliminazione delle chat vengono propagati (`DELETE …/messages/{id}`, `DELETE …/conversations/{id}`). Il percorso
   della richiesta non attende mai Recordare.
-- **Tool di richiamo** (solo per utenti con l'interruttore acceso, in una chat salvata, e non mentre il consenso è
-  noto come spento): `recordare_search_episodes`, `recordare_search_memory`, `recordare_resolve_period`,
+- **Tool di richiamo** (solo per utenti con l'interruttore acceso, in una chat salvata): `recordare_search_episodes`, `recordare_search_memory`, `recordare_resolve_period`,
   `recordare_remember`, `recordare_correct_episode`, `recordare_forget_episode` (niente `log_episode`: l'ingest cattura
   già la conversazione, registrare in più duplicherebbe) — costruiti dai tool che Recordare elenca via MCP (i suoi
   nomi, descrizioni e JSON Schema, con prefisso `recordare_`), chiamati con la libreria client (`/mcp`, streamable
   HTTP, una sessione per utente e chat). Ogni richiesta porta `X-Recordare-User` e
-  `X-Recordare-Conversation: <id chat>`, impostati nel codice (il contesto di chi legge: senza, Recordare non
-  restituisce nulla). Le righe outbox in sospeso della chat vengono inviate (≤3 s) prima di una chiamata.
+  `X-Recordare-Conversation: <id chat>`, impostati nel codice (la conversazione: le scritture MCP vi legano la
+  loro evidenza; nessun filtro per chi legge dal D50 di Recordare). Le righe outbox in sospeso della chat vengono inviate (≤3 s) prima di una chiamata.
 - **Contesto di memoria** (opzione dell'agente `memoryContext`, Agenti → agente, spenta di default): prima di ogni
   risposta l'agente riceve da Recordare i ricordi dell'utente pertinenti al messaggio (`POST api/v1/context`, un blocco
   recintato `<memory-context>` marcato come dati) in fondo al prompt di sistema — non in cache, dopo gli altri blocchi per
@@ -1408,7 +1431,7 @@ Attributi: `voice.operation` = `transcription` | `speech`; `gen_ai.request.model
 della voce per il Piper interno); `gen_ai.provider.name` quando noto (`whisper` / `piper` per i servizi inclusi,
 `openai`, `groq`; omesso per gli endpoint OpenAI-compatible); `voice.audio_seconds` (durata dell'audio in ingresso
 STT / in uscita TTS, solo se l'audio è WAV — letta dall'header); `voice.characters` (lunghezza del testo TTS, un
-conteggio); `user.id` e `recordare.owner_id` quando l'utente è noto (le richieste Wyoming asr / tts da Home Assistant
+conteggio); `user.id` e `recordare.memory_id` quando l'utente è noto (le richieste Wyoming asr / tts da Home Assistant
 agiscono per l'utente di conversazione Wyoming quando è configurato, altrimenti nessuno). Uno span vocale si annida sotto lo span attivo quando c'è; le rotte HTTP e il protocollo Wyoming (una
 richiesta per connessione: asr, handle e tts arrivano separati) rendono ogni chiamata vocale una traccia a sé, mentre
 il turno `handle` di Wyoming è una traccia `invoke_agent` propria.

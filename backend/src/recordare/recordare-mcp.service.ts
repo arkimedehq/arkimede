@@ -20,12 +20,11 @@
  * `log_episode` is deliberately NOT offered: the ingest already captures the
  * conversation, logging on top of it would duplicate episodes.
  */
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { type Tool } from './client';
 import { recordareClient } from './recordare.config';
 import { RecordareOutboxService } from './recordare-outbox.service';
-import { RecordareIdentityService } from './recordare-identity.service';
 
 /** Recordare's tools not offered to Arkimede's agent (the ingest captures the conversation). */
 const NOT_OFFERED = new Set(['log_episode']);
@@ -39,10 +38,7 @@ export class RecordareMcpService {
   private readonly logger = new Logger(RecordareMcpService.name);
   private tools: { at: number; list: Tool[] } | null = null;
 
-  constructor(
-    private readonly outbox: RecordareOutboxService,
-    @Optional() private readonly identity?: RecordareIdentityService,
-  ) {}
+  constructor(private readonly outbox: RecordareOutboxService) {}
 
   /** True when Recordare is configured on this installation. */
   get enabled(): boolean {
@@ -59,12 +55,12 @@ export class RecordareMcpService {
 
   /**
    * The user's memories relevant to `message` (Recordare's `<memory-context>` block) for an agent with
-   * memoryContext on — or null: consent known off, nothing relevant, Recordare slow or down. The current turn is
+   * memoryContext on — or null: nothing relevant, Recordare slow or down. The current turn is
    * sent first (bounded), so Recordare knows the conversation (its viewer rule needs it).
    */
   async contextBlock(userId: string, chatId: string, message: string): Promise<string | null> {
     const client = recordareClient();
-    if (!client || this.identity?.cachedConsent(userId) === false) return null;
+    if (!client) return null;
     let timer: NodeJS.Timeout | undefined;
     try {
       return await Promise.race([
@@ -98,9 +94,6 @@ export class RecordareMcpService {
    * Recordare unreachable → no tools for this run (the agent works without memory).
    */
   async buildTools(userId: string, chatId: string): Promise<DynamicStructuredTool[]> {
-    // Consent known to be off in Recordare: reads would return nothing — offer no tools.
-    // Unknown (first contact, Recordare down) → offered; the cache is refreshed meanwhile.
-    if (this.identity?.cachedConsent(userId) === false) return [];
     let listed: Tool[];
     try {
       listed = await this.listTools(userId, chatId);

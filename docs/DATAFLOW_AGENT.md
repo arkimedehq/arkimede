@@ -185,7 +185,8 @@ SAVE -. "on the next turn:<br/>replay in the history (Diagram A)" .-> CTX
 | `historyCompactionThreshold` | Admin settings (`app_config`) | 80% (clamp 50–95) | % of the budget beyond which compaction triggers (80% × 30000 = 24000 tok) |
 | `toolLoadingStrategy` / `toolLoadingMaxTools` | User profile | all | Which/how many tools get injected (semantic RAG selection over the manifests) |
 | `toolSchemaFormat` | User profile | full | `deferred` = SKILL.md on-demand via `get_tool_instructions` (lighter prompt) |
-| `autoMemoryEnabled` | User profile | off | Injects the confirmed facts of the user memory into the stable prefix |
+| `autoMemoryEnabled` | User profile | off | Personal memory: extraction, personal pinned notes in the stable prefix, retrieval, memory tools |
+| `sharedMemoryEnabled` | User profile | off | Team / org notes: pinned in the stable prefix, retrieved, `search_memory` (independent of the above) |
 | Base / user / project system prompt | Admin / profile / project | — | The 4 prompt levels |
 | LLM default + summarizer + vision | `llm_configs` | — | Agent-loop model, rolling-summary model, model for multimodal tasks (image OCR) |
 | `maxRows`, `timeoutMs`, `prefetchTables`, `prefetchAllColumns` | `executorConfig` of the individual SQL tool | 10000 / 60s / on | Tool output size (heavily affects history weight) |

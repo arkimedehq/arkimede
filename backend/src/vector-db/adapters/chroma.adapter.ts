@@ -152,17 +152,39 @@ export class ChromaAdapter implements VectorStoreAdapter {
     }));
   }
 
-  async deleteByFilter(collection: string, filter: Record<string, any>): Promise<void> {
+  async deleteByFilter(collection: string, filter: Record<string, any>, except?: Record<string, any>): Promise<void> {
     const id = await this.resolveId(collection);
     if (!id) return;
 
-    const where = Object.keys(filter).length === 1
-      ? { [Object.keys(filter)[0]]: { $eq: Object.values(filter)[0] } }
-      : { $and: Object.entries(filter).map(([k, v]) => ({ [k]: { $eq: v } })) };
-
-    await this.fetch(`${this.collectionsPath}/${id}/delete`, {
+    if (!except) {
+      await this.fetch(`${this.collectionsPath}/${id}/delete`, {
+        method: 'POST',
+        body:   JSON.stringify({ where: chromaWhere(filter) }),
+      });
+      return;
+    }
+    // `$ne` does not match metadata without the key (chunks written before it existed): pick the ids here instead.
+    const found = await this.fetch<{ ids: string[]; metadatas: Record<string, any>[] }>(`${this.collectionsPath}/${id}/get`, {
       method: 'POST',
-      body:   JSON.stringify({ where }),
+      body:   JSON.stringify({ where: chromaWhere(filter), include: ['metadatas'] }),
+    });
+    const ids = found.ids.filter((_, i) => !Object.entries(except).some(([k, v]) => found.metadatas[i]?.[k] === v));
+    if (!ids.length) return;
+    await this.fetch(`${this.collectionsPath}/${id}/delete`, { method: 'POST', body: JSON.stringify({ ids }) });
+  }
+
+  async updatePayloadByFilter(collection: string, filter: Record<string, any>, patch: Record<string, any>): Promise<void> {
+    const id = await this.resolveId(collection);
+    if (!id) return;
+    // Chroma updates metadata by id: read the matching ids, then write the merged metadata.
+    const found = await this.fetch<{ ids: string[]; metadatas: Record<string, any>[] }>(`${this.collectionsPath}/${id}/get`, {
+      method: 'POST',
+      body:   JSON.stringify({ where: chromaWhere(filter), include: ['metadatas'] }),
+    });
+    if (!found.ids.length) return;
+    await this.fetch(`${this.collectionsPath}/${id}/update`, {
+      method: 'POST',
+      body:   JSON.stringify({ ids: found.ids, metadatas: found.ids.map((_, i) => ({ ...(found.metadatas[i] ?? {}), ...patch })) }),
     });
   }
 
@@ -184,4 +206,10 @@ export class ChromaAdapter implements VectorStoreAdapter {
   async deleteCollection(): Promise<void> {
     throw new VectorMaintenanceNotSupportedError('chroma', 'deleteCollection');
   }
+}
+
+/** Chroma `where` for a key → value equality filter. */
+function chromaWhere(filter: Record<string, any>): Record<string, any> {
+  const clauses = Object.entries(filter).map(([k, v]) => ({ [k]: { $eq: v } }));
+  return clauses.length === 1 ? clauses[0] : { $and: clauses };
 }

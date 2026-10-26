@@ -22,21 +22,35 @@ export interface UserProfile {
   maxHistoryTokens: number | null;
   /** Persistent user memory: automatic extraction of durable facts. */
   autoMemoryEnabled: boolean;
+  /** Use the team and organisation notes, apart from the personal memory (Recordare D34). */
+  sharedMemoryEnabled: boolean;
   /** Memory extraction threshold override (n. messages); null = global default. */
   memoryThreshold: number | null;
   /** Episodic memory in Recordare (separate from autoMemoryEnabled). */
   episodicMemoryEnabled: boolean;
+  /** The copy rule: Recordare notes of these categories are copied into the personal memory (D34). */
+  recordareCopyCategories?: string[];
   /** True when Recordare is configured on this installation. */
   episodicMemoryAvailable?: boolean;
-  /** off | waiting_activation (consent not given in Recordare yet) | active | unknown (Recordare unreachable). */
-  episodicMemoryStatus?: 'off' | 'waiting_activation' | 'active' | 'unknown';
-  /** Personal memory, or shared by everyone using this account (Recordare "entity"); null = not known yet. */
-  episodicMemoryKind?: 'human' | 'entity' | null;
+  /** off | active | unknown (Recordare unreachable). */
+  episodicMemoryStatus?: 'off' | 'active' | 'unknown';
+  /**
+   * Recordare memory mode: personal (what you say becomes the agent's own memory, first person) or entity (a shared
+   * agent: unidentified speakers are "someone"); null = not known yet.
+   */
+  episodicMemoryMode?: MemoryMode | null;
+  /** Grammatical gender (also the first person of the memory); null = not set (masculine). */
+  gender?: UserGender | null;
   /** Recordare Atlas address (admins only, when installed). */
   recordareAtlasUrl?: string | null;
   createdAt:    string;
   updatedAt:    string;
 }
+
+/** Recordare memory mode (its D50). */
+export type MemoryMode = 'personal' | 'entity';
+/** Grammatical gender: masculine (default) | feminine | neutral. */
+export type UserGender = 'masculine' | 'feminine' | 'neutral';
 
 export const profileApi = {
   get: (): Promise<UserProfile> =>
@@ -53,9 +67,12 @@ export const profileApi = {
     showTokenCount?: boolean;
     maxHistoryTokens?: number | null;
     autoMemoryEnabled?: boolean;
+    sharedMemoryEnabled?: boolean;
     memoryThreshold?: number | null;
     episodicMemoryEnabled?: boolean;
-    episodicMemoryKind?: 'human' | 'entity';
+    episodicMemoryMode?: MemoryMode;
+    gender?: UserGender | null;
+    recordareCopyCategories?: string[];
   }): Promise<UserProfile> =>
     api.patch('/users/me', data).then((r) => r.data),
 

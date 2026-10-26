@@ -99,14 +99,24 @@ export class QdrantAdapter implements VectorStoreAdapter {
     }));
   }
 
-  async deleteByFilter(collection: string, filter: Record<string, any>): Promise<void> {
+  async deleteByFilter(collection: string, filter: Record<string, any>, except?: Record<string, any>): Promise<void> {
     await this.client.delete(collection, {
+      wait: true,
       filter: {
         must: Object.entries(filter).map(([key, value]) => ({
           key,
           match: { value },
         })),
+        ...(except ? { must_not: Object.entries(except).map(([key, value]) => ({ key, match: { value } })) } : {}),
       },
+    });
+  }
+
+  async updatePayloadByFilter(collection: string, filter: Record<string, any>, patch: Record<string, any>): Promise<void> {
+    await this.client.setPayload(collection, {
+      wait: true,
+      payload: patch,
+      filter: { must: Object.entries(filter).map(([key, value]) => ({ key, match: { value } })) },
     });
   }
 

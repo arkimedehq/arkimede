@@ -84,8 +84,16 @@ export interface VectorStoreAdapter {
    *
    * @param collection - Collection name
    * @param filter     - Key → value object (e.g. { fileId: 'uuid' })
+   * @param except     - Optional key → value: points whose payload has this value are kept
+   *                     (e.g. { indexRun: 'uuid' } keeps the chunks of the run that just wrote them)
    */
-  deleteByFilter(collection: string, filter: Record<string, any>): Promise<void>;
+  deleteByFilter(collection: string, filter: Record<string, any>, except?: Record<string, any>): Promise<void>;
+
+  /**
+   * Sets payload fields on the points that match the payload filter (other fields are kept;
+   * a `null` value clears the field). Used to change a document's visibility without re-embedding.
+   */
+  updatePayloadByFilter(collection: string, filter: Record<string, any>, patch: Record<string, any>): Promise<void>;
 
   /**
    * Deletes and recreates the collection with the specified dimension.

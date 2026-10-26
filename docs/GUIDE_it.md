@@ -318,6 +318,11 @@ Ogni tool, skill e data source ha uno scope che ne definisce visibilità e gesti
 
 > In pratica: **org** = strumenti standard e fidati per tutta l'azienda (curati dagli admin); **team** = strumenti e dati di un reparto, gestiti dai suoi owner; **personal** = sperimentazione individuale.
 
+I **file** seguono lo stesso scope per chi può aprirli, scelto in **Impostazioni → File** (proprietario o admin):
+**team** significa uno dei tuoi team, scelto nello stesso menu. La stessa riga imposta la visibilità del documento
+indicizzato nelle ricerche (**universale / progetto / personale**, cambiata sul posto senza reindicizzare) — un'impostazione
+separata: un documento *universale* lo trovano tutti anche se il file resta personale.
+
 ---
 
 ## 5. System prompt a 4 livelli

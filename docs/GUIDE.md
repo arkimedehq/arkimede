@@ -319,6 +319,11 @@ Every tool, skill and data source has a scope that defines its visibility and ma
 
 > In practice: **org** = standard, trusted tools for the whole company (curated by admins); **team** = tools and data for a department, managed by its owners; **personal** = individual experimentation.
 
+**Files** follow the same scope for who can open them, chosen in **Settings → Files** (owner or admin): **team** means
+one of your teams, picked in the same menu. The same row sets the indexed document's visibility in searches
+(**universal / project / personal**, changed in place without re-indexing) — a separate setting: a *universal*
+document is found by everyone even when the file itself stays personal.
+
 ---
 
 ## 5. 4-level system prompt

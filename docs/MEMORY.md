@@ -7,7 +7,10 @@ the system prompt on every turn. The design is inspired by
 with a conservative-evolution correction: the system links and enriches notes but
 never rewrites their content behind the user's back.
 
-Memory is opt-in per user (`autoMemoryEnabled`). Every note is owned by the user
+Memory is opt-in per user, with two independent choices: the **personal memory**
+(`autoMemoryEnabled` — extraction, plus pinned and retrieved personal notes, and the
+tools below) and the **team / org notes** (`sharedMemoryEnabled` — pinned and
+retrieved shared notes, `search_memory` over them). Every note is owned by the user
 and follows a `pending → confirmed` lifecycle, so nothing enters active memory
 without the user's approval.
 
@@ -78,11 +81,13 @@ never crosses scopes — a `personal` note never modifies an `org` one.
 
 Notes carry a `scope` mirroring the platform's resource model: `personal` (default),
 `team` (visible to team members), or `org` (admin-promoted, visible to everyone).
-Retrieval unions the scopes accessible to the user; evolution stays within a scope.
+Retrieval unions the scopes accessible to the user that they use (personal and / or team + org, see above);
+evolution stays within a scope.
 
 ## Agent tools
 
-When memory is enabled the agent gets three built-in tools:
+With the personal memory on the agent gets three built-in tools (with the team / org notes alone, only
+`search_memory`):
 
 - **`save_memory`** — records an explicitly requested durable fact ("remember
   that…") as a `pending` proposal (never auto-confirmed; the user approves it from
@@ -119,6 +124,23 @@ evolution job's output visible and correctable.
 - Automatic forgetting/decay.
 - A working/long-term hierarchy (the rolling summary already covers working memory).
 
-Episodic memory ("what happened and when") and the digital twin are designed as a
-separate service, [Recordare](https://github.com/arkimedehq/recordare), that Arkimede
-will use as a client.
+## Copies from Recordare
+
+Episodic memory ("what happened and when") lives in a separate service,
+[Recordare](https://github.com/arkimedehq/recordare), which keeps its own notes too (Recordare D34). A-MEM stays as
+it is; the user chooses what crosses over, one way only:
+
+- **by hand** — Diary → Who you are: a note is copied into A-MEM, personal, a team of the user's or the org (admins);
+  copies into a team or the org are recorded in the audit log (`memory.copy_from_recordare`);
+- **by rule** — `recordareCopyCategories`: Recordare notes of the chosen categories are copied into the personal
+  memory by themselves. A copy by rule never pushes the user's own notes out: it is skipped when the personal memory
+  is full.
+
+A copy is `confirmed` (the user chose it) and keeps `recordareNoteId`. A background worker
+(`recordare-notes-sync.service.ts`, every `RECORDARE_NOTES_SYNC_MS`, default 5 minutes) follows the user's notes change
+feed (`GET api/v1/notes/changes`, cursor `users.recordareNotesCursor`): a note updated or corrected gives its copies the
+new text, a note forgotten or retired removes them. Adding a category to the rule follows the feed again from the start,
+so the notes already there are copied too.
+
+With both the personal memory and Recordare on, the same taste or habit may be stored twice: the Memory section warns,
+it does not forbid.

@@ -18,14 +18,14 @@ import { apiKeysApi } from '../api/apiKeys';
 import ApiKeyPersistToggle from '../components/ApiKeyPersistToggle';
 import { adminUsersApi } from '../api/adminUsers';
 import { filesApi, type FileRecord, type DocScope, type FileScope } from '../api/files';
-import { profileApi } from '../api/profile';
+import { profileApi, type MemoryMode, type UserGender } from '../api/profile';
 import { appConfigApi } from '../api/appConfig';
 import { userMemoryApi, type UserMemoryItem } from '../api/userMemory';
 import { usageApi, type TokenGroup, type AdminUsageSummary } from '../api/usage';
 import { llmConfigsApi, type LlmConfigDto } from '../api/llmConfigs';
 import { vectorDbApi, type VectorCollection, type VectorDbProvider } from '../api/vectorDb';
 import { ocrApi, OCR_LEVELS, type OcrLevel } from '../api/ocr';
-import { teamsApi } from '../api/teams';
+import { teamsApi, type Team } from '../api/teams';
 import { projectsApi } from '../api/projects';
 import { useStore } from '../store/useStore';
 import { ToolsSection } from './ToolsPage';
@@ -541,10 +541,13 @@ function ProfileSection() {
 // A-MEM note metadata (F1): category + tags chips, context in muted text.
 function NoteMeta({ f }: { f: UserMemoryItem }) {
   const { t } = useTranslation('settings');
-  if (!f.category && !(f.tags?.length) && !f.context && !(f.mergeOfIds?.length) && (f.scope ?? 'personal') === 'personal') return null;
+  if (!f.category && !(f.tags?.length) && !f.context && !(f.mergeOfIds?.length) && (f.scope ?? 'personal') === 'personal' && !f.recordareNoteId) return null;
   return (
     <div className="flex flex-wrap items-center gap-1 mt-0.5">
       {f.scope && f.scope !== 'personal' && <ScopeBadge scope={f.scope} />}
+      {f.recordareNoteId && (
+        <span className="px-1.5 py-px rounded-full bg-emerald-500/15 text-emerald-300 text-[10px]">{t('memory.fromRecordare')}</span>
+      )}
       {(f.mergeOfIds?.length ?? 0) > 0 && (
         <span className="px-1.5 py-px rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[10px]">
           {t('memory.mergeProposal')}
@@ -658,14 +661,16 @@ function MemorySection() {
     <div className="space-y-6">
       <UserMemoryCard
         autoMemoryEnabled={profileQuery.data?.autoMemoryEnabled ?? false}
+        sharedMemoryEnabled={profileQuery.data?.sharedMemoryEnabled ?? false}
+        episodicMemoryEnabled={!!profileQuery.data?.episodicMemoryAvailable && !!profileQuery.data?.episodicMemoryEnabled}
         memoryThreshold={profileQuery.data?.memoryThreshold ?? null}
         loading={profileQuery.isLoading}
       />
       {profileQuery.data?.episodicMemoryAvailable && (
         <EpisodicMemoryCard
           enabledInitial={profileQuery.data.episodicMemoryEnabled ?? false}
-          status={profileQuery.data.episodicMemoryStatus ?? 'off'}
-          kind={profileQuery.data.episodicMemoryKind ?? null}
+          mode={profileQuery.data.episodicMemoryMode ?? null}
+          gender={profileQuery.data.gender ?? null}
           atlasUrl={profileQuery.data.recordareAtlasUrl ?? null}
         />
       )}
@@ -675,13 +680,15 @@ function MemorySection() {
 
 // ── Episodic memory (Recordare) card ───────────────────────────────────────
 // Shown only when the installation has Recordare configured. Gates Arkimede's
-// side (ingest + recall tools); consent inside Recordare stays with its admin.
-// The kind (personal / shared by everyone using the account) is the user's choice,
-// accepted by Recordare only while the memory is empty. Admins get the Atlas link.
-function EpisodicMemoryCard({ enabledInitial, status, kind, atlasUrl }: {
+// side (ingest + recall tools); Recordare has no consent of its own (its D50): this switch is the on/off.
+// One account = one agent = one memory (Recordare D50). The mode — personal (what you say is the
+// agent's own memory, first person) or entity (a shared agent) — is the user's choice, accepted by
+// Recordare only while the memory is empty. The gender (profile) is the first person's in gendered
+// languages. Admins get the Atlas link.
+function EpisodicMemoryCard({ enabledInitial, mode, gender, atlasUrl }: {
   enabledInitial: boolean;
-  status: 'off' | 'waiting_activation' | 'active' | 'unknown';
-  kind: 'human' | 'entity' | null;
+  mode: MemoryMode | null;
+  gender: UserGender | null;
   atlasUrl: string | null;
 }) {
   const { t } = useTranslation('settings');
@@ -692,13 +699,20 @@ function EpisodicMemoryCard({ enabledInitial, status, kind, atlasUrl }: {
     mutationFn: (val: boolean) => profileApi.update({ episodicMemoryEnabled: val }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['profile'] }),
   });
-  const [kindError, setKindError] = useState<string | null>(null);
-  const kindMutation = useMutation({
-    mutationFn: (val: 'human' | 'entity') => profileApi.update({ episodicMemoryKind: val }),
-    onMutate: () => setKindError(null),
+  const [modeError, setModeError] = useState<string | null>(null);
+  const modeMutation = useMutation({
+    mutationFn: (val: MemoryMode) => profileApi.update({ episodicMemoryMode: val }),
+    onMutate: () => setModeError(null),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['profile'] }),
-    onError: (e: any) => setKindError(e?.response?.data?.message ?? e.message),
+    onError: (e: any) => setModeError(e?.response?.data?.message ?? e.message),
   });
+  const genderMutation = useMutation({
+    mutationFn: (val: UserGender) => profileApi.update({ gender: val }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['profile'] }),
+  });
+  const currentGender: UserGender = gender ?? 'masculine';
+  const choice = (active: boolean) => `px-3 py-1.5 rounded-lg text-xs border transition-colors disabled:cursor-default
+    ${active ? 'bg-blue-600/20 border-blue-500 text-blue-200' : 'border-gray-700 text-gray-400 hover:border-gray-500'}`;
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
       <div>
@@ -712,9 +726,6 @@ function EpisodicMemoryCard({ enabledInitial, status, kind, atlasUrl }: {
         <div>
           <p className="text-sm text-gray-200">{t('memory.episodicToggle')}</p>
           <p className="text-xs text-gray-500 mt-0.5">{t('memory.episodicHint')}</p>
-          {enabled && status === 'waiting_activation' && (
-            <p className="text-xs text-amber-400 mt-1">{t('memory.episodicWaiting')}</p>
-          )}
         </div>
         <button
           role="switch"
@@ -728,29 +739,48 @@ function EpisodicMemoryCard({ enabledInitial, status, kind, atlasUrl }: {
             ${enabled ? 'translate-x-6' : 'translate-x-1'}`} />
         </button>
       </div>
-      {enabled && kind && (
+      {enabled && mode && (
         <div className="py-2 border-t border-gray-800 space-y-2">
-          <p className="text-sm text-gray-200">{t('memory.episodicKind')}</p>
+          <p className="text-sm text-gray-200">{t('memory.episodicMode')}</p>
           <div className="flex gap-2">
-            {(['human', 'entity'] as const).map((k) => (
+            {(['personal', 'entity'] as const).map((m) => (
               <button
-                key={k}
-                disabled={kindMutation.isPending || k === kind}
-                onClick={() => kindMutation.mutate(k)}
-                className={`px-3 py-1.5 rounded-lg text-xs border transition-colors disabled:cursor-default
-                  ${k === kind ? 'bg-blue-600/20 border-blue-500 text-blue-200' : 'border-gray-700 text-gray-400 hover:border-gray-500'}`}
+                key={m}
+                disabled={modeMutation.isPending || m === mode}
+                onClick={() => modeMutation.mutate(m)}
+                className={choice(m === mode)}
               >
-                {t(k === 'human' ? 'memory.episodicKindPersonal' : 'memory.episodicKindShared')}
+                {t(m === 'personal' ? 'memory.episodicModePersonal' : 'memory.episodicModeEntity')}
               </button>
             ))}
           </div>
-          <p className="text-xs text-gray-500">{t('memory.episodicKindHint')}</p>
-          {kind === 'entity' && (
+          <p className="text-xs text-gray-500">{t('memory.episodicModePersonalHint')}</p>
+          <p className="text-xs text-gray-500">{t('memory.episodicModeEntityHint')}</p>
+          <p className="text-xs text-gray-500">{t('memory.episodicModeHint')}</p>
+          {mode === 'entity' && (
             <p className="text-xs text-amber-400 flex items-start gap-1.5">
-              <UsersRound size={12} className="mt-0.5 shrink-0" />{t('memory.episodicSharedNotice')}
+              <UsersRound size={12} className="mt-0.5 shrink-0" />{t('memory.episodicEntityNotice')}
             </p>
           )}
-          {kindError && <p className="text-xs text-red-400">{kindError}</p>}
+          {modeError && <p className="text-xs text-red-400">{modeError}</p>}
+        </div>
+      )}
+      {enabled && (
+        <div className="py-2 border-t border-gray-800 space-y-2">
+          <p className="text-sm text-gray-200">{t('memory.gender')}</p>
+          <div className="flex gap-2">
+            {(['masculine', 'feminine', 'neutral'] as const).map((g) => (
+              <button
+                key={g}
+                disabled={genderMutation.isPending || g === currentGender}
+                onClick={() => genderMutation.mutate(g)}
+                className={choice(g === currentGender)}
+              >
+                {t(`memory.gender_${g}`)}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-gray-500">{t('memory.genderHint')}</p>
         </div>
       )}
       {atlasUrl && (
@@ -767,16 +797,22 @@ function EpisodicMemoryCard({ enabledInitial, status, kind, atlasUrl }: {
 }
 
 // ── Persistent user memory card ────────────────────────────────────────────
+// Two independent choices (Recordare D34): the personal memory (extraction + use of
+// the personal notes) and the team / org notes (use).
 function UserMemoryCard({
-  autoMemoryEnabled, memoryThreshold, loading,
+  autoMemoryEnabled, sharedMemoryEnabled, episodicMemoryEnabled, memoryThreshold, loading,
 }: {
   autoMemoryEnabled: boolean;
+  sharedMemoryEnabled: boolean;
+  /** Recordare on too: its notes may duplicate the extracted ones (warn, never forbid). */
+  episodicMemoryEnabled: boolean;
   memoryThreshold: number | null;
   loading: boolean;
 }) {
   const { t } = useTranslation('settings');
   const qc = useQueryClient();
   const [enabled, setEnabled]     = useState(autoMemoryEnabled);
+  const [shared, setShared]       = useState(sharedMemoryEnabled);
   const [threshold, setThreshold] = useState<string>(memoryThreshold != null ? String(memoryThreshold) : '');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText]   = useState('');
@@ -786,13 +822,14 @@ function UserMemoryCard({
   const isAdminUser = useStore((s) => s.user?.role === 'admin');
 
   useEffect(() => { setEnabled(autoMemoryEnabled); }, [autoMemoryEnabled]);
+  useEffect(() => { setShared(sharedMemoryEnabled); }, [sharedMemoryEnabled]);
   useEffect(() => { setThreshold(memoryThreshold != null ? String(memoryThreshold) : ''); }, [memoryThreshold]);
 
-  // List of stored facts (only if memory is enabled)
+  // List of stored facts (only if some notes are used)
   const memoryQuery = useQuery({
     queryKey: ['user-memory'],
     queryFn: userMemoryApi.list,
-    enabled,
+    enabled: enabled || shared,
   });
 
   const toggleMutation = useMutation({
@@ -801,6 +838,11 @@ function UserMemoryCard({
       qc.invalidateQueries({ queryKey: ['profile'] });
       qc.invalidateQueries({ queryKey: ['user-memory'] });
     },
+  });
+
+  const sharedMutation = useMutation({
+    mutationFn: (val: boolean) => profileApi.update({ sharedMemoryEnabled: val }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['profile'] }),
   });
 
   const thresholdMutation = useMutation({
@@ -878,6 +920,31 @@ function UserMemoryCard({
         </button>
       </div>
 
+      {enabled && episodicMemoryEnabled && (
+        <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+          {t('memory.duplicatesWarning')}
+        </p>
+      )}
+
+      {/* Team / org notes: used apart from the personal memory (D34) */}
+      <div className="flex items-center justify-between py-2 border-t border-gray-800">
+        <div className="pr-4">
+          <p className="text-sm text-gray-200">{t('memory.sharedMemory')}</p>
+          <p className="text-xs text-gray-500 mt-0.5">{t('memory.sharedMemoryHint')}</p>
+        </div>
+        <button
+          role="switch"
+          aria-checked={shared}
+          disabled={sharedMutation.isPending || loading}
+          onClick={() => { const next = !shared; setShared(next); sharedMutation.mutate(next); }}
+          className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors
+            disabled:opacity-50 focus:outline-none ${shared ? 'bg-blue-600' : 'bg-gray-700'}`}
+        >
+          <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform
+            ${shared ? 'translate-x-6' : 'translate-x-1'}`} />
+        </button>
+      </div>
+
       {enabled && (
         <>
           {/* Per-user threshold (override of the global default) */}
@@ -924,6 +991,11 @@ function UserMemoryCard({
             </div>
           )}
 
+        </>
+      )}
+
+      {(enabled || shared) && (
+        <>
           {/* Confirmed facts */}
           <div className="border-t border-gray-800 pt-3 space-y-1.5">
             <div className="flex items-center justify-between">
@@ -3253,16 +3325,33 @@ function FilesSection() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['files'] }),
   });
 
+  const { data: myTeams = [] } = useQuery({ queryKey: ['teams', 'mine'], queryFn: teamsApi.mine, staleTime: 60_000 });
+
+  /** The last failed change of a file (sharing or visibility), shown under its row. */
+  const [rowError, setRowError] = useState<{ fileId: string; message: string } | null>(null);
+  const failed = (fileId: string) => (err: any) =>
+    setRowError({ fileId, message: err?.response?.data?.message ?? t('files.changeFailed') });
+  const changed = () => { setRowError(null); qc.invalidateQueries({ queryKey: ['files'] }); };
+
+  const setDocScope = useMutation({
+    mutationFn: ({ id, scope, projectId }: { id: string; scope: DocScope; projectId?: string | null }) =>
+      filesApi.setDocScope(id, scope, scope === 'project' ? projectId : null),
+    onSuccess: changed,
+    onError: (err, vars) => failed(vars.id)(err),
+  });
+
   const setScope = useMutation({
-    mutationFn: ({ id, scope }: { id: string; scope: FileScope }) => filesApi.setScope(id, scope),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['files'] }),
+    mutationFn: ({ id, scope, teamId }: { id: string; scope: FileScope; teamId?: string | null }) => filesApi.setScope(id, scope, teamId),
+    onSuccess: changed,
+    onError: (err, vars) => failed(vars.id)(err),
   });
 
   function openIngest(file: FileRecord) {
     setIngestFileId(file.id);
     setSelectValue('');
-    setIngestProjectId(file.projectId ?? null);
-    setScopeValue(file.projectId ? 'project' : 'personal');
+    setIngestProjectId(file.vectorProjectId ?? file.projectId ?? null);
+    // A re-index keeps the current visibility; otherwise: in a project → project, else personal.
+    setScopeValue(file.vectorScope ?? (file.projectId ? 'project' : 'personal'));
   }
 
   function closeIngest() {
@@ -3343,7 +3432,11 @@ function FilesSection() {
                 onScopeChange={setScopeValue}
                 onConfirmIngest={confirmIngest}
                 onCancelIngest={closeIngest}
-                onSetScope={(scope) => setScope.mutate({ id: file.id, scope })}
+                onSetScope={(scope, teamId) => setScope.mutate({ id: file.id, scope, teamId })}
+                teams={myTeams}
+                onSetDocScope={(scope) => setDocScope.mutate({ id: file.id, scope, projectId: file.vectorProjectId ?? file.projectId })}
+                changing={(setScope.isPending && setScope.variables?.id === file.id) || (setDocScope.isPending && setDocScope.variables?.id === file.id)}
+                error={rowError?.fileId === file.id ? rowError.message : null}
               />
             ))}
           </div>
@@ -3369,6 +3462,10 @@ function FileRow({
   onConfirmIngest,
   onCancelIngest,
   onSetScope,
+  teams,
+  onSetDocScope,
+  changing,
+  error,
 }: {
   file: FileRecord;
   isIngesting: boolean;
@@ -3384,37 +3481,74 @@ function FileRow({
   onScopeChange: (v: DocScope) => void;
   onConfirmIngest: () => void;
   onCancelIngest: () => void;
-  onSetScope: (scope: FileScope) => void;
+  onSetScope: (scope: FileScope, teamId?: string | null) => void;
+  /** The user's teams: a file is shared with one of them. */
+  teams: Team[];
+  /** Changes the visibility of the indexed document in searches (no re-index). */
+  onSetDocScope: (scope: DocScope) => void;
+  changing: boolean;
+  error: string | null;
 }) {
   const { t } = useTranslation('settings');
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   return (
     <div className="px-4 py-3 hover:bg-gray-800/40 transition-colors group">
-      {/* ── Main row ── */}
-      <div className="flex items-center gap-3">
+      {/* ── Main row: name on its own line on phones, controls below it (one line from sm up) ── */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+       <div className="flex items-center gap-3 min-w-0 sm:flex-1">
         <span className="text-xl flex-shrink-0">{fileIcon(file.mimeType)}</span>
 
         <div className="flex-1 min-w-0">
-          <p className="text-sm text-gray-200 truncate">{file.originalName}</p>
+          <p className="text-sm text-gray-200 break-words sm:truncate" title={file.originalName}>{file.originalName}</p>
           <p className="text-xs text-gray-500 mt-0.5">
             {filesApi.formatSize(file.size)}
             {' · '}
             {new Date(file.createdAt).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' })}
           </p>
         </div>
+       </div>
 
-        {/* Access scope (C2): personal | team | org */}
+       <div className="flex flex-wrap items-center gap-2 pl-9 sm:pl-0 sm:flex-nowrap">
+        {/* Sharing (C2): who can open the file — personal | a team of mine | org */}
         <select
-          value={file.scope ?? 'personal'}
-          onChange={(e) => onSetScope(e.target.value as FileScope)}
+          value={file.scope === 'team' ? `team:${file.teamId ?? ''}` : (file.scope ?? 'personal')}
+          disabled={changing}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v.startsWith('team:')) onSetScope('team', v.slice(5));
+            else onSetScope(v as FileScope, null);
+          }}
           title={t('files.scopeTitle')}
-          className="flex-shrink-0 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-xs text-gray-300 focus:outline-none focus:border-indigo-500/50"
+          className="flex-shrink-0 max-w-[11rem] bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-xs text-gray-300 focus:outline-none focus:border-indigo-500/50 disabled:opacity-50"
         >
           <option value="personal">{t('files.scopePersonal')}</option>
-          <option value="team">{t('files.scopeTeam')}</option>
+          {teams.map((team) => (
+            <option key={team.id} value={`team:${team.id}`}>{t('files.scopeTeam')}: {team.name}</option>
+          ))}
+          {/* A team-shared file whose team is not among mine (an admin's view), or saved without a team */}
+          {file.scope === 'team' && !teams.some((team) => team.id === file.teamId) && (
+            <option value={`team:${file.teamId ?? ''}`} disabled>{file.teamId ? t('files.scopeTeam') : t('files.scopeTeamMissing')}</option>
+          )}
+          {teams.length === 0 && <option value="team:none" disabled>{t('files.scopeTeamNone')}</option>}
           <option value="org">{t('files.scopeOrg')}</option>
         </select>
+
+        {/* Visibility of the indexed document in searches — changed in place, no re-index */}
+        {file.vectorized && (
+          <select
+            value={file.vectorScope ?? ''}
+            disabled={changing}
+            onChange={(e) => onSetDocScope(e.target.value as DocScope)}
+            title={t('files.docScopeTitle')}
+            className="flex-shrink-0 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-xs text-gray-300 focus:outline-none focus:border-teal-500/50 disabled:opacity-50"
+          >
+            {!file.vectorScope && <option value="" disabled>{t('files.docScopeUnknown')}</option>}
+            <option value="universal">🌐 {t('files.indexingScopeUniversal')}</option>
+            <option value="project" disabled={!(file.vectorProjectId || file.projectId)}>📁 {t('files.indexingScopeProject')}</option>
+            <option value="personal">🔒 {t('files.indexingScopePersonal')}</option>
+          </select>
+        )}
 
         {/* RAG status — shows the collection if already indexed */}
         <div className="flex-shrink-0">
@@ -3428,8 +3562,8 @@ function FileRow({
           )}
         </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        {/* Actions — always visible on touch screens (no hover there) */}
+        <div className="flex items-center gap-1 ml-auto sm:ml-0 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
           <button
             onClick={() => filesApi.download(file.id)}
             className="p-1.5 text-gray-400 hover:text-gray-200 rounded transition-colors"
@@ -3475,7 +3609,10 @@ function FileRow({
             </button>
           )}
         </div>
+       </div>
       </div>
+
+      {error && <p className="mt-1.5 ml-9 text-xs text-red-400 leading-tight">{error}</p>}
 
       {/* ── Scope + collection selector (expanded inline) ── */}
       {isSelectingThis && (

@@ -88,6 +88,10 @@ export class UserMemory {
   @Column({ type: 'uuid', nullable: true })
   sourceChatId: string | null;
 
+  /** A copy of this Recordare note (D34): it follows the note — updated, corrected, removed with it. */
+  @Column({ type: 'uuid', nullable: true })
+  recordareNoteId: string | null;
+
   @CreateDateColumn()
   createdAt: Date;
 

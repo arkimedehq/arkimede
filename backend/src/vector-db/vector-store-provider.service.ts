@@ -88,8 +88,12 @@ export class VectorStoreProviderService {
     return (await this.getAdapter()).search(collection, vector, limit, filter);
   }
 
-  async deleteByFilter(collection: string, filter: Record<string, any>): Promise<void> {
-    return (await this.getAdapter()).deleteByFilter(collection, filter);
+  async deleteByFilter(collection: string, filter: Record<string, any>, except?: Record<string, any>): Promise<void> {
+    return (await this.getAdapter()).deleteByFilter(collection, filter, except);
+  }
+
+  async updatePayloadByFilter(collection: string, filter: Record<string, any>, patch: Record<string, any>): Promise<void> {
+    return (await this.getAdapter()).updatePayloadByFilter(collection, filter, patch);
   }
 
   async recreateCollection(name: string, vectorSize: number): Promise<void> {

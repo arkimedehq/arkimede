@@ -139,7 +139,7 @@ export class RecordareOutboxService implements OnModuleInit, OnModuleDestroy {
       await this.remove(rows.map((r) => r.id));
       result.sent += rows.length;
       // Store / name the person on first contact (background, cached afterwards).
-      this.identity.cachedOwnerId(chat.userId);
+      this.identity.cachedMemoryId(chat.userId);
     } catch (err) {
       await this.fail(rows, err, result);
     }

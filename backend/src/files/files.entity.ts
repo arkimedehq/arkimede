@@ -31,6 +31,14 @@ export class File {
   @Column({ type: 'varchar', nullable: true })
   vectorCollectionId: string;
 
+  /** Visibility of the indexed document (universal | project | personal), as its chunks carry it; null = indexed before it was recorded. */
+  @Column({ type: 'varchar', length: 20, nullable: true, default: null })
+  vectorScope: 'universal' | 'project' | 'personal' | null;
+
+  /** The project of a `project`-scoped indexed document. */
+  @Column({ type: 'uuid', nullable: true, default: null })
+  vectorProjectId: string | null;
+
   @ManyToOne(() => User, (u) => u.files, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'userId' })
   user: User;

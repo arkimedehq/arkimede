@@ -22,6 +22,8 @@ export interface UserMemoryItem {
   /** Visibility (F4): personal | team | org. */
   scope:        'personal' | 'team' | 'org';
   teamId:       string | null;
+  /** A copy of this Recordare note (D34): it follows the note. */
+  recordareNoteId: string | null;
   userId:       string;
   createdAt:    string;
   updatedAt:    string;

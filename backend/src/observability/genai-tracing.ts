@@ -27,10 +27,10 @@ import { BaseCallbackHandler } from '@langchain/core/callbacks/base';
 import { Attributes, Context, Span, SpanKind, SpanStatusCode, context, trace } from '@opentelemetry/api';
 import { NodeTracerProvider, BatchSpanProcessor, SpanExporter, SpanProcessor } from '@opentelemetry/sdk-trace-node';
 import { defaultResource, detectResources, envDetector, resourceFromAttributes } from '@opentelemetry/resources';
-import { GenAiTraceHandler, OWNER_ID_KEY, USER_ID_KEY, errorType, recordareOwnerOf, withUserContext } from './genai-trace.handler';
+import { GenAiTraceHandler, MEMORY_ID_KEY, USER_ID_KEY, errorType, recordareMemoryOf, withUserContext } from './genai-trace.handler';
 import { getLlmCallContext } from '../usage/llm-call-context';
 
-export { setRecordareOwnerResolver } from './genai-trace.handler';
+export { setRecordareMemoryResolver } from './genai-trace.handler';
 
 const logger = new Logger('GenAiTracing');
 
@@ -134,7 +134,7 @@ export async function withAgentSpan<T>(info: AgentSpanInfo, fn: () => Promise<T>
     const parent = context.active();
     const userId = info.userId ?? parent.getValue(USER_ID_KEY);
     // Cached value only (never waits on Recordare; unknown → looked up in the background).
-    const ownerId = typeof userId === 'string' ? recordareOwnerOf(userId) : undefined;
+    const memoryId = typeof userId === 'string' ? recordareMemoryOf(userId) : undefined;
     span = state.handler.tracer.startSpan(`invoke_agent ${info.name}`, {
       kind: SpanKind.INTERNAL,
       attributes: {
@@ -143,7 +143,7 @@ export async function withAgentSpan<T>(info: AgentSpanInfo, fn: () => Promise<T>
         ...(info.id ? { 'gen_ai.agent.id': info.id } : {}),
         ...(info.conversationId ? { 'gen_ai.conversation.id': info.conversationId } : {}),
         ...(typeof userId === 'string' ? { 'user.id': userId } : {}),
-        ...(ownerId ? { 'recordare.owner_id': ownerId } : {}),
+        ...(memoryId ? { 'recordare.memory_id': memoryId } : {}),
       },
     }, parent);
     ctx = trace.setSpan(typeof userId === 'string' ? withUserContext(parent, userId) : parent, span);
@@ -173,7 +173,7 @@ export function withRunParent<T>(runId: string | undefined, fn: () => Promise<T>
 }
 
 /**
- * Runs `fn` with `userId` (and its Recordare owner id, when known) in the OTel
+ * Runs `fn` with `userId` (and its Recordare memory id, when known) in the OTel
  * context, so spans started inside it (e.g. a voice span) carry `user.id`.
  * Pass-through when off or without a user.
  */
@@ -221,15 +221,15 @@ export async function withVoiceSpan<T>(
     const i = info();
     const parent = context.active();
     const userId = parent.getValue(USER_ID_KEY) ?? getLlmCallContext().userId;
-    const ownerFromCtx = parent.getValue(OWNER_ID_KEY);
-    const ownerId = typeof ownerFromCtx === 'string' ? ownerFromCtx : recordareOwnerOf(userId);
+    const memoryFromCtx = parent.getValue(MEMORY_ID_KEY);
+    const memoryId = typeof memoryFromCtx === 'string' ? memoryFromCtx : recordareMemoryOf(userId);
     const attributes: Attributes = { 'voice.operation': i.operation };
     if (i.model) attributes['gen_ai.request.model'] = i.model;
     if (i.provider) attributes['gen_ai.provider.name'] = i.provider;
     if (validSeconds(i.audioSeconds)) attributes['voice.audio_seconds'] = i.audioSeconds;
     if (typeof i.characters === 'number' && Number.isFinite(i.characters)) attributes['voice.characters'] = i.characters;
     if (typeof userId === 'string') attributes['user.id'] = userId;
-    if (ownerId) attributes['recordare.owner_id'] = ownerId;
+    if (memoryId) attributes['recordare.memory_id'] = memoryId;
     span = state.handler.tracer.startSpan(i.model ? `${i.operation} ${i.model}` : i.operation, {
       kind: i.remote ? SpanKind.CLIENT : SpanKind.INTERNAL,
       attributes,

@@ -425,7 +425,11 @@ interface RagExecutorConfig {
 ```
 
 **Document scope & dynamic visibility.** The scope is a property of the **document** (chosen at embed time:
-`universal | project | personal`), saved in the vector payload (`scope`, `userId`, `projectId`). The search filters
+`universal | project | personal`), saved in the vector payload (`scope`, `userId`, `projectId`) and recorded on the
+file (`files.vectorScope`). A re-index replaces the file's previous chunks (each indexing tags its chunks with
+`indexRun`; the older ones go, in the target collection and the one the file was in), so a narrower scope never leaves
+the wider copy visible; the file panel changes the scope in place, without re-indexing (`PATCH /api/embed/:fileId/scope`,
+owner or admin); deleting a file removes its chunks from every collection. The search filters
 **dynamically based on the context** of the chat, without needing a per-project tool:
 
 | `searchScope` | What it returns |
@@ -788,7 +792,9 @@ explorations and produced `GraphRecursionError`. Full flow with diagrams and thr
 
 **Persistent user memory / auto-memory** (`UserMemoryService`, module `user-memory/`):
 
-- Opt-in **per-user**: toggle `User.autoMemoryEnabled` (default OFF) enabled from Settings→Profile
+- Opt-in **per-user**, two independent toggles (Settings → Memory): `User.autoMemoryEnabled` (default OFF; the personal
+  memory: extraction + use) and `User.sharedMemoryEnabled` (default OFF; use of the team / org notes). Recordare notes can
+  be copied in, by hand or by category (`docs/MEMORY.md`, Copies from Recordare)
 - Table `user_memory`: one row = one durable fact about the user, state `pending` (proposed) → `confirmed` (active),
   with `sourceChatId`
 - **Threshold extraction** (not per-message): at the end of a turn, if ≥ threshold new messages have accumulated since the last
@@ -919,6 +925,8 @@ users
   ├── toolSchemaFormat (nullable)
   ├── maxHistoryTokens (integer, nullable) ← per-user history budget (null = use global)
   ├── autoMemoryEnabled (boolean, default false)  ← persistent user memory (opt-in)
+  ├── sharedMemoryEnabled (boolean, default false)  ← use the team / org notes (opt-in)
+  ├── recordareCopyCategories (jsonb), recordareNotesCursor (bigint)  ← copies of Recordare notes (rule, feed cursor)
   ├── memoryThreshold (integer, nullable)  ← extraction threshold override (null = use global)
   ├── user_memory              (content, status pending|confirmed, sourceChatId)  ← durable facts about the user
   ├── projects   # userId = OWNER (nullable, ON DELETE SET NULL → the team project survives the owner's deletion)
@@ -1015,7 +1023,7 @@ POST   /api/auth/login
 
 # User profile
 GET    /api/users/me
-PATCH  /api/users/me             ← includes user systemPrompt, autoMemoryEnabled, memoryThreshold
+PATCH  /api/users/me             ← includes user systemPrompt, autoMemoryEnabled, sharedMemoryEnabled, memoryThreshold, recordareCopyCategories
 POST   /api/users/me/change-password
 
 # User management (admin)
@@ -1063,6 +1071,7 @@ GET    /api/files/raw?rel=<path>        ← authenticated download (UPLOAD_DIR w
 POST   /api/embed/:fileId               ← body { scope: universal|project|personal, collection?, projectId?, ocrLevel? } → queued (async, notification when done)
 GET    /api/ocr/levels                  ← OCR levels: admin default/max + availability (see docs/OCR.md)
 GET|PATCH /api/admin/config/ocr         ← admin: default and maximum OCR level
+PATCH  /api/embed/:fileId/scope         ← body { scope: universal|project|personal, projectId? } → visibility changed in place (owner or admin)
 DELETE /api/embed/:fileId
 GET    /api/embed/collections
 
@@ -1320,7 +1329,8 @@ for vectors indexed before this was recorded — that the model is unknown (unti
 
 Recordare is a separate memory / digital-twin service. Arkimede can use it
 as its users' **episodic memory** (what happened and when), next to — not instead of — A-MEM, which is unchanged
-(`autoMemoryEnabled`, `save_memory` / `search_memory`, `search_conversations`). Code: `backend/src/recordare/`, on
+(`autoMemoryEnabled` / `sharedMemoryEnabled`, `save_memory` / `search_memory`, `search_conversations`); the user can copy
+Recordare's notes into A-MEM, by hand or by category, and the copies follow them (`docs/MEMORY.md`). Code: `backend/src/recordare/`, on
 Recordare's **client library** (`backend/src/recordare/client/`, a copy synced from Recordare's `packages/client` —
 never edited here): official MCP SDK, RFC 9457 errors, `Retry-After`, W3C trace context; requests go through
 `safeFetch`.
@@ -1332,33 +1342,46 @@ RECORDARE_OUTBOX_POLL_MS=3000         # optional
 ```
 
 - **Per-user switch** `users.episodicMemoryEnabled` (default off; Settings → Memory, shown only when Recordare is
-  configured; `PATCH /api/users/me {episodicMemoryEnabled}`). It gates Arkimede's side only: **consent inside
-  Recordare is given by the Recordare admin** (`episodicEnabled` per person). `GET api/v1/me` reports it; Arkimede
-  caches it (5 min, re-checked when the switch changes and on every profile read) and exposes
-  `episodicMemoryStatus`: `off | waiting_activation | active | unknown` (Recordare unreachable). With the switch on
-  and consent not given, Settings shows "Waiting for activation by the Recordare administrator".
-- **Identity**: on first use `GET api/v1/me` with `X-Recordare-User: <Arkimede user id>` (Recordare auto-provisions
-  the person), the `ownerId` is stored in `users.recordareOwnerId` and the person's name follows the Arkimede
-  profile (`PATCH api/v1/me {displayName}`, synced on every lookup). The kind of memory — personal, or shared by everyone
-  using the account (Recordare's entity, e.g. the voice user) — is chosen in Settings while the memory is empty; admins
-  get the Recordare Atlas link there. Tracing spans carry `recordare.owner_id` when it is known (cached value only).
+  configured; `PATCH /api/users/me {episodicMemoryEnabled}`). It is the **only on/off**: Recordare has no consent
+  flag of its own (Recordare D50) and stores everything Arkimede sends. Arkimede caches the user's Recordare
+  identity (5 min, re-checked when the switch changes and on every profile read) and exposes `episodicMemoryStatus`:
+  `off | active | unknown` (Recordare unreachable).
+- **Agent memory** (Recordare D50): **one Arkimede account = one agent = one memory**. On first use `GET api/v1/me`
+  with `X-Recordare-User: <Arkimede user id>` (Recordare auto-provisions the memory), the `memoryId` is stored in
+  `users.recordareMemoryId` and the memory's name follows the Arkimede profile (`PATCH api/v1/me {displayName}`, synced
+  on every lookup). Admins get the Recordare Atlas link in Settings. Tracing spans carry `recordare.memory_id` when it is
+  known (cached value only).
+  - **Mode** (Settings → Memory, `PATCH /api/users/me {episodicMemoryMode}`, profile field `episodicMemoryMode`;
+    forwarded as `PATCH api/v1/me {mode}`, accepted only while the memory is empty — otherwise 409 →
+    `users.memoryNotEmpty`): **personal** (default) — what the user says becomes the agent's own memory, in the first
+    person (an indirect digital twin of the account holder); **entity** — a shared agent (e.g. the voice account used by
+    the household): whoever speaks without being identified is "someone", identified people are remembered by name.
+  - **Gender** (`users.gender` `masculine | feminine | neutral`, null = not set → masculine; Settings → Memory, `PATCH
+    /api/users/me {gender}`): the grammatical gender of the memory's first person in gendered languages, sent as
+    `PATCH api/v1/me {gender}` by the client library's `PersonDirectory` whenever Recordare's differs, on each lookup
+    (not sent while not set: Recordare's default is masculine).
+  - **Participants**: other Arkimede users who write in a shared chat are sent as `other` participants with
+    `identity: {externalUserId: <their user id>}` — Recordare recognises them as **contacts inside the chat owner's
+    memory** (never as memories of their own there). The chat owner's turns are the account's (`user`, participant
+    `owner`). Voice (Wyoming) chats belong to the voice user's account like any other chat (typically an entity memory);
+    nothing is marked `own` yet (no device-perceived input in Arkimede today).
 - **Ingest via an outbox**: a TypeORM subscriber on `Message` writes a `recordare_outbox` row in the same transaction
   as every persisted message (savepoint-protected: an outbox failure never fails the chat), for chats whose owner has
-  the switch on. **Nothing is buffered before consent**: owners whose consent is known to be off are skipped in the
-  same statement (unknown → enqueued; Recordare answers `stored: false` and the row is dropped). The chat's error
+  the switch on. The chat's error
   turns (the "⚠️ …" messages saved on failures, inside `withoutRecordareIngest`) are never sent. A background worker sends them to `POST api/v1/ingest/messages` (conversation = chat id, message
   externalId = message id → idempotent; tool calls as `tool` messages; other users of a shared chat as `other`
-  participants), with the library's delivery policy (exponential back-off with jitter, Recordare's `Retry-After`
+  participants with their user id), with the library's delivery policy (exponential back-off with jitter, Recordare's `Retry-After`
   honoured); after 12 attempts (or a 400/413/422) the row is parked (`parkedAt`,
   `lastError`, warning in the log). Rewinds and chat deletions are propagated (`DELETE …/messages/{id}`,
   `DELETE …/conversations/{id}`). The request path never waits on Recordare.
-- **Recall tools** (only for users with the switch on, in a persisted chat, and not while consent is known off):
+- **Recall tools** (only for users with the switch on, in a persisted chat):
   `recordare_search_episodes`, `recordare_search_memory`, `recordare_resolve_period`, `recordare_remember`,
   `recordare_correct_episode`, `recordare_forget_episode` (no `log_episode`: the ingest already captures the
   conversation, logging on top would duplicate) — built from the tools Recordare lists over MCP (its names,
   descriptions and JSON Schemas, prefixed `recordare_`), called through the client library (`/mcp`, streamable HTTP, one
   session per user and chat). Every request carries `X-Recordare-User` and
-  `X-Recordare-Conversation: <chat id>`, bound in code (the viewer context: without it Recordare returns nothing).
+  `X-Recordare-Conversation: <chat id>`, bound in code (the conversation: MCP writes bind their evidence to it; no viewer
+  filter since Recordare D50).
   Pending outbox rows of the chat are flushed (≤3 s) before a call.
 - **Memory context** (agent option `memoryContext`, Agents → agent, off by default): before each answer the agent gets
   the user's memories relevant to the message from Recordare (`POST api/v1/context`, a fenced `<memory-context>` block
@@ -1399,7 +1422,7 @@ the admin TTS test. Kind CLIENT (the engines are remote services). Attributes: `
 `speech`; `gen_ai.request.model` (STT model; TTS model, or the voice id for the internal Piper);
 `gen_ai.provider.name` when known (`whisper` / `piper` for the bundled services, `openai`, `groq`; omitted for
 OpenAI-compatible endpoints); `voice.audio_seconds` (STT input / TTS output length, only when the audio is WAV — read
-from its header); `voice.characters` (TTS input length, a count); `user.id` and `recordare.owner_id` when a user is
+from its header); `voice.characters` (TTS input length, a count); `user.id` and `recordare.memory_id` when a user is
 known (Wyoming asr / tts requests from Home Assistant act for the Wyoming conversation user when one is configured,
 else they carry none). A voice span nests under the active span when there is one;
 the HTTP routes and the Wyoming protocol (one request per connection: asr, handle and tts arrive separately) make

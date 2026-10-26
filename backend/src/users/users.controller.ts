@@ -2,13 +2,14 @@
 // Copyright © 2026 Andrea Genovese
 
 import {Body, Controller, Get, HttpCode, HttpStatus, Inject, Optional, Patch, Post, UseGuards,} from '@nestjs/common';
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, Min, MinLength } from 'class-validator';
+import { IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, Min, MinLength } from 'class-validator';
 import { Type } from 'class-transformer';
 import {JwtAuthGuard} from '../common/guards/jwt-auth.guard';
 import {CurrentUser} from '../common/decorators/current-user.decorator';
 import {UsersService} from './users.service';
 import { AuditService } from '../audit/audit.service';
 import { ToolLoadingStrategy, ToolSchemaFormat } from '../app-config/app-config.entity';
+import { RECORDARE_NOTE_CATEGORIES, USER_GENDERS, UserGender } from './users.entity';
 
 const TOOL_STRATEGIES: ToolLoadingStrategy[] = ['always_inject_all', 'top_k_rag', 'auto'];
 const TOOL_FORMATS: ToolSchemaFormat[]        = ['full', 'compressed', 'deferred'];
@@ -26,6 +27,10 @@ class UpdateProfileDto {
   /** Interface/response language ('it' | 'en'); null = no preference. */
   @IsOptional() @IsIn(['it', 'en', null])
   language?: string | null;
+
+  /** Grammatical gender (also the first person of the Recordare memory); null = not set (masculine). */
+  @IsOptional() @IsIn([...USER_GENDERS, null])
+  gender?: UserGender | null;
 
   /** null = reset to the global admin default */
   @IsOptional() @IsIn([...TOOL_STRATEGIES, null])
@@ -50,13 +55,24 @@ class UpdateProfileDto {
   @IsOptional() @IsBoolean()
   autoMemoryEnabled?: boolean;
 
+  /** Use the team and organisation notes, apart from the personal memory (Recordare D34). */
+  @IsOptional() @IsBoolean()
+  sharedMemoryEnabled?: boolean;
+
+  /** The copy rule: Recordare notes of these categories are copied into the personal memory (D34). */
+  @IsOptional() @IsArray() @IsIn(RECORDARE_NOTE_CATEGORIES, { each: true })
+  recordareCopyCategories?: string[];
+
   /** Enable episodic memory in Recordare (separate from autoMemoryEnabled). */
   @IsOptional() @IsBoolean()
   episodicMemoryEnabled?: boolean;
 
-  /** Personal memory, or shared by everyone using the account (Recordare `entity`); only while it is empty. */
-  @IsOptional() @IsIn(['human', 'entity'])
-  episodicMemoryKind?: 'human' | 'entity';
+  /**
+   * Recordare memory mode: personal (the account holder is "I") or entity (a shared agent; undeclared speakers are
+   * "someone"); accepted only while the memory is empty.
+   */
+  @IsOptional() @IsIn(['personal', 'entity'])
+  episodicMemoryMode?: 'personal' | 'entity';
 
   /** Override memory extraction threshold (no. of messages); null = global default. */
   @IsOptional() @IsInt() @Min(1) @Max(100) @Type(() => Number)

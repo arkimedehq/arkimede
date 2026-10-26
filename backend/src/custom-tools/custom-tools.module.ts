@@ -22,7 +22,9 @@ import { TeamsModule } from '../teams/teams.module';
     // cycle and these classes can be undefined at decorator-evaluation time.
     forwardRef(() => EmbedModule),      // provides EmbeddingProviderService
     forwardRef(() => VectorDbModule),   // provides VectorStoreProviderService
-    AppConfigModule,   // provides AppConfigService (API key for the Prompt executor)
+    // forwardRef: Users → Recordare → UserMemory → AppConfig → Embed → VectorDb → CustomTools → AppConfig is a JS
+    // module cycle too (Recordare D34 copies).
+    forwardRef(() => AppConfigModule),   // provides AppConfigService (API key for the Prompt executor)
     TeamsModule,       // provides TeamsService (team scoping)
   ],
   providers: [CustomToolsService],

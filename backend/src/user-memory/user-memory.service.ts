@@ -6,7 +6,7 @@ import {
   NotFoundException, ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, IsNull, Not, Repository } from 'typeorm';
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { UserMemory, UserMemoryScope } from './user-memory.entity';
@@ -33,6 +33,17 @@ const MAX_FACTS_PER_USER = 50;
 const MAX_FACT_LEN = 300;
 
 /** Fact proposed by extraction (already persisted as `pending`). */
+/**
+ * Which notes a chat may use (Recordare D34, the toggle split): the personal ones (`User.autoMemoryEnabled`) and the
+ * team / org ones (`User.sharedMemoryEnabled`), independently.
+ */
+export interface MemoryUse { personal: boolean; shared: boolean }
+
+const ALL_NOTES: MemoryUse = { personal: true, shared: true };
+
+/** A Recordare note to copy (D34): its id, text and category. */
+export interface RecordareNoteCopy { id: string; content: string; category: string | null }
+
 export interface MemoryProposal {
   id:      string;
   content: string;
@@ -109,13 +120,13 @@ export class UserMemoryService {
     @Optional() private readonly evolution?: MemoryEvolutionService,
   ) {}
 
-  /** TypeORM OR-conditions for the notes ACCESSIBLE to a user (F4). */
-  private async accessibleWhere(userId: string, extra: Record<string, unknown> = {}): Promise<Record<string, unknown>[]> {
-    const teamIds = await this.teams.teamIdsForUser(userId).catch(() => [] as string[]);
+  /** TypeORM OR-conditions for the notes ACCESSIBLE to a user (F4), limited to the ones they use (D34). */
+  private async accessibleWhere(userId: string, extra: Record<string, unknown> = {}, use: MemoryUse = ALL_NOTES): Promise<Record<string, unknown>[]> {
+    const teamIds = use.shared ? await this.teams.teamIdsForUser(userId).catch(() => [] as string[]) : [];
     return [
-      { ...extra, scope: 'personal', userId },
+      ...(use.personal ? [{ ...extra, scope: 'personal', userId }] : []),
       ...(teamIds.length ? [{ ...extra, scope: 'team', teamId: In(teamIds) }] : []),
-      { ...extra, scope: 'org' },
+      ...(use.shared ? [{ ...extra, scope: 'org' }] : []),
     ];
   }
 
@@ -135,9 +146,11 @@ export class UserMemoryService {
    * Pinned notes: always injected in the STABLE prompt prefix (they change
    * rarely, so they are cache-friendly — unlike the per-query retrieval).
    */
-  async getPinnedContents(userId: string): Promise<string[]> {
+  async getPinnedContents(userId: string, use: MemoryUse = ALL_NOTES): Promise<string[]> {
+    const where = await this.accessibleWhere(userId, { status: 'confirmed', pinned: true }, use);
+    if (!where.length) return [];
     const rows = await this.repo.find({
-      where: await this.accessibleWhere(userId, { status: 'confirmed', pinned: true }),
+      where,
       order: { createdAt: 'ASC' },
       select: { content: true },
     });
@@ -150,9 +163,9 @@ export class UserMemoryService {
    * vector leg returns [] and retrieval degrades to FTS-only (and vice versa).
    * Pinned notes are excluded (already in the stable prefix).
    */
-  async retrieve(userId: string, queryText: string): Promise<UserMemory[]> {
+  async retrieve(userId: string, queryText: string, use: MemoryUse = ALL_NOTES): Promise<UserMemory[]> {
     const q = queryText?.trim();
-    if (!q) return [];
+    if (!q || (!use.personal && !use.shared)) return [];
     const t0 = Date.now();
 
     // OR-semantics FTS query: plainto_tsquery ANDs every word, which never
@@ -164,20 +177,19 @@ export class UserMemoryService {
     )].slice(0, 16);
     const orQuery = terms.join(' | ');
 
-    const teamIds = (await this.teams.teamIdsForUser(userId).catch(() => [] as string[])).slice(0, 5);
+    const teamIds = use.shared ? (await this.teams.teamIdsForUser(userId).catch(() => [] as string[])).slice(0, 5) : [];
 
     const [ftsIds, vectorHits] = await Promise.all([
       (orQuery
         ? this.repo.query(
             `SELECT "id" FROM "user_memory"
               WHERE "status" = 'confirmed' AND "pinned" = false
-                AND (("scope" = 'personal' AND "userId" = $1)
-                  OR ("scope" = 'team' AND "teamId" = ANY($3::uuid[]))
-                  OR "scope" = 'org')
+                AND (($4::boolean AND "scope" = 'personal' AND "userId" = $1)
+                  OR ($5::boolean AND ("scope" = 'team' AND "teamId" = ANY($3::uuid[]) OR "scope" = 'org')))
                 AND "tsv" @@ to_tsquery('simple', $2)
               ORDER BY ts_rank("tsv", to_tsquery('simple', $2)) DESC
               LIMIT ${CANDIDATE_LIMIT}`,
-            [userId, orQuery, teamIds],
+            [userId, orQuery, teamIds, use.personal, use.shared],
           )
         : Promise.resolve([]))
         .then((rows: Array<{ id: string }>) => rows.map((r) => r.id))
@@ -187,8 +199,8 @@ export class UserMemoryService {
       this.embedding
         .embed(q)
         .then((vector) => Promise.all([
-          this.vectorStore.search(MEMORY_COLLECTION, vector, CANDIDATE_LIMIT, { userId }),
-          this.vectorStore.search(MEMORY_COLLECTION, vector, CANDIDATE_LIMIT, { scope: 'org' }),
+          ...(use.personal ? [this.vectorStore.search(MEMORY_COLLECTION, vector, CANDIDATE_LIMIT, { userId })] : []),
+          ...(use.shared ? [this.vectorStore.search(MEMORY_COLLECTION, vector, CANDIDATE_LIMIT, { scope: 'org' })] : []),
           ...teamIds.map((t) => this.vectorStore.search(MEMORY_COLLECTION, vector, CANDIDATE_LIMIT, { scope: 'team', teamId: t })),
         ]))
         .then((all) => {
@@ -206,7 +218,7 @@ export class UserMemoryService {
     if (!orderedIds.length) return [];
 
     const notes = await this.repo.find({
-      where: await this.accessibleWhere(userId, { id: In(orderedIds), status: 'confirmed', pinned: false }),
+      where: await this.accessibleWhere(userId, { id: In(orderedIds), status: 'confirmed', pinned: false }, use),
     });
     const byId = new Map(notes.map((n) => [n.id, n]));
     const result = orderedIds.map((id) => byId.get(id)).filter((n): n is UserMemory => !!n);
@@ -438,14 +450,15 @@ export class UserMemoryService {
   // ── Built-in tools for the agent (F5, class B) ────────────────────────────────
 
   /**
-   * The two memory tools injected into the agent when the user has automatic
-   * memory enabled (gated in agent.service, same as scheduling/sandbox).
+   * The memory tools injected into the agent when the user uses notes (gated in
+   * agent.service, same as scheduling/sandbox):
    *   • save_memory  → proposes a durable fact as `pending` (NEVER auto-confirmed:
-   *                    the user still approves it from the memory panel).
+   *                    the user still approves it from the memory panel) — personal memory only;
    *   • search_memory → hybrid retrieval BEYOND the top-K already injected, so the
-   *                    agent can look up older/less-salient notes on demand.
+   *                    agent can look up older/less-salient notes on demand — the notes the user uses (D34);
+   *   • search_conversations → the user's own chats — personal memory only.
    */
-  buildMemoryTools(userId: string, chatId?: string): DynamicStructuredTool[] {
+  buildMemoryTools(userId: string, chatId?: string, use: MemoryUse = ALL_NOTES): DynamicStructuredTool[] {
     const saveTool = new DynamicStructuredTool({
       name: 'save_memory',
       description: SAVE_MEMORY_DESC,
@@ -475,7 +488,7 @@ export class UserMemoryService {
         const query = (args?.query ?? '').trim();
         if (!query) return 'Error: empty query.';
         try {
-          const notes = await this.retrieve(userId, query);
+          const notes = await this.retrieve(userId, query, use);
           if (!notes.length) return 'No relevant memory found.';
           return notes.map((n) => {
             const meta = [n.category, ...(n.tags ?? [])].filter(Boolean).join(', ');
@@ -509,7 +522,7 @@ export class UserMemoryService {
       },
     });
 
-    return [saveTool, searchTool, searchConversationsTool];
+    return use.personal ? [saveTool, searchTool, searchConversationsTool] : use.shared ? [searchTool] : [];
   }
 
   /** Edits the text of a fact (owner). Metadata regenerated for the new content. */
@@ -531,6 +544,69 @@ export class UserMemoryService {
     const removedId = fact.id;
     await this.repo.remove(fact);
     void this.deindexNote(removedId);
+  }
+
+  // ── Copies of Recordare notes (D34) ──────────────────────────────────────────
+
+  /**
+   * Copies a Recordare note into A-MEM, confirmed: the user chose it, by hand or by their rule. Personal, team
+   * (membership) or org (admin), as `setScope`. The same note copied again into the same place gives the copy already
+   * there. A copy by rule (`byRule`) never pushes the user's own notes out: it is skipped (null) when the personal
+   * memory is full.
+   */
+  async copyRecordareNote(userId: string, note: RecordareNoteCopy,
+    target: { scope: UserMemoryScope; teamId: string | null; isAdmin: boolean }, byRule = false): Promise<UserMemory | null> {
+    const { scope, isAdmin } = target;
+    const teamId = scope === 'team' ? target.teamId : null;
+    if (scope === 'org' && !isAdmin) throw new ForbiddenException('userMemory.orgRequiresAdmin');
+    if (scope === 'team' && (!teamId || !(await this.teams.teamIdsForUser(userId)).includes(teamId))) {
+      throw new ForbiddenException('userMemory.notATeamMember');
+    }
+    const there = await this.repo.findOne({ where: { userId, recordareNoteId: note.id, scope, teamId: teamId ?? IsNull() } });
+    if (there) return there;
+    if (byRule && await this.repo.count({ where: { userId, status: 'confirmed', scope: 'personal' } }) >= MAX_FACTS_PER_USER) return null;
+    const saved = await this.repo.save(this.repo.create({
+      userId, content: note.content.trim().slice(0, MAX_FACT_LEN), category: note.category?.slice(0, 64) ?? null,
+      status: 'confirmed', scope, teamId, sourceChatId: null, recordareNoteId: note.id,
+    }));
+    if (scope === 'personal') await this.pruneConfirmed(userId);
+    void this.enrichNote(saved.id, saved.content, userId);   // indexes it once enriched
+    this.evolution?.enqueue(saved.id);
+    return saved;
+  }
+
+  /**
+   * The user's copies of a Recordare note follow it: the new text (and the note that took its place), or removed
+   * with it (`next` null). Returns how many copies there were.
+   */
+  async followRecordareNote(userId: string, noteId: string, next: RecordareNoteCopy | null): Promise<number> {
+    const copies = await this.repo.find({ where: { userId, recordareNoteId: noteId } });
+    for (const copy of copies) {
+      if (!next) {
+        const id = copy.id;   // remove() clears it
+        await this.repo.remove(copy);
+        void this.deindexNote(id);
+        continue;
+      }
+      copy.recordareNoteId = next.id;
+      if (copy.content === next.content) {
+        await this.repo.save(copy);
+        continue;
+      }
+      copy.content = next.content.trim().slice(0, MAX_FACT_LEN);
+      const saved = await this.repo.save(copy);
+      void this.enrichNote(saved.id, saved.content, userId);
+    }
+    return copies.length;
+  }
+
+  /** Where the user copied Recordare notes (for the Diary): note id, place. */
+  async recordareCopies(userId: string): Promise<Array<{ recordareNoteId: string; scope: UserMemoryScope; teamId: string | null }>> {
+    const rows = await this.repo.find({
+      where: { userId, recordareNoteId: Not(IsNull()) },
+      select: { recordareNoteId: true, scope: true, teamId: true },
+    });
+    return rows.map((r) => ({ recordareNoteId: r.recordareNoteId!, scope: r.scope, teamId: r.teamId }));
   }
 
   // ── Extraction ──────────────────────────────────────────────────────────────

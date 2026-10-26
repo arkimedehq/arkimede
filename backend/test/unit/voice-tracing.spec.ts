@@ -14,7 +14,7 @@ import { InMemorySpanExporter, ReadableSpan, SimpleSpanProcessor } from '@opente
 import {
   initGenAiTracing, shutdownGenAiTracing, withAgentSpan, withTraceUser, wavDurationSeconds,
 } from '../../src/observability/genai-tracing';
-import { setRecordareOwnerResolver } from '../../src/observability/genai-trace.handler';
+import { setRecordareMemoryResolver } from '../../src/observability/genai-trace.handler';
 import { TranscriptionService } from '../../src/transcription/transcription.service';
 import { TtsService } from '../../src/tts/tts.service';
 import { WyomingService } from '../../src/wyoming/wyoming.service';
@@ -91,11 +91,11 @@ describe('voice spans — tracing on', () => {
   afterEach(async () => {
     await shutdownGenAiTracing();
     delete process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT;
-    setRecordareOwnerResolver(null);
+    setRecordareMemoryResolver(null);
   });
 
   it('speech-to-text: one transcription span with model, provider, audio length and user; no transcript', async () => {
-    setRecordareOwnerResolver((u) => (u === 'u1' ? 'owner-1' : undefined));
+    setRecordareMemoryResolver((u) => (u === 'u1' ? 'memory-1' : undefined));
     const { svc } = makeStt();
     const text = await withTraceUser('u1', () => svc.transcribe(oneSecondWav(), 'audio.wav', 'it'));
     expect(text).toBe(SECRET_TRANSCRIPT);
@@ -111,7 +111,7 @@ describe('voice spans — tracing on', () => {
       'gen_ai.provider.name': 'whisper',
       'voice.audio_seconds': 1,
       'user.id': 'u1',
-      'recordare.owner_id': 'owner-1',
+      'recordare.memory_id': 'memory-1',
     });
     assertNoContent(spans);
   });
@@ -204,17 +204,17 @@ describe('voice spans — tracing on', () => {
   }
 
   it('Wyoming asr / tts with a conversation user configured: spans act for that user', async () => {
-    setRecordareOwnerResolver((u) => (u === 'ha-user' ? 'owner-ha' : undefined));
+    setRecordareMemoryResolver((u) => (u === 'ha-user' ? 'memory-ha' : undefined));
     for (const v of await wyomingAsrAndTts('ha-user')) {
       expect(v.attributes['user.id']).toBe('ha-user');
-      expect(v.attributes['recordare.owner_id']).toBe('owner-ha');
+      expect(v.attributes['recordare.memory_id']).toBe('memory-ha');
     }
   });
 
   it('Wyoming asr / tts without a conversation user: spans without user', async () => {
     for (const v of await wyomingAsrAndTts(null)) {
       expect(v.attributes['user.id']).toBeUndefined();
-      expect(v.attributes['recordare.owner_id']).toBeUndefined();
+      expect(v.attributes['recordare.memory_id']).toBeUndefined();
     }
   });
 

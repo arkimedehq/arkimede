@@ -24,7 +24,7 @@
  * The extracted text is then used by EmbedService.ingestFile() for
  * vectorization in Qdrant.
  */
-import { Injectable, Inject, NotFoundException, ForbiddenException, Logger, Optional } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, ForbiddenException, BadRequestException, Logger, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -38,6 +38,7 @@ import * as mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
 import { OcrService } from '../ocr/ocr.service';
 import type { OcrLevel } from '../ocr/ocr.types';
+import type { DocScope } from '../custom-tools/custom-tool.types';
 import { File } from './files.entity';
 import { Message } from '../messages/messages.entity';
 import { ProjectsService } from '../projects/projects.service';
@@ -122,6 +123,7 @@ export class FilesService {
     }
     const scope  = opts.scope ?? 'personal';
     const teamId = scope === 'team' ? (opts.teamId ?? null) : null;
+    await this.assertTeam(scope, teamId, userId, false);
     const entity = this.repo.create({
       originalName: file.originalname,
       storagePath:  file.path,
@@ -379,6 +381,7 @@ export class FilesService {
     if (file.userId !== userId && !isAdmin) {
       throw new ForbiddenException('files.scopeOwnerOnly');
     }
+    await this.assertTeam(scope, teamId, userId, isAdmin);
     const from = file.scope;
     file.scope  = scope;
     file.teamId = scope === 'team' ? (teamId ?? null) : null;
@@ -394,6 +397,18 @@ export class FilesService {
   }
 
   /**
+   * A team-shared file names a team the user belongs to (admins: any team). Without one nobody else could open it
+   * (canAccessFile needs the teamId), so the "team" choice would silently stay personal.
+   */
+  private async assertTeam(scope: string, teamId: string | null, userId: string, isAdmin: boolean): Promise<void> {
+    if (scope !== 'team') return;
+    if (!teamId) throw new BadRequestException('files.teamRequired');
+    if (!isAdmin && !(await this.teams.teamIdsForUser(userId)).includes(teamId)) {
+      throw new ForbiddenException('files.teamNotMember');
+    }
+  }
+
+  /**
    * Deletes a file: removes the physical file on disk and the DB record.
    * The try/catch on fs.unlinkSync tolerates the case where the file
    * has already been deleted manually from the filesystem.
@@ -402,6 +417,7 @@ export class FilesService {
     const file = await this.findOne(id, userId);
     try { fs.unlinkSync(file.storagePath); } catch { /* file already removed, ok */ }
     await this.repo.delete(id);
+    for (const hook of this.removeHooks) await hook(id).catch((err) => this.logger.warn(`file ${id} removed, hook failed: ${err.message}`));
     await this.audit?.record({
       actorId: userId,
       action: 'file.delete',
@@ -511,7 +527,17 @@ export class FilesService {
    * @param id           - ID of the file
    * @param collectionId - Name of the Qdrant collection into which it was indexed
    */
-  markVectorized(id: string, collectionId: string) {
-    return this.repo.update(id, { vectorized: true, vectorCollectionId: collectionId });
+  markVectorized(id: string, collectionId: string, docScope?: DocScope, docProjectId?: string | null) {
+    return this.repo.update(id, {
+      vectorized: true, vectorCollectionId: collectionId,
+      ...(docScope ? { vectorScope: docScope, vectorProjectId: docProjectId ?? null } : {}),
+    });
+  }
+
+  private readonly removeHooks: Array<(fileId: string) => Promise<void>> = [];
+
+  /** Runs after a file is deleted (EmbedService: its chunks in the vector store). */
+  onRemove(hook: (fileId: string) => Promise<void>): void {
+    this.removeHooks.push(hook);
   }
 }

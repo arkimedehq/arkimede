@@ -1,4 +1,6 @@
 {
   "projectIdRequired": "projectId obbligatorio per scope=\"project\".",
-  "projectReadOnly": "Permesso di sola lettura su questo progetto."
+  "projectReadOnly": "Permesso di sola lettura su questo progetto.",
+  "scopeOwnerOnly": "Solo il proprietario del file o un admin può cambiarne la visibilità.",
+  "notIndexed": "Il file non è indicizzato."
 }

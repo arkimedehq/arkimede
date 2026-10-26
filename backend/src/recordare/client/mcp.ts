@@ -1,11 +1,11 @@
-// GENERATED from recordare packages/client/src/mcp.ts @ 4bd90f7 — do not edit here: change the library and run
+// GENERATED from recordare packages/client/src/mcp.ts @ 42a6729 — do not edit here: change the library and run
 // packages/client/scripts/sync-to.sh again.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright © 2026 Andrea Genovese
 
 /**
- * Recall over MCP with the official SDK (streamable HTTP). Recordare fixes the owner when a session starts and resolves
- * the viewer context from the conversation header (docs/API.md §1), so a session belongs to one user AND one
+ * Recall over MCP with the official SDK (streamable HTTP). Recordare fixes the memory when a session starts and resolves
+ * the conversation from its header (docs/API.md §1: evidence of writes), so a session belongs to one user AND one
  * conversation: both headers are bound here, in code — neither the LLM nor the user can change them. Sessions are
  * reused (bounded, least recently used closed first) and an expired one is re-opened once.
  */
@@ -101,7 +101,7 @@ export class RecordareMcp {
       },
       requestInit: { headers: { ...this.http.headers(user), [CONVERSATION_HEADER]: conversation } },
     });
-    const client = new Client(this.options.clientInfo ?? { name: 'recordare-client', version: '0.1.0' });
+    const client = new Client(this.options.clientInfo ?? { name: 'recordare-client', version: '0.3.0' });
     await client.connect(transport);
     return client;
   }

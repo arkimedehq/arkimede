@@ -31,31 +31,31 @@ import { getLlmCallContext } from '../usage/llm-call-context';
 
 /** OTel context key carrying the Arkimede user id down the span tree. */
 export const USER_ID_KEY = createContextKey('arkimede.user_id');
-/** OTel context key carrying the user's Recordare owner id down the span tree. */
-export const OWNER_ID_KEY = createContextKey('recordare.owner_id');
+/** OTel context key carrying the user's Recordare memory id down the span tree. */
+export const MEMORY_ID_KEY = createContextKey('recordare.memory_id');
 
 /**
- * Arkimede user id → Recordare owner id, when known. Synchronous and cached
+ * Arkimede user id → Recordare memory id, when known. Synchronous and cached
  * (RecordareIdentityService registers it when Recordare is configured); it must
  * never wait on the network. null = no Recordare integration.
  */
-let ownerResolver: ((userId: string) => string | undefined) | null = null;
+let memoryResolver: ((userId: string) => string | undefined) | null = null;
 
-export function setRecordareOwnerResolver(fn: ((userId: string) => string | undefined) | null): void {
-  ownerResolver = fn;
+export function setRecordareMemoryResolver(fn: ((userId: string) => string | undefined) | null): void {
+  memoryResolver = fn;
 }
 
-/** Recordare owner id of a user, or undefined (unknown / no integration). Never throws. */
-export function recordareOwnerOf(userId: unknown): string | undefined {
-  if (typeof userId !== 'string' || !ownerResolver) return undefined;
-  try { return ownerResolver(userId) || undefined; } catch { return undefined; }
+/** Recordare memory id of a user, or undefined (unknown / no integration). Never throws. */
+export function recordareMemoryOf(userId: unknown): string | undefined {
+  if (typeof userId !== 'string' || !memoryResolver) return undefined;
+  try { return memoryResolver(userId) || undefined; } catch { return undefined; }
 }
 
-/** Adds the user (and their Recordare owner id, when known) to a context. */
+/** Adds the user (and their Recordare memory id, when known) to a context. */
 export function withUserContext(ctx: Context, userId: string): Context {
   let out = ctx.setValue(USER_ID_KEY, userId);
-  const ownerId = recordareOwnerOf(userId);
-  if (ownerId) out = out.setValue(OWNER_ID_KEY, ownerId);
+  const memoryId = recordareMemoryOf(userId);
+  if (memoryId) out = out.setValue(MEMORY_ID_KEY, memoryId);
   return out;
 }
 
@@ -153,15 +153,15 @@ export class GenAiTraceHandler extends BaseCallbackHandler {
     this.sweep();
     let parent = this.parentContext(parentRunId);
     const userId = parent.getValue(USER_ID_KEY);
-    // The owner may have been unknown when the trace started (cold cache) and known
+    // The memory may have been unknown when the trace started (cold cache) and known
     // now: look it up again at every span start (cached, synchronous, cheap).
-    if (typeof userId === 'string' && parent.getValue(OWNER_ID_KEY) === undefined) {
-      const ownerId = recordareOwnerOf(userId);
-      if (ownerId) parent = parent.setValue(OWNER_ID_KEY, ownerId);
+    if (typeof userId === 'string' && parent.getValue(MEMORY_ID_KEY) === undefined) {
+      const memoryId = recordareMemoryOf(userId);
+      if (memoryId) parent = parent.setValue(MEMORY_ID_KEY, memoryId);
     }
     if (typeof userId === 'string') attributes['user.id'] = userId;
-    const ownerId = parent.getValue(OWNER_ID_KEY);
-    if (typeof ownerId === 'string') attributes['recordare.owner_id'] = ownerId;
+    const memoryId = parent.getValue(MEMORY_ID_KEY);
+    if (typeof memoryId === 'string') attributes['recordare.memory_id'] = memoryId;
     const span = this.tracer.startSpan(name, { kind, attributes }, parent);
     this.runs.set(runId, { span, ctx: trace.setSpan(parent, span), at: Date.now() });
   }

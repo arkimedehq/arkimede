@@ -6,7 +6,7 @@
  * identity lookup + naming + caching; outbox enqueue (gated, savepoint-safe,
  * no-op when off), send, retry with back-off, parking, idempotent externalIds;
  * MCP calls carry the user AND conversation headers on every request; tracing
- * spans get recordare.owner_id when the mapping is known.
+ * spans get recordare.memory_id when the mapping is known.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { createServer, IncomingMessage, Server, ServerResponse } from 'http';
@@ -14,6 +14,8 @@ import { AddressInfo } from 'net';
 import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { RecordareIdentityService, RecordareMemoryNotEmptyError } from '../../src/recordare/recordare-identity.service';
 import { RecordareOutboxService } from '../../src/recordare/recordare-outbox.service';
+import { UsersService } from '../../src/users/users.service';
+import { ConflictException } from '@nestjs/common';
 import { DEFAULT_DELIVERY, backoffMs } from '../../src/recordare/client';
 
 const MAX_ATTEMPTS = DEFAULT_DELIVERY.maxAttempts;
@@ -21,10 +23,10 @@ import { RecordareMcpService } from '../../src/recordare/recordare-mcp.service';
 import { RecordareDiaryController } from '../../src/recordare/recordare-diary.controller';
 import {
   enqueueRecordareMessage, enqueueRecordareMessageDeletes, enqueueRecordareConversationDelete,
-  setConsentOffProvider, withoutRecordareIngest,
+  withoutRecordareIngest,
 } from '../../src/recordare/recordare-outbox';
 import { buildIngestBody, clipUtf8 } from '../../src/recordare/recordare-ingest.mapper';
-import { GenAiTraceHandler, setRecordareOwnerResolver } from '../../src/observability/genai-trace.handler';
+import { GenAiTraceHandler, setRecordareMemoryResolver } from '../../src/observability/genai-trace.handler';
 import { runWithLlmCallContext } from '../../src/usage/llm-call-context';
 
 // ── Fake Recordare ─────────────────────────────────────────────────────────
@@ -33,8 +35,6 @@ interface Seen { method: string; path: string; headers: IncomingMessage['headers
 
 const seen: Seen[] = [];
 let sessions = 0;
-/** Users whose consent the fake Recordare reports as given (GET /me → episodicEnabled). */
-const consented = new Set<string>();
 /** Per-route override: return a status (and optional body) for the next matching requests. */
 let respond: (req: Seen) => { status: number; body?: any; headers?: Record<string, string> } | undefined = () => undefined;
 let server: Server;
@@ -54,12 +54,12 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     if (custom) return send(custom.status, custom.body, custom.headers);
     if (s.path === '/api/v1/me' && s.method === 'GET') {
       const u = String(s.headers['x-recordare-user']);
-      return send(200, { ownerId: `owner-of-${u}`, displayName: u, episodicEnabled: consented.has(u) });
+      return send(200, { memoryId: `memory-of-${u}`, displayName: u });
     }
     if (s.path === '/api/v1/me' && s.method === 'PATCH') return send(204);
     if (s.path.startsWith('/api/v1/episodes')) return send(200, { items: [{ id: 'e1', content: 'Gita a Bologna' }], nextCursor: null });
     if (s.path === '/api/v1/context') return send(200, { block: `<memory-context>\n- fact: car = Yaris\n</memory-context>`, items: 1 });
-    if (s.path === '/api/v1/ingest/messages') return send(200, { conversationId: 'c', accepted: s.body.messages.length, duplicates: 0, conflicts: [], stored: false });
+    if (s.path === '/api/v1/ingest/messages') return send(200, { conversationId: 'c', accepted: s.body.messages.length, duplicates: 0, conflicts: [] });
     if (s.method === 'DELETE') return send(202, { jobId: 'j' });
     if (s.path === '/mcp' && s.method === 'GET') return send(405); // no server-initiated stream
     if (s.path === '/mcp' && s.method === 'DELETE') return send(200);
@@ -96,8 +96,8 @@ function configure(on: boolean): void {
   else { delete process.env.RECORDARE_URL; delete process.env.RECORDARE_API_KEY; }
 }
 
-beforeEach(() => { seen.length = 0; consented.clear(); respond = () => undefined; configure(true); });
-afterEach(() => { configure(false); setRecordareOwnerResolver(null); setConsentOffProvider(null); });
+beforeEach(() => { seen.length = 0; respond = () => undefined; configure(true); });
+afterEach(() => { configure(false); setRecordareMemoryResolver(null); });
 
 
 // ── Identity ────────────────────────────────────────────────────────────────
@@ -114,11 +114,11 @@ function fakeUsers(rows: Record<string, any>) {
 }
 
 describe('RecordareIdentityService', () => {
-  it('provisions via GET /me, stores the ownerId, names the person, then serves from cache', async () => {
-    const { repo, updates } = fakeUsers({ u1: { id: 'u1', name: 'Andrea', episodicMemoryEnabled: true, recordareOwnerId: null } });
+  it('provisions via GET /me, stores the memoryId, names the person, then serves from cache', async () => {
+    const { repo, updates } = fakeUsers({ u1: { id: 'u1', name: 'Andrea', episodicMemoryEnabled: true, recordareMemoryId: null } });
     const svc = new RecordareIdentityService(repo);
-    expect(await svc.ensureOwner('u1')).toBe('owner-of-u1');
-    expect(updates).toEqual([{ id: 'u1', recordareOwnerId: 'owner-of-u1' }]);
+    expect(await svc.ensureMemory('u1')).toBe('memory-of-u1');
+    expect(updates).toEqual([{ id: 'u1', recordareMemoryId: 'memory-of-u1' }]);
     const me = seen.find((s) => s.method === 'GET')!;
     expect(me.headers['x-recordare-user']).toBe('u1');
     expect(me.headers.authorization).toBe('Bearer rk_test_key');
@@ -126,31 +126,31 @@ describe('RecordareIdentityService', () => {
     expect(patch.body).toEqual({ displayName: 'Andrea' });
 
     seen.length = 0;
-    expect(svc.cachedOwnerId('u1')).toBe('owner-of-u1');
-    expect(await svc.ensureOwner('u1')).toBe('owner-of-u1'); // stored column: no further GET
+    expect(svc.cachedMemoryId('u1')).toBe('memory-of-u1');
+    expect(await svc.ensureMemory('u1')).toBe('memory-of-u1'); // stored column: no further GET
     expect(seen.filter((s) => s.path === '/api/v1/me')).toHaveLength(0);
   });
 
-  it('cachedOwnerId never waits: undefined first, background lookup, value afterwards', async () => {
-    const { repo } = fakeUsers({ u2: { id: 'u2', name: 'B', episodicMemoryEnabled: true, recordareOwnerId: null } });
+  it('cachedMemoryId never waits: undefined first, background lookup, value afterwards', async () => {
+    const { repo } = fakeUsers({ u2: { id: 'u2', name: 'B', episodicMemoryEnabled: true, recordareMemoryId: null } });
     const svc = new RecordareIdentityService(repo);
-    expect(svc.cachedOwnerId('u2')).toBeUndefined();
+    expect(svc.cachedMemoryId('u2')).toBeUndefined();
     // The background lookup does real HTTP round trips to the stub: wait for it instead of a fixed number of ticks
     // (it is slower when the whole suite runs).
-    await vi.waitFor(() => expect(svc.cachedOwnerId('u2')).toBe('owner-of-u2'));
-    expect(svc.cachedOwnerId('u2')).toBe('owner-of-u2');
+    await vi.waitFor(() => expect(svc.cachedMemoryId('u2')).toBe('memory-of-u2'));
+    expect(svc.cachedMemoryId('u2')).toBe('memory-of-u2');
   });
 
   it('a naming failure never fails the lookup', async () => {
     respond = (s) => (s.method === 'PATCH' ? { status: 403, body: { title: 'Forbidden' } } : undefined);
-    const { repo } = fakeUsers({ u3: { id: 'u3', name: 'C', episodicMemoryEnabled: true, recordareOwnerId: null } });
-    expect(await new RecordareIdentityService(repo).ensureOwner('u3')).toBe('owner-of-u3');
+    const { repo } = fakeUsers({ u3: { id: 'u3', name: 'C', episodicMemoryEnabled: true, recordareMemoryId: null } });
+    expect(await new RecordareIdentityService(repo).ensureMemory('u3')).toBe('memory-of-u3');
   });
 
   it('keeps the name in sync with the profile: renames only when it differs', async () => {
     respond = (s) => (s.method === 'GET' && s.path === '/api/v1/me'
-      ? { status: 200, body: { ownerId: 'owner-of-u6', displayName: 'Andrea', episodicEnabled: true } } : undefined);
-    const rows = { u6: { id: 'u6', name: 'Andrea', episodicMemoryEnabled: true, recordareOwnerId: 'owner-of-u6' } };
+      ? { status: 200, body: { memoryId: 'memory-of-u6', displayName: 'Andrea' } } : undefined);
+    const rows = { u6: { id: 'u6', name: 'Andrea', episodicMemoryEnabled: true, recordareMemoryId: 'memory-of-u6' } };
     const svc = new RecordareIdentityService(fakeUsers(rows).repo);
     await svc.status('u6', true);
     expect(seen.filter((s) => s.method === 'PATCH')).toHaveLength(0); // same name: nothing to do
@@ -160,76 +160,145 @@ describe('RecordareIdentityService', () => {
     expect(seen.filter((s) => s.method === 'PATCH').map((s) => s.body)).toEqual([{ displayName: 'Andrea G.' }]);
   });
 
-  it('reads the kind of memory and the Atlas address, and maps a refused kind change', async () => {
+  it('reads the memory mode and the Atlas address, and maps a refused mode change', async () => {
     respond = (s) => {
       if (s.method === 'GET' && s.path === '/api/v1/me') {
-        return { status: 200, body: { ownerId: 'owner-of-u7', displayName: 'Voice', episodicEnabled: true, kind: 'entity', atlasUrl: 'http://atlas:5175' } };
+        return { status: 200, body: { memoryId: 'memory-of-u7', displayName: 'Voice', mode: 'entity', gender: 'masculine', atlasUrl: 'http://atlas:5175' } };
       }
-      return s.method === 'PATCH' && s.body?.kind ? { status: 409, body: { title: 'Conflict' } } : undefined;
+      return s.method === 'PATCH' && s.body?.mode ? { status: 409, body: { title: 'Conflict' } } : undefined;
     };
-    const svc = new RecordareIdentityService(fakeUsers({ u7: { id: 'u7', name: 'Voice', episodicMemoryEnabled: true, recordareOwnerId: 'owner-of-u7' } }).repo);
+    const svc = new RecordareIdentityService(fakeUsers({ u7: { id: 'u7', name: 'Voice', episodicMemoryEnabled: true, recordareMemoryId: 'memory-of-u7' } }).repo);
     expect(await svc.status('u7', true)).toBe('active');
-    expect(svc.details('u7')).toEqual({ kind: 'entity', atlasUrl: 'http://atlas:5175' });
-    await expect(svc.setKind('u7', 'human')).rejects.toBeInstanceOf(RecordareMemoryNotEmptyError);
-    expect(seen.filter((s) => s.method === 'PATCH').map((s) => s.body)).toEqual([{ kind: 'human' }]);
+    expect(svc.details('u7')).toEqual({ mode: 'entity', atlasUrl: 'http://atlas:5175' });
+    await expect(svc.setMode('u7', 'personal')).rejects.toBeInstanceOf(RecordareMemoryNotEmptyError);
+    expect(seen.filter((s) => s.method === 'PATCH').map((s) => s.body)).toEqual([{ mode: 'personal' }]);
+  });
+
+  it('sets the mode while the memory is empty', async () => {
+    const svc = new RecordareIdentityService(fakeUsers({ u8: { id: 'u8', name: 'Home', episodicMemoryEnabled: true, recordareMemoryId: 'memory-of-u8' } }).repo);
+    await svc.setMode('u8', 'entity');
+    expect(seen.filter((s) => s.method === 'PATCH' && s.body?.mode).map((s) => s.body)).toEqual([{ mode: 'entity' }]);
+  });
+
+  it('sends the profile gender when Recordare\'s differs, again after a change, never when not set', async () => {
+    let stored = 'masculine'; // Recordare's side: what the last PATCH set
+    respond = (s) => {
+      if (s.method === 'PATCH' && s.body?.gender) stored = s.body.gender;
+      return s.method === 'GET' && s.path === '/api/v1/me'
+        ? { status: 200, body: { memoryId: 'memory-of-u9', displayName: 'Giulia', mode: 'personal', gender: stored } } : undefined;
+    };
+    const rows: Record<string, any> = {
+      u9: { id: 'u9', name: 'Giulia', episodicMemoryEnabled: true, recordareMemoryId: 'memory-of-u9', gender: 'feminine' },
+      u10: { id: 'u10', name: 'Giulia', episodicMemoryEnabled: true, recordareMemoryId: 'memory-of-u10', gender: null },
+    };
+    const svc = new RecordareIdentityService(fakeUsers(rows).repo);
+    const genders = () => seen.filter((s) => s.method === 'PATCH' && s.body?.gender).map((s) => [s.headers['x-recordare-user'], s.body]);
+    await svc.status('u9', true);
+    expect(genders()).toEqual([['u9', { gender: 'feminine' }]]);
+    svc.invalidate('u9'); // e.g. a rename: the lookup runs again
+    await svc.status('u9', true);
+    seen.length = 0;
+    await svc.status('u9', true); // Recordare already has it: nothing
+    rows.u9.gender = 'neutral';
+    svc.invalidate('u9'); // UsersService invalidates when the gender changes
+    await svc.status('u9', true);
+    expect(genders()).toEqual([['u9', { gender: 'neutral' }]]);
+    seen.length = 0;
+    await svc.status('u10', true); // not set: Recordare's default (masculine) stands
+    expect(genders()).toEqual([]);
+  });
+
+  it('a gender sync failure never fails the lookup', async () => {
+    respond = (s) => (s.method === 'PATCH' && s.body?.gender ? { status: 503, body: { title: 'Unavailable' } } : undefined);
+    const { repo } = fakeUsers({ u11: { id: 'u11', name: 'F', episodicMemoryEnabled: true, recordareMemoryId: null, gender: 'feminine' } });
+    expect(await new RecordareIdentityService(repo).ensureMemory('u11')).toBe('memory-of-u11');
   });
 
   it('never provisions a user whose switch is off, nor when Recordare is not configured', async () => {
-    const { repo } = fakeUsers({ u4: { id: 'u4', name: 'D', episodicMemoryEnabled: false, recordareOwnerId: null } });
-    expect(await new RecordareIdentityService(repo).ensureOwner('u4')).toBeNull();
+    const { repo } = fakeUsers({ u4: { id: 'u4', name: 'D', episodicMemoryEnabled: false, recordareMemoryId: null } });
+    expect(await new RecordareIdentityService(repo).ensureMemory('u4')).toBeNull();
     configure(false);
-    const { repo: repo2 } = fakeUsers({ u5: { id: 'u5', name: 'E', episodicMemoryEnabled: true, recordareOwnerId: null } });
-    expect(await new RecordareIdentityService(repo2).ensureOwner('u5')).toBeNull();
+    const { repo: repo2 } = fakeUsers({ u5: { id: 'u5', name: 'E', episodicMemoryEnabled: true, recordareMemoryId: null } });
+    expect(await new RecordareIdentityService(repo2).ensureMemory('u5')).toBeNull();
     expect(seen).toHaveLength(0);
   });
 });
 
-// ── Consent state ───────────────────────────────────────────────────────────
+describe('UsersService: memory mode and gender', () => {
+  function setup(row: Record<string, any>, recordare: Record<string, any>) {
+    const saved: any[] = [];
+    const repo = {
+      findOne: async () => ({ ...row }),
+      save: async (u: any) => { saved.push({ ...u }); Object.assign(row, u); return u; },
+    } as any;
+    const calls: any[] = [];
+    const fake = {
+      invalidate: (id: string) => calls.push(['invalidate', id]),
+      status: async () => 'active',
+      details: () => ({ mode: 'personal', atlasUrl: null }),
+      ...recordare,
+    } as any;
+    return { svc: new UsersService(repo, fake), saved, calls };
+  }
 
-describe('consent state (GET /me → episodicEnabled)', () => {
-  it('status: off (switch off / not configured), waiting_activation, active, unknown (Recordare down)', async () => {
-    const { repo } = fakeUsers({
-      on: { id: 'on', name: 'A', episodicMemoryEnabled: true, recordareOwnerId: null },
-      wait: { id: 'wait', name: 'W', episodicMemoryEnabled: true, recordareOwnerId: null },
-      down: { id: 'down', name: 'D', episodicMemoryEnabled: true, recordareOwnerId: 'owner-x' },
+  it('stores the gender and re-syncs Recordare only when it changed; the profile carries mode and gender', async () => {
+    const row = { id: 'u', name: 'Giulia', role: 'user', gender: null, episodicMemoryEnabled: true };
+    const { svc, saved, calls } = setup(row, {});
+    const profile: any = await svc.updateProfile('u', { gender: 'feminine' });
+    expect(saved[0].gender).toBe('feminine');
+    expect(calls).toEqual([['invalidate', 'u']]);
+    expect(profile.gender).toBe('feminine');
+    expect(profile.episodicMemoryMode).toBe('personal');
+    calls.length = 0;
+    await svc.updateProfile('u', { gender: 'feminine' });
+    expect(calls).toEqual([]); // unchanged: nothing to re-sync
+  });
+
+  it('sets the memory mode; a non-empty memory is a 409 with a user-facing key; the switch must be on', async () => {
+    const setMode = vi.fn(async () => undefined);
+    const on = setup({ id: 'u', name: 'H', role: 'user', episodicMemoryEnabled: true }, { setMode });
+    await on.svc.updateProfile('u', { episodicMemoryMode: 'entity' });
+    expect(setMode).toHaveBeenCalledWith('u', 'entity');
+
+    const full = setup({ id: 'u', name: 'H', role: 'user', episodicMemoryEnabled: true }, {
+      setMode: async () => { throw new RecordareMemoryNotEmptyError(); },
     });
-    consented.add('on');
+    const err = await full.svc.updateProfile('u', { episodicMemoryMode: 'personal' }).catch((e) => e);
+    expect(err).toBeInstanceOf(ConflictException);
+    expect(err.message).toBe('users.memoryNotEmpty');
+
+    const off = setup({ id: 'u', name: 'H', role: 'user', episodicMemoryEnabled: false }, { setMode });
+    await expect(off.svc.updateProfile('u', { episodicMemoryMode: 'entity' })).rejects.toThrow('users.episodicMemoryOff');
+  });
+});
+
+// ── Status (no consent in Recordare, its D50: the user's switch is the only on/off) ───
+
+describe('episodic memory status', () => {
+  it('status: off (switch off / not configured), active, unknown (Recordare down)', async () => {
+    const { repo } = fakeUsers({
+      on: { id: 'on', name: 'A', episodicMemoryEnabled: true, recordareMemoryId: null },
+      down: { id: 'down', name: 'D', episodicMemoryEnabled: true, recordareMemoryId: 'memory-x' },
+    });
     const svc = new RecordareIdentityService(repo);
-    (repo as any).find = async () => [{ id: 'down', recordareOwnerId: 'owner-x' }]; // stored ids, loaded at start
+    (repo as any).find = async () => [{ id: 'down', recordareMemoryId: 'memory-x' }]; // stored ids, loaded at start
     await svc.warm();
     expect(await svc.status('on', false)).toBe('off');
     expect(await svc.status('on', true)).toBe('active');
-    expect(await svc.status('wait', true)).toBe('waiting_activation');
     respond = (s) => (s.path === '/api/v1/me' ? { status: 503 } : undefined);
     expect(await svc.status('down', true)).toBe('unknown');
-    expect(svc.cachedOwnerId('down')).toBe('owner-x'); // stored id kept when Recordare is down
+    expect(svc.cachedMemoryId('down')).toBe('memory-x'); // stored id kept when Recordare is down
+    respond = () => undefined;
+    expect(await svc.status('down', true)).toBe('active'); // reachable again
     configure(false);
     expect(await svc.status('on', true)).toBe('off');
   });
 
-  it('every profile read re-checks: consent given later by the admin becomes active', async () => {
-    const { repo } = fakeUsers({ u: { id: 'u', name: 'U', episodicMemoryEnabled: true, recordareOwnerId: null } });
-    const svc = new RecordareIdentityService(repo);
-    expect(await svc.status('u', true)).toBe('waiting_activation');
-    expect(svc.consentKnownOff()).toEqual(['u']);
-    consented.add('u');
-    expect(await svc.status('u', true)).toBe('active');
-    expect(svc.consentKnownOff()).toEqual([]);
-  });
-
-  it('registers the known-off list with the outbox: those owners are skipped in the enqueue statement', async () => {
-    const { repo } = fakeUsers({ u: { id: 'u', name: 'U', episodicMemoryEnabled: true, recordareOwnerId: null } });
-    const svc = new RecordareIdentityService(repo);
-    svc.onModuleInit();
-    await svc.status('u', true); // consent off
+  it('enqueues every message of a user whose switch is on (no consent filter)', async () => {
     const r = fakeRunner();
     await enqueueRecordareMessage(r, { id: 'm1', chatId: 'c1', role: 'user' });
-    expect(r.calls[0].sql).toMatch(/NOT \(c\."userId" = ANY\(\$3::uuid\[\]\)\)/);
-    expect(r.calls[0].params).toEqual(['m1', 'c1', ['u']]);
-    svc.invalidate('u'); // the switch changed: unknown again → enqueued as usual
-    const r2 = fakeRunner();
-    await enqueueRecordareMessage(r2, { id: 'm2', chatId: 'c1', role: 'user' });
-    expect(r2.calls[0].params).toEqual(['m2', 'c1', []]);
+    expect(r.calls[0].sql).not.toMatch(/ANY\(\$3/);
+    expect(r.calls[0].params).toEqual(['m1', 'c1']);
   });
 });
 
@@ -265,7 +334,7 @@ describe('outbox enqueue', () => {
     expect(r.calls).toHaveLength(1);
     expect(r.calls[0].sql).toMatch(/INSERT INTO "recordare_outbox"/);
     expect(r.calls[0].sql).toMatch(/"episodicMemoryEnabled" = true/);
-    expect(r.calls[0].params).toEqual(['m1', 'c1', []]);
+    expect(r.calls[0].params).toEqual(['m1', 'c1']);
   });
 
   it('inside a transaction uses a savepoint and swallows failures (the chat save is never aborted)', async () => {
@@ -290,7 +359,7 @@ describe('outbox enqueue', () => {
     await enqueueRecordareMessageDeletes(r, 'c1', ['m1', 'm2']);
     await enqueueRecordareConversationDelete(r, 'c1');
     expect(r.calls[0].sql).toMatch(/'delete_message'/);
-    expect(r.calls[0].sql).toMatch(/"recordareOwnerId" IS NOT NULL/);
+    expect(r.calls[0].sql).toMatch(/"recordareMemoryId" IS NOT NULL/);
     expect(r.calls[0].params).toEqual(['c1', ['m1', 'm2']]);
     expect(r.calls[1].sql).toMatch(/'delete_conversation'/);
   });
@@ -330,7 +399,7 @@ function fakeDb() {
   return { ds: ds as any, outbox, chats, messages, add, makeDue: () => outbox.forEach((r) => { r.due = true; }) };
 }
 
-const noIdentity = { cachedOwnerId: () => undefined } as any;
+const noIdentity = { cachedMemoryId: () => undefined } as any;
 
 describe('RecordareOutboxService', () => {
   it('sends a chat\'s messages in one ingest call with stable externalIds and participants, then clears the rows', async () => {
@@ -347,7 +416,7 @@ describe('RecordareOutboxService', () => {
     expect(posts[0].headers.authorization).toBe('Bearer rk_test_key');
     const body = posts[0].body;
     expect(body.conversation).toMatchObject({ externalId: 'c1', source: 'chat', title: 'Car' });
-    expect(body.conversation.participants.map((p: any) => p.role)).toEqual(['owner', 'assistant']);
+    expect(body.conversation.participants.map((p: any) => p.role)).toEqual(['holder', 'assistant']);
     expect(body.messages.map((m: any) => [m.externalId, m.role])).toEqual([
       ['m1', 'user'], ['m2:tool:0', 'tool'], ['m2', 'assistant'],
     ]);
@@ -432,6 +501,27 @@ describe('ingest mapper', () => {
     expect(body.conversation.participants[2]).toEqual({ ref: 'user:colleague', role: 'other', displayName: 'Bob', identity: { externalUserId: 'colleague' } });
   });
 
+  it('every other speaker of a shared chat is a participant with their user id; the owner\'s turns are the account\'s', () => {
+    const body = buildIngestBody(
+      { id: 'c', title: 'Trip', userId: 'andrea', externalSource: null },
+      [{ id: 'a', role: 'user', content: 'plan the trip', toolCalls: null, authorId: 'andrea', createdAt: new Date(0) },
+       { id: 'b', role: 'user', content: 'I book the hotel', toolCalls: null, authorId: 'marta', createdAt: new Date(1) },
+       { id: 'c1', role: 'user', content: 'I drive', toolCalls: null, authorId: 'luca', createdAt: new Date(2) },
+       { id: 'd', role: 'user', content: 'and the train?', toolCalls: null, authorId: 'marta', createdAt: new Date(3) },
+       { id: 'e', role: 'user', content: 'legacy turn', toolCalls: null, authorId: null, createdAt: new Date(4) }],
+      new Map([['andrea', 'Andrea'], ['marta', 'Marta']]), 'Arkimede',
+    );
+    expect(body.messages.map((m) => [m.externalId, m.role, m.authorRef])).toEqual([
+      ['a', 'user', 'holder'], ['b', 'other', 'user:marta'], ['c1', 'other', 'user:luca'], ['d', 'other', 'user:marta'], ['e', 'user', 'holder'],
+    ]);
+    expect(body.conversation.participants).toEqual([
+      { ref: 'holder', role: 'holder', displayName: 'Andrea' },
+      { ref: 'assistant', role: 'assistant', displayName: 'Arkimede' },
+      { ref: 'user:marta', role: 'other', displayName: 'Marta', identity: { externalUserId: 'marta' } },
+      { ref: 'user:luca', role: 'other', identity: { externalUserId: 'luca' } },
+    ]);
+  });
+
   it('clips content below Recordare\'s 64 KB limit, marking the cut', () => {
     const clipped = clipUtf8('è'.repeat(50_000));
     expect(Buffer.byteLength(clipped, 'utf8')).toBeLessThanOrEqual(64 * 1024);
@@ -485,13 +575,6 @@ describe('RecordareMcpService', () => {
     expect(posts('initialize').filter((s) => s.headers['x-recordare-conversation'] === 'c-exp')).toHaveLength(2);
   });
 
-  it('withholds the tools while consent is known off, offers them when on or unknown', async () => {
-    const identity = (c: boolean | undefined) => ({ cachedConsent: () => c }) as any;
-    expect(await new RecordareMcpService(outbox, identity(false)).buildTools('u1', 'c')).toHaveLength(0);
-    expect(await new RecordareMcpService(outbox, identity(true)).buildTools('u1', 'c')).toHaveLength(6);
-    expect(await new RecordareMcpService(outbox, identity(undefined)).buildTools('u1', 'c')).toHaveLength(6);
-  });
-
   it('a Recordare outage never fails the run: no tools when it cannot list them, a short answer when a call fails', async () => {
     respond = (s) => (s.path === '/mcp' ? { status: 503 } : undefined);
     expect(await new RecordareMcpService(outbox).buildTools('u1', 'c-down')).toEqual([]);
@@ -519,9 +602,7 @@ describe('RecordareMcpService.contextBlock (Agent.memoryContext)', () => {
     expect(req.headers['x-recordare-conversation']).toBe('chat-9');
   });
 
-  it('never fails or holds the answer: consent off, Recordare down or slow → null', async () => {
-    const off = { cachedConsent: () => false } as any;
-    expect(await new RecordareMcpService(outbox, off).contextBlock('u1', 'c', 'x')).toBeNull();
+  it('never fails or holds the answer: Recordare down or slow → null', async () => {
     respond = (s) => (s.path === '/api/v1/context' ? { status: 503 } : undefined);
     expect(await new RecordareMcpService(outbox).contextBlock('u1', 'c', 'x')).toBeNull();
     respond = () => undefined;
@@ -554,11 +635,11 @@ describe('RecordareDiaryController (Settings → Diary)', () => {
   });
 });
 
-describe('tracing: recordare.owner_id', () => {
-  it('spans carry recordare.owner_id when the mapping is known, nothing otherwise', async () => {
+describe('tracing: recordare.memory_id', () => {
+  it('spans carry recordare.memory_id when the mapping is known, nothing otherwise', async () => {
     const exporter = new InMemorySpanExporter();
     const handler = new GenAiTraceHandler(new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] }).getTracer('t'));
-    setRecordareOwnerResolver((uid) => (uid === 'known' ? 'owner-1' : undefined));
+    setRecordareMemoryResolver((uid) => (uid === 'known' ? 'memory-1' : undefined));
     for (const user of ['known', 'unknown']) {
       await runWithLlmCallContext({ userId: user }, async () => {
         handler.handleChatModelStart({} as any, [], `r-${user}`, undefined, { invocation_params: { model: 'm' } });
@@ -566,8 +647,8 @@ describe('tracing: recordare.owner_id', () => {
       handler.handleLLMEnd({ generations: [] }, `r-${user}`);
     }
     const [a, b] = exporter.getFinishedSpans();
-    expect(a.attributes['recordare.owner_id']).toBe('owner-1');
-    expect(b.attributes['recordare.owner_id']).toBeUndefined();
+    expect(a.attributes['recordare.memory_id']).toBe('memory-1');
+    expect(b.attributes['recordare.memory_id']).toBeUndefined();
     expect(b.attributes['user.id']).toBe('unknown');
   });
 });

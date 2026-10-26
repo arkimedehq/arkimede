@@ -39,7 +39,7 @@ import {User} from '../users/users.entity';
 import {Project} from '../projects/projects.entity';
 import {ToolManifest, ToolSelectionService} from './tool-selection.service';
 import {FeedbackService} from '../feedback/feedback.service';
-import {UserMemoryService} from '../user-memory/user-memory.service';
+import { type MemoryUse, UserMemoryService } from '../user-memory/user-memory.service';
 import {FlowsService} from '../flows/flows.service';
 import {
   GET_CURRENT_DATETIME_DESC, languageLine, userMemoryBlock, summaryBlock,
@@ -946,7 +946,7 @@ export class AgentService implements OnModuleInit {
       userId
         ? this.userRepo.findOne({
             where: { id: userId },
-            select: { id: true, role: true, systemPrompt: true, language: true, toolLoadingStrategy: true, toolLoadingMaxTools: true, toolSchemaFormat: true, maxHistoryTokens: true, autoMemoryEnabled: true, episodicMemoryEnabled: true },
+            select: { id: true, role: true, systemPrompt: true, language: true, toolLoadingStrategy: true, toolLoadingMaxTools: true, toolSchemaFormat: true, maxHistoryTokens: true, autoMemoryEnabled: true, sharedMemoryEnabled: true, episodicMemoryEnabled: true },
           })
         : Promise.resolve(null),
       projectId
@@ -1092,10 +1092,13 @@ export class AgentService implements OnModuleInit {
     // rarely). The rest of the memory enters per-query via hybrid retrieval,
     // in the NON-cached blocks below — injecting everything here would both
     // bloat the prompt and (if per-query) invalidate the stable-prefix cache.
+    // Two independent choices (Recordare D34): the personal notes and the team / org ones.
+    const memoryUse: MemoryUse = { personal: !!user?.autoMemoryEnabled, shared: !!user?.sharedMemoryEnabled };
+    const usesNotes = memoryUse.personal || memoryUse.shared;
     let userMemory: string[] | null = null;
-    if (user?.autoMemoryEnabled && userId && this.userMemoryService) {
+    if (usesNotes && userId && this.userMemoryService) {
       try {
-        userMemory = await this.userMemoryService.getPinnedContents(userId);
+        userMemory = await this.userMemoryService.getPinnedContents(userId, memoryUse);
       } catch (err: any) {
         this.logger.warn(`Failed to load user memory: ${err?.message ?? err}`);
       }
@@ -1134,12 +1137,12 @@ export class AgentService implements OnModuleInit {
     // ahead" still carry topical signal). Per-query → NON-cached block. Pinned
     // notes are excluded here: they already sit in the stable prefix.
     let memoryTextBlock: string | null = null;
-    if (user?.autoMemoryEnabled && userId && userInput?.trim() && this.userMemoryService) {
+    if (usesNotes && userId && userInput?.trim() && this.userMemoryService) {
       try {
         const query = summary?.trim()
           ? `${userInput}\n${summary.trim().slice(-400)}`
           : userInput;
-        const notes = await this.userMemoryService.retrieve(userId, query);
+        const notes = await this.userMemoryService.retrieve(userId, query, memoryUse);
         if (notes.length) {
           memoryTextBlock = memoryBlock(notes);
           this.logger.debug(`Memory: ${notes.length} retrieved notes injected`);
@@ -1159,7 +1162,7 @@ export class AgentService implements OnModuleInit {
     // ── Recordare memory context (Agent.memoryContext) ────────────────────────
     // The user's memories relevant to this message, as Recordare's fenced block
     // (data, not instructions). Per-query → NON-cached, last; bounded wait, never
-    // fails the answer. Recordare applies consent and the viewer rule.
+    // fails the answer. Recordare applies the viewer rule.
     const recordareContextBlock = memoryContext && user?.episodicMemoryEnabled && userId && chatId && userInput?.trim() && this.recordareMcp?.enabled
       ? await this.recordareMcp.contextBlock(userId, chatId, userInput)
       : null;
@@ -1204,10 +1207,10 @@ export class AgentService implements OnModuleInit {
     // Origin chatId: for one-shots it becomes the delivery chat of the result.
     const schedulingTools = userId ? this.schedulingService.buildSchedulingTools(userId, projectId, chatId) : [];
 
-    // Memory (A-MEM F5): save_memory / search_memory, gated by the same toggle
-    // that governs automatic memory. save_memory only proposes (pending).
-    const memoryTools = user?.autoMemoryEnabled && userId && this.userMemoryService
-      ? this.userMemoryService.buildMemoryTools(userId, chatId)
+    // Memory (A-MEM F5): save_memory / search_memory, gated by the notes the user
+    // uses (D34: search only, for the team / org ones alone). save_memory only proposes (pending).
+    const memoryTools = usesNotes && userId && this.userMemoryService
+      ? this.userMemoryService.buildMemoryTools(userId, chatId, memoryUse)
       : [];
 
     // Sandbox (arbitrary code/shell): gated per-request built-in. When enabled

@@ -140,16 +140,25 @@ export class AstraDbAdapter implements VectorStoreAdapter {
     });
   }
 
-  async deleteByFilter(collection: string, filter: Record<string, any>): Promise<void> {
+  async deleteByFilter(collection: string, filter: Record<string, any>, except?: Record<string, any>): Promise<void> {
     // AstraDB uses MongoDB-like filter syntax
     const astraFilter: Record<string, any> = {};
     Object.entries(filter).forEach(([k, v]) => {
       astraFilter[k] = { $eq: v };
     });
+    Object.entries(except ?? {}).forEach(([k, v]) => {
+      astraFilter[k] = { ...(astraFilter[k] ?? {}), $ne: v };
+    });
 
     await this.command(collection, {
       deleteMany: { filter: astraFilter },
     });
+  }
+
+  async updatePayloadByFilter(collection: string, filter: Record<string, any>, patch: Record<string, any>): Promise<void> {
+    const astraFilter: Record<string, any> = {};
+    Object.entries(filter).forEach(([k, v]) => { astraFilter[k] = { $eq: v }; });
+    await this.command(collection, { updateMany: { filter: astraFilter, update: { $set: patch } } });
   }
 
   async listCollections(): Promise<string[]> {

@@ -18,7 +18,10 @@
     "defaultHintEm": "Default collection",
     "defaultHintPost": "to use the one configured by the admin.",
     "download": "Download",
-    "delete": "Delete"
+    "delete": "Delete",
+    "scopeTitle": "Who sees this document in searches (changes without re-indexing)",
+    "scopeUnknown": "Visibility: not recorded",
+    "scopeChangeFailed": "Could not change the visibility"
   },
   "ocr": {
     "label": "OCR level",

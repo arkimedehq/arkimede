@@ -10,17 +10,22 @@
  * delete a note, confirm or reject what was inferred). A thin proxy over Recordare's
  * read API (its API.md §4) through the shared client library, always for the logged-in
  * user: the browser never sees Recordare's key, and nobody reads another user's diary.
+ * A note can be copied into A-MEM (D34): personal, a team of the user's, or the org (admins);
+ * the copy follows the note (recordare-notes-sync.service). Copies into a team or the org are audited.
  * Recordare errors keep their status (404 stays 404); an outage is a 503.
  */
 import {
-  Body, Controller, Delete, ForbiddenException, Get, HttpCode, HttpException, Param, Patch, Post, Query, ServiceUnavailableException, UseGuards,
+  Body, ConflictException, Controller, Delete, ForbiddenException, Get, HttpCode, HttpException, Param, Patch, Post, Query,
+  ServiceUnavailableException, UseGuards,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsBoolean, IsIn, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import { IsBoolean, IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength } from 'class-validator';
 import { Repository } from 'typeorm';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { AuditService } from '../audit/audit.service';
 import { User } from '../users/users.entity';
+import { UserMemoryService } from '../user-memory/user-memory.service';
 import { type EpisodeQuery, type PlanStatus, RecordareHttpError, type RecordareClient } from './client';
 import { recordareClient } from './recordare.config';
 
@@ -36,13 +41,22 @@ class PinDto {
   @IsBoolean() pinned: boolean;
 }
 
+class CopyDto {
+  @IsIn(['personal', 'team', 'org']) scope: 'personal' | 'team' | 'org';
+  @IsOptional() @IsUUID() teamId?: string | null;
+}
+
 const bool = (v?: string) => (v === 'true' ? true : v === 'false' ? false : undefined);
 const day = (v?: string) => (v && ISO_DAY.test(v) ? v : undefined);
 
 @Controller('api/recordare/diary')
 @UseGuards(JwtAuthGuard)
 export class RecordareDiaryController {
-  constructor(@InjectRepository(User) private readonly users: Repository<User>) {}
+  constructor(
+    @InjectRepository(User) private readonly users: Repository<User>,
+    private readonly memory: UserMemoryService,
+    private readonly audit: AuditService,
+  ) {}
 
   /** The client for the logged-in user, who must have the episodic memory switched on. */
   private async client(userId: string): Promise<RecordareClient> {
@@ -113,6 +127,28 @@ export class RecordareDiaryController {
   @Get('plans')
   plans(@CurrentUser() user: User) {
     return this.call(user.id, (c) => c.plans(user.id));
+  }
+
+  /** Where the user copied Recordare notes in A-MEM (D34). */
+  @Get('copies')
+  async copies(@CurrentUser() user: User) {
+    await this.client(user.id);
+    return this.memory.recordareCopies(user.id);
+  }
+
+  /** Copies a current, confirmed note into A-MEM (D34): personal, a team of the user's, or the org (admins). */
+  @Post('notes/:id/copy')
+  async copy(@CurrentUser() user: User, @Param('id') id: string, @Body() body: CopyDto) {
+    const note = await this.call(user.id, (c) => c.note(user.id, id));
+    if (note.status !== 'current' || note.pending) throw new ConflictException('recordare.noteNotCurrent');
+    const copy = await this.memory.copyRecordareNote(user.id, { id: note.id, content: note.content, category: note.category },
+      { scope: body.scope, teamId: body.teamId ?? null, isAdmin: user.role === 'admin' });
+    // Widening the audience is always the user's own act, and it is recorded (D34). Identifiers only, no content.
+    if (body.scope !== 'personal') {
+      await this.audit.record({ actorId: user.id, actorName: user.email, action: 'memory.copy_from_recordare', resource: copy!.id,
+        outcome: 'ok', ctx: { scope: body.scope, teamId: body.teamId ?? null, recordareNoteId: note.id } });
+    }
+    return copy;
   }
 
   @Patch('notes/:id')

@@ -55,6 +55,15 @@ export default function FilePanel({ chatId, projectId }: Props) {
     },
   });
 
+  /** File whose visibility change failed (e.g. not its owner): shows the error under it. */
+  const [scopeError, setScopeError] = useState<{ fileId: string; message: string } | null>(null);
+  const changeScope = useMutation({
+    mutationFn: ({ fileId, scope, fileProjectId }: { fileId: string; scope: DocScope; fileProjectId?: string | null }) =>
+      filesApi.setDocScope(fileId, scope, scope === 'project' ? (fileProjectId || projectId || null) : null),
+    onSuccess: () => { setScopeError(null); qc.invalidateQueries({ queryKey: ['files'] }); },
+    onError: (err: any, vars) => setScopeError({ fileId: vars.fileId, message: err?.response?.data?.message ?? t('panel.scopeChangeFailed') }),
+  });
+
   const deleteFile = useMutation({
     mutationFn: (fileId: string) => filesApi.delete(fileId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['files'] }),
@@ -65,8 +74,9 @@ export default function FilePanel({ chatId, projectId }: Props) {
     setSelectValue('');
     setOcrValue('');
     setQueuedFileId(null);
-    // Sensible default: if the chat is in a project → project scope, otherwise personal.
-    setScopeValue(projectId ? 'project' : 'personal');
+    // A re-index keeps the current visibility; otherwise: in a project → project scope, else personal.
+    const current = files.find((f: FileRecord) => f.id === fileId)?.vectorScope;
+    setScopeValue(current ?? (projectId ? 'project' : 'personal'));
   }
 
   function closeIngest() {
@@ -117,6 +127,23 @@ export default function FilePanel({ chatId, projectId }: Props) {
                       {filesApi.formatSize(file.size)}
                       {file.vectorized && <span className="ml-2 text-green-500">· {t('panel.indexed')}</span>}
                     </p>
+                    {/* Visibility of the indexed document, changed in place (no re-index) */}
+                    {file.vectorized && (
+                      <select
+                        value={file.vectorScope ?? ''}
+                        disabled={changeScope.isPending}
+                        onChange={(e) => changeScope.mutate({ fileId: file.id, scope: e.target.value as DocScope, fileProjectId: file.vectorProjectId ?? file.projectId })}
+                        title={t('panel.scopeTitle')}
+                        className="mt-1 bg-gray-900 border border-gray-700 rounded px-1.5 py-0.5 text-xs text-gray-300
+                          focus:outline-none focus:border-teal-500 transition-colors disabled:opacity-50"
+                      >
+                        {!file.vectorScope && <option value="" disabled>{t('panel.scopeUnknown')}</option>}
+                        <option value="universal">{t('panel.scopeUniversal')}</option>
+                        <option value="project" disabled={!(file.vectorProjectId || file.projectId || projectId)}>{t('panel.scopeProject')}</option>
+                        <option value="personal">{t('panel.scopePersonal')}</option>
+                      </select>
+                    )}
+                    {scopeError?.fileId === file.id && <p className="mt-1 text-xs text-red-400 leading-tight">{scopeError.message}</p>}
                   </div>
 
                   {file.vectorized ? (

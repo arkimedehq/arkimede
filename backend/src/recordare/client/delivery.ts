@@ -1,4 +1,4 @@
-// GENERATED from recordare packages/client/src/delivery.ts @ 4bd90f7 — do not edit here: change the library and run
+// GENERATED from recordare packages/client/src/delivery.ts @ 42a6729 — do not edit here: change the library and run
 // packages/client/scripts/sync-to.sh again.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright © 2026 Andrea Genovese

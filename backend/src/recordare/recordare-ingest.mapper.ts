@@ -7,10 +7,13 @@
  * Arkimede chat + messages → body of Recordare `POST api/v1/ingest/messages`
  * (Recordare API §2). Pure functions (unit-tested).
  *
- * Mapping:
+ * Mapping (Recordare D50: one Arkimede account = one agent = one memory, the chat
+ * owner's):
  *   - conversation.externalId = chat id; participants: the chat owner (role
- *     owner), the assistant, and every other user who wrote in a shared chat
- *     (role other, identity = their Arkimede user id).
+ *     holder — "I" in a personal memory, "someone" in an entity one), the
+ *     assistant, and every other user who wrote in a shared chat (role other,
+ *     identity = their Arkimede user id → a contact recognised inside the chat
+ *     owner's memory, never a memory of its own).
  *   - message.externalId = Arkimede message id (stable → idempotent retries);
  *     the owner's turns are `user`, other humans' turns `other`, the assistant's
  *     `assistant`; each recorded tool call of an assistant message becomes a
@@ -76,7 +79,7 @@ export function buildIngestBody(
     out.push({
       externalId: m.id,
       role: byOwner ? 'user' : 'other',
-      authorRef: byOwner ? 'owner' : `user:${m.authorId}`,
+      authorRef: byOwner ? 'holder' : `user:${m.authorId}`,
       content: clipUtf8(m.content),
       sentAt,
     });
@@ -90,7 +93,7 @@ export function buildIngestBody(
       channel: chat.externalSource ? `arkimede-${chat.externalSource}` : 'arkimede',
       ...(chat.title?.trim() ? { title: chat.title.trim().slice(0, 500) } : {}),
       participants: [
-        { ref: 'owner', role: 'owner', ...(ownerName ? { displayName: ownerName.slice(0, 200) } : {}) },
+        { ref: 'holder', role: 'holder', ...(ownerName ? { displayName: ownerName.slice(0, 200) } : {}) },
         { ref: 'assistant', role: 'assistant', displayName: assistantName.slice(0, 200) },
         ...[...others].map((id) => ({
           ref: `user:${id}`, role: 'other' as const,

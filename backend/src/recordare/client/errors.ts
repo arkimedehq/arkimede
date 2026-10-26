@@ -1,4 +1,4 @@
-// GENERATED from recordare packages/client/src/errors.ts @ 4bd90f7 — do not edit here: change the library and run
+// GENERATED from recordare packages/client/src/errors.ts @ 42a6729 — do not edit here: change the library and run
 // packages/client/scripts/sync-to.sh again.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright © 2026 Andrea Genovese
@@ -36,10 +36,10 @@ export class RecordareUnavailableError extends Error {
   }
 }
 
-/** The memory kind can change only while the memory is empty (`PATCH /me {kind}` → 409). */
+/** The memory mode can change only while the memory is empty (`PATCH /me {mode}` → 409). */
 export class MemoryNotEmptyError extends Error {
   constructor() {
-    super('The memory kind can change only while the memory is empty');
+    super('The memory mode can change only while the memory is empty');
     this.name = 'MemoryNotEmptyError';
   }
 }

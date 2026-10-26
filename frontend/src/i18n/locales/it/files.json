@@ -18,7 +18,10 @@
     "defaultHintEm": "Collection default",
     "defaultHintPost": "per usare quella configurata dall'admin.",
     "download": "Scarica",
-    "delete": "Elimina"
+    "delete": "Elimina",
+    "scopeTitle": "Chi vede questo documento nelle ricerche (cambia senza reindicizzare)",
+    "scopeUnknown": "Visibilità: non registrata",
+    "scopeChangeFailed": "Impossibile cambiare la visibilità"
   },
   "ocr": {
     "label": "Livello OCR",

@@ -125,7 +125,8 @@ export const SAVE_MEMORY_DESC =
   'Use it ONLY when the user explicitly asks to remember something ("ricordati che…", "remember that…") ' +
   'or states a lasting preference/constraint/decision worth recalling later. ' +
   'Do NOT use it for ephemeral details tied to the current request. ' +
-  'The fact is saved as a PROPOSAL the user confirms from the memory panel — tell the user you noted it and that it awaits their confirmation.';
+  'The fact is saved as a PROPOSAL the user confirms from the memory panel — tell the user you noted it and that it awaits their confirmation. ' +
+  'Never ask the user whether to save or remember something: conversations are already remembered automatically.';
 
 export const SEARCH_MEMORY_DESC =
   'Searches the user\'s long-term memory for facts relevant to a query, BEYOND the ones already ' +
