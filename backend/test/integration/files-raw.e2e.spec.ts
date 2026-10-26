@@ -61,6 +61,8 @@ beforeAll(async () => {
   const mk = async (email: string) => (await users.save(users.create({ email, name: email, password: 'x' }))).id;
   BID = await mk('b@raw.local');
   CID = await mk('c@raw.local');
+  mkdirSync(join(outDir, CID));
+  writeFileSync(join(outDir, CID, 'mine.pdf'), 'pdf-untracked');        // C's own skill output
 
   // owner.txt is a TRACKED file owned by B (personal scope). Store the storagePath in
   // its realpath form: the controller resolves the requested path via realpathSync, and
@@ -135,8 +137,13 @@ describe('access-aware (C2)', () => {
     expect((await raw('owner.txt')).status).toBe(403);
   });
 
-  it('an untracked output is served with path containment only', async () => {
+  it('an untracked output in the caller\'s own skills-output subdir is served with path containment only', async () => {
     current = { id: CID, role: 'user' };
-    expect((await raw('skills-output/out.pdf')).status).toBe(200);
+    expect((await raw('skills-output/mine.pdf')).status).toBe(200);
+  });
+
+  it('an output outside the caller\'s own subdir is not served, not even through the upload root (404)', async () => {
+    current = { id: CID, role: 'user' };
+    expect((await raw('skills-output/out.pdf')).status).toBe(404);
   });
 });

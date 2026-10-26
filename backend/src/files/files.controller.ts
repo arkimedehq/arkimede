@@ -313,9 +313,12 @@ export class FilesController {
     // skills-output tree (guards the per-user confinement when SKILLS_OUTPUT_DIR
     // is nested under UPLOAD_DIR — otherwise a ?rel=skills-output/<otherUser>/x
     // would bypass it).
+    // Compared with realpaths: a SKILLS_OUTPUT_DIR reached through a symlink would otherwise not match.
+    let realSkills = skillsRoot;
+    try { realSkills = realpathSync(skillsRoot); } catch { /* nonexistent: nothing can sit under it */ }
     const roots: Array<[string, string, (real: string) => boolean]> = [
       [userSkills, relForSkills, () => true],
-      [uploadDirAbs(), relPath, (real) => real !== skillsRoot && !real.startsWith(skillsRoot + sep)],
+      [uploadDirAbs(), relPath, (real) => real !== realSkills && !real.startsWith(realSkills + sep)],
     ];
     for (const [dir, rel, ok] of roots) {
       let realDir: string;
