@@ -6,6 +6,7 @@
     "timeline": "Timeline",
     "digests": "Diary",
     "profile": "Who you are",
+    "people": "People",
     "plans": "Plans",
     "pending": "To confirm"
   },
@@ -81,6 +82,9 @@
     "facts": "No facts.",
     "notes": "No notes.",
     "plans": "No open plans.",
-    "pending": "Nothing to confirm."
-  }
+    "pending": "Nothing to confirm.",
+    "people": "No people yet."
+  },
+  "peopleHint": "The people you know, as the memory remembers them now. To correct or delete something, use “Who you are” or the timeline.",
+  "lastMentioned": "mentioned"
 }

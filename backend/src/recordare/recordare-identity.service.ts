@@ -22,6 +22,9 @@
  * Only users with episodicMemoryEnabled are looked up: switching the memory off
  * never creates a person in Recordare.
  *
+ * Deleting an account erases its memory in Recordare (eraseMemory): a memory does not
+ * outlive its account.
+ *
  * The synchronous readers never wait on Recordare: they answer from the cache (even
  * if stale) and start a refresh in the background.
  */
@@ -30,7 +33,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Not, Repository } from 'typeorm';
 import { User } from '../users/users.entity';
 import { setRecordareMemoryResolver } from '../observability/genai-tracing';
-import { MemoryNotEmptyError, type MemoryMode, PersonDirectory, type RecordareClient } from './client';
+import { MemoryNotEmptyError, type MemoryMode, PersonDirectory, type RecordareClient, RecordareHttpError } from '@arkimedehq/recordare-client';
 import { recordareClient, recordareConfig } from './recordare.config';
 
 /** Bound on the profile read's re-check (Settings must not hang on Recordare). */
@@ -159,5 +162,24 @@ export class RecordareIdentityService implements OnModuleInit {
     const known = people.peek(userId)?.memoryId;
     if (known) return known;
     return (await people.refresh(userId)).memoryId;
+  }
+
+  /**
+   * Erases the account's whole memory in Recordare (its WORK_PLAN 8.13), before the account is deleted: needs the
+   * `erase` scope on Arkimede's key. The user's pending outbox rows go first, so no late ingest or deletion provisions
+   * the memory again. A memory Recordare no longer has counts as erased; any other failure throws, and the account
+   * stays. Nothing to do when the account was never provisioned or Recordare is not configured.
+   */
+  async eraseMemory(userId: string, memoryId: string | null): Promise<void> {
+    const client = recordareClient();
+    if (!client || !memoryId) return;
+    await this.users.manager.query(`DELETE FROM "recordare_outbox" WHERE "userId" = $1`, [userId]);
+    try {
+      await client.eraseMemory(userId, memoryId);
+    } catch (err) {
+      if (!(err instanceof RecordareHttpError && err.status === 404)) throw err;
+    }
+    this.invalidate(userId);
+    this.unreachable.delete(userId);
   }
 }

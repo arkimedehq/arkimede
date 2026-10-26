@@ -6,6 +6,7 @@
     "timeline": "Linea del tempo",
     "digests": "Diario",
     "profile": "Chi sei",
+    "people": "Persone",
     "plans": "Piani",
     "pending": "Da confermare"
   },
@@ -81,6 +82,9 @@
     "facts": "Nessun fatto.",
     "notes": "Nessuna nota.",
     "plans": "Nessun piano aperto.",
-    "pending": "Niente da confermare."
-  }
+    "pending": "Niente da confermare.",
+    "people": "Nessuna persona ancora."
+  },
+  "peopleHint": "Le persone che conosci, come la memoria le ricorda adesso. Per correggere o eliminare qualcosa usa «Chi sei» o la linea del tempo.",
+  "lastMentioned": "citata il"
 }

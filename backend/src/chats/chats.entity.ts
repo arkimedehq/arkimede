@@ -58,6 +58,10 @@ export class Chat {
   @Column({ type: 'varchar', length: 200, nullable: true })
   externalKey: string | null;
 
+  /** Satellite that started the chat (e.g. the hub's satellite entity), when the entry point reports one. */
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  externalSatellite: string | null;
+
   @OneToMany(() => Message, (m) => m.chat)
   messages: Message[];
 

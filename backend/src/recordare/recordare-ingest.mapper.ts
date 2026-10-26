@@ -20,7 +20,7 @@
  *     `tool` message `<messageId>:tool:<n>` (Recordare D30). `system` is never sent.
  */
 import type { ToolCallRecord } from '../messages/messages.entity';
-import { clipUtf8, type IngestRequest } from './client';
+import { clipUtf8, type IngestRequest } from '@arkimedehq/recordare-client';
 
 export { clipUtf8 };
 

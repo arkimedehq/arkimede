@@ -58,6 +58,17 @@ export interface DiaryNote {
   authorRole: string;
 }
 
+/** A person as the memory knows them now (Recordare cards): current, confirmed facts and notes. */
+export interface DiaryCard {
+  personId: string;
+  name: string;
+  aliases: string[];
+  facts: Array<{ id: string; key: string; value: string | null; validFrom: string | null }>;
+  notes: Array<{ id: string; category: string; content: string; pinned: boolean; pattern: boolean }>;
+  /** Day of the latest memory about them. */
+  lastMentioned: string | null;
+}
+
 /** Where a Recordare note was copied in the persistent memory (A-MEM, D34). */
 export interface DiaryCopy { recordareNoteId: string; scope: 'personal' | 'team' | 'org'; teamId: string | null }
 
@@ -76,6 +87,7 @@ export const diaryApi = {
   digests: (): Promise<DiaryDigest[]> => api.get(`${base}/digests`).then((r) => r.data),
   facts: (includePending = false): Promise<DiaryFact[]> => api.get(`${base}/facts`, { params: { includePending } }).then((r) => r.data),
   notes: (includePending = false): Promise<DiaryNote[]> => api.get(`${base}/notes`, { params: { includePending } }).then((r) => r.data),
+  cards: (): Promise<{ self: DiaryCard; contacts: DiaryCard[] }> => api.get(`${base}/cards`).then((r) => r.data),
   plans: (): Promise<DiaryEpisode[]> => api.get(`${base}/plans`).then((r) => r.data),
   copies: (): Promise<DiaryCopy[]> => api.get(`${base}/copies`).then((r) => r.data),
   /** Copies a note into the persistent memory (A-MEM): personal, a team, or the org (admins). */

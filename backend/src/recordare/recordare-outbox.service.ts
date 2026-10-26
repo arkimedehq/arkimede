@@ -25,7 +25,7 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { APP_NAME } from '../config/app.config';
-import { afterFailure, type RecordareClient } from './client';
+import { afterFailure, type RecordareClient } from '@arkimedehq/recordare-client';
 import { recordareClient } from './recordare.config';
 import { IngestChat, IngestMessage, buildIngestBody } from './recordare-ingest.mapper';
 import type { OutboxOp } from './recordare-outbox';

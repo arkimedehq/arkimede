@@ -14,14 +14,14 @@ import { useStore } from '../store/useStore';
 
 /**
  * Settings → Diary: what Recordare (the episodic memory) remembers about the user —
- * timeline, the nightly diary, who they are (facts and notes), plans and what awaits
+ * timeline, the nightly diary, who they are (facts and notes), the people they know, plans and what awaits
  * their confirmation — with their own edits: correct or forget a memory, pin or delete
  * a note, confirm or reject what was only inferred, copy a note into the persistent
  * memory (A-MEM, Recordare D34: by hand, or by kind with the copy rule). Read through the
  * backend proxy: always the logged-in user's own memory.
  */
-type Tab = 'timeline' | 'digests' | 'profile' | 'plans' | 'pending';
-const TABS: Tab[] = ['timeline', 'digests', 'profile', 'plans', 'pending'];
+type Tab = 'timeline' | 'digests' | 'profile' | 'people' | 'plans' | 'pending';
+const TABS: Tab[] = ['timeline', 'digests', 'profile', 'people', 'plans', 'pending'];
 
 const STATUS_COLOR: Record<PlanStatus, string> = {
   open: 'text-blue-300 border-blue-800', confirmed: 'text-green-300 border-green-800', cancelled: 'text-gray-400 border-gray-700',
@@ -60,6 +60,7 @@ export function DiarySection({ enabled }: { enabled: boolean }) {
           {tab === 'timeline' && <Timeline />}
           {tab === 'digests' && <Digests />}
           {tab === 'profile' && <Profile />}
+          {tab === 'people' && <People />}
           {tab === 'plans' && <Plans />}
           {tab === 'pending' && <Pending />}
         </>
@@ -373,6 +374,43 @@ function FactRow({ fact: f, onDelete }: { fact: DiaryFact; onDelete: () => void 
         </ul>
       )}
     </li>
+  );
+}
+
+// ── The people the user knows (Recordare cards) ──────────────────────────────────
+
+function People() {
+  const { t } = useTranslation('diary');
+  const q = useQuery({ queryKey: ['diary', 'cards'], queryFn: diaryApi.cards });
+  if (q.isLoading) return <Loading />;
+  if (q.error) return <Failed error={q.error} />;
+  if (!q.data?.contacts.length) return <Empty text={t('empty.people')} />;
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-gray-500">{t('peopleHint')}</p>
+      <ul className="space-y-2">
+        {q.data.contacts.map((c) => (
+          <li key={c.personId} className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3">
+            <div className="flex items-baseline gap-2 flex-wrap">
+              <UserRound size={14} className="text-gray-400 self-center" />
+              <span className="text-sm font-medium text-white">{c.name}</span>
+              {c.aliases.length > 0 && <span className="text-xs text-gray-500">({c.aliases.join(', ')})</span>}
+              {c.lastMentioned && <span className="text-xs text-gray-500 ml-auto">{t('lastMentioned')} {c.lastMentioned}</span>}
+            </div>
+            {c.facts.length + c.notes.length > 0 && (
+              <ul className="mt-1.5 ml-6 space-y-0.5">
+                {c.facts.map((f) => (
+                  <li key={f.id} className="text-sm text-gray-300">
+                    <span className="text-gray-400">{f.key.replace(/_/g, ' ')}:</span> {f.value ?? t('unknown')}
+                  </li>
+                ))}
+                {c.notes.map((n) => <li key={n.id} className="text-sm text-gray-300">{n.content}</li>)}
+              </ul>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

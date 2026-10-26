@@ -16,7 +16,7 @@ import { RecordareIdentityService, RecordareMemoryNotEmptyError } from '../../sr
 import { RecordareOutboxService } from '../../src/recordare/recordare-outbox.service';
 import { UsersService } from '../../src/users/users.service';
 import { ConflictException } from '@nestjs/common';
-import { DEFAULT_DELIVERY, backoffMs } from '../../src/recordare/client';
+import { DEFAULT_DELIVERY, backoffMs } from '@arkimedehq/recordare-client';
 
 const MAX_ATTEMPTS = DEFAULT_DELIVERY.maxAttempts;
 import { RecordareMcpService } from '../../src/recordare/recordare-mcp.service';
@@ -269,6 +269,53 @@ describe('UsersService: memory mode and gender', () => {
 
     const off = setup({ id: 'u', name: 'H', role: 'user', episodicMemoryEnabled: false }, { setMode });
     await expect(off.svc.updateProfile('u', { episodicMemoryMode: 'entity' })).rejects.toThrow('users.episodicMemoryOff');
+  });
+});
+
+// ── Erasing the memory with the account (Recordare WORK_PLAN 8.13) ──────────
+
+describe('deleting an account erases its memory', () => {
+  const erased = { erased: { conversations: 1, messages: 2, episodes: 1, facts: 0, notes: 0, digests: 0, sources: 0, contacts: 0 } };
+  function identity() {
+    const queries: unknown[][] = [];
+    const repo = { manager: { query: async (...args: unknown[]) => { queries.push(args); return []; } } } as any;
+    return { svc: new RecordareIdentityService(repo), queries };
+  }
+
+  it('drops the pending outbox rows, then erases with the memoryId as confirmation; a memory already gone is fine', async () => {
+    respond = (s) => (s.method === 'DELETE' && s.path.startsWith('/api/v1/me') ? { status: 200, body: erased } : undefined);
+    const { svc, queries } = identity();
+    await svc.eraseMemory('u1', 'memory-of-u1');
+    expect(queries).toEqual([['DELETE FROM "recordare_outbox" WHERE "userId" = $1', ['u1']]]);
+    const req = seen.find((s) => s.method === 'DELETE')!;
+    expect(req.path).toBe('/api/v1/me?confirm=memory-of-u1');
+    expect(req.headers['x-recordare-user']).toBe('u1');
+
+    respond = (s) => (s.method === 'DELETE' ? { status: 404, body: { code: 'not_found' } } : undefined);
+    await expect(svc.eraseMemory('u1', 'memory-of-u1')).resolves.toBeUndefined();
+    respond = (s) => (s.method === 'DELETE' ? { status: 403, body: { code: 'forbidden' } } : undefined);
+    await expect(svc.eraseMemory('u1', 'memory-of-u1')).rejects.toMatchObject({ status: 403 });
+  });
+
+  it('nothing to erase when never provisioned or Recordare is off', async () => {
+    const { svc, queries } = identity();
+    await svc.eraseMemory('u1', null);
+    configure(false);
+    await svc.eraseMemory('u1', 'memory-of-u1');
+    expect(queries).toEqual([]);
+    expect(seen).toEqual([]);
+  });
+
+  it('the account stays when the erasure fails, and goes when it succeeds', async () => {
+    const removed: string[] = [];
+    const repo = { findOne: async () => ({ id: 'u', role: 'user', recordareMemoryId: 'm' }), remove: async (u: any) => { removed.push(u.id); } } as any;
+    const failing = new UsersService(repo, { eraseMemory: async () => { throw new Error('down'); } } as any);
+    await expect(failing.deleteUser('u')).rejects.toMatchObject({ status: 503, message: 'users.memoryEraseFailed' });
+    expect(removed).toEqual([]);
+    const erase = vi.fn(async () => undefined);
+    await new UsersService(repo, { eraseMemory: erase } as any).deleteUser('u');
+    expect(erase).toHaveBeenCalledWith('u', 'm');
+    expect(removed).toEqual(['u']);
   });
 });
 
@@ -632,6 +679,13 @@ describe('RecordareDiaryController (Settings → Diary)', () => {
     await expect(new RecordareDiaryController(users(true)).episodes({ id: 'u1' } as any)).rejects.toMatchObject({ status: 503 });
     configure(false);
     await expect(new RecordareDiaryController(users(true)).episodes({ id: 'u1' } as any)).rejects.toMatchObject({ status: 503 });
+  });
+
+  it('reads the cards (who the user is, the people they know) as the logged-in user', async () => {
+    const cards = { self: { personId: 'm', name: 'Andrea', aliases: [], facts: [], notes: [], lastMentioned: null }, contacts: [] };
+    respond = (s) => (s.path === '/api/v1/cards' ? { status: 200, body: cards } : undefined);
+    expect(await new RecordareDiaryController(users(true)).cards({ id: 'u1' } as any)).toEqual(cards);
+    expect(seen.find((s) => s.path === '/api/v1/cards')!.headers['x-recordare-user']).toBe('u1');
   });
 });
 

@@ -14,6 +14,10 @@
  * turn is appended to the latest chat with that key unless it went idle or (for
  * entry points without a conversation id) the client's history no longer
  * matches it — see external-chats.util.ts.
+ *
+ * Focus (conversation-focus.service.ts): a turn of a focused satellite is
+ * appended to the focused chat instead, and the entry point runs it with that
+ * chat's history (historyOf) — the one case where a chat is read back.
  */
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -38,6 +42,12 @@ export interface ExternalTurn {
   key: string;
   /** A chat idle for longer than this is closed: the next turn opens a new one. */
   idleMs: number;
+  /** The satellite the turn came from (kept on a new chat so a list can show it). */
+  satellite?: string | null;
+  /** Focused chat of the satellite: the turn is appended there, no grouping. */
+  chatId?: string | null;
+  /** Epoch ms: a chat last active before this is never continued (a focus ended since). */
+  notBefore?: number | null;
   /**
    * User messages of the history the client resent with this turn, oldest first.
    * Omit when the key already identifies the conversation (no coherence check).
@@ -64,7 +74,7 @@ export class ExternalChatsService {
   /** Records a completed turn; returns the chat it was appended to. */
   async recordTurn(input: ExternalTurn): Promise<string> {
     const turn = { ...input, key: input.key.slice(0, 200) };   // column width
-    const chatId = (await this.findOpenChat(turn)) ?? (await this.createChat(turn));
+    const chatId = (await this.focusedChat(turn)) ?? (await this.findOpenChat(turn)) ?? (await this.createChat(turn));
 
     // createdAt stays the DB default (as in the in-app flow): insertion order is the
     // chat order, and app-written and DB-written timestamps are not comparable.
@@ -91,6 +101,32 @@ export class ExternalChatsService {
     return chatId;
   }
 
+  /**
+   * The last `max` user/assistant messages of a chat of the user, oldest first, as
+   * agent history; null when the chat does not exist or is not the user's.
+   */
+  async historyOf(chatId: string, userId: string, max: number): Promise<{ role: 'user' | 'assistant'; content: string }[] | null> {
+    const chat = await this.chatRepo.findOne({ where: { id: chatId, userId }, select: { id: true } });
+    if (!chat) return null;
+    const rows = await this.messageRepo.find({
+      where: { chatId }, order: { createdAt: 'DESC' }, take: max, select: { role: true, content: true },
+    });
+    return rows.reverse()
+      .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content ?? '' }));
+  }
+
+  /** The focused chat, if it still exists and is the user's; an empty one takes its title from the turn. */
+  private async focusedChat(turn: ExternalTurn): Promise<string | null> {
+    if (!turn.chatId) return null;
+    const chat = await this.chatRepo.findOne({ where: { id: turn.chatId, userId: turn.userId }, select: { id: true } });
+    if (!chat) return null;
+    if (!(await this.messageRepo.exists({ where: { chatId: chat.id } }))) {
+      await this.chatRepo.update(chat.id, { title: turn.userText.slice(0, TITLE_MAX) });
+    }
+    return chat.id;
+  }
+
   /** Latest chat with the turn's key that the turn may continue, if any. */
   private async findOpenChat(turn: ExternalTurn): Promise<string | null> {
     const chat = await this.chatRepo.findOne({
@@ -99,6 +135,7 @@ export class ExternalChatsService {
       select: { id: true, updatedAt: true },
     });
     if (!chat || !isWithinIdleWindow(chat.updatedAt, turn.idleMs)) return null;
+    if (turn.notBefore && new Date(chat.updatedAt).getTime() < turn.notBefore) return null;
     if (turn.priorUserTexts === undefined) return chat.id;
 
     const lastUser = await this.messageRepo.findOne({
@@ -115,6 +152,7 @@ export class ExternalChatsService {
       title: turn.userText.slice(0, TITLE_MAX),
       externalSource: turn.source,
       externalKey: turn.key,
+      externalSatellite: turn.satellite ?? null,
     }));
     return chat.id;
   }

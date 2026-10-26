@@ -8,12 +8,14 @@ import { ChatsService } from './chats.service';
 import { ExternalChatsService } from './external-chats.service';
 import { Message } from '../messages/messages.entity';
 import { ChatsController } from './chats.controller';
+import { ExternalChatsController } from './external-chats.controller';
+import { ConversationFocusService } from './conversation-focus.service';
 import { ProjectsModule } from '../projects/projects.module';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Chat, Message]), ProjectsModule],
-  providers: [ChatsService, ExternalChatsService],
-  controllers: [ChatsController],
-  exports: [ChatsService, ExternalChatsService],
+  providers: [ChatsService, ExternalChatsService, ConversationFocusService],
+  controllers: [ChatsController, ExternalChatsController],
+  exports: [ChatsService, ExternalChatsService, ConversationFocusService],
 })
 export class ChatsModule {}

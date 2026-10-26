@@ -8,5 +8,6 @@
   "cannotDisableOwnAccount": "Non puoi disabilitare il tuo stesso account.",
   "cannotDeleteOwnAccount": "Non puoi eliminare il tuo stesso account.",
   "memoryNotEmpty": "La modalità della memoria si può cambiare solo finché la memoria è vuota.",
-  "episodicMemoryOff": "Attiva prima la memoria episodica."
+  "episodicMemoryOff": "Attiva prima la memoria episodica.",
+  "memoryEraseFailed": "Account non eliminato: non è stato possibile cancellare la sua memoria episodica (Recordare). Riprova più tardi."
 }

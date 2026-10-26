@@ -273,3 +273,40 @@ Aggiungi integrazione → *Wyoming Protocol* → host = IP di Arkimede, porta =
 configurato, l'agente di conversazione); selezionale nella pipeline di Assist.
 I satelliti (Voice PE, app Companion) usano così Arkimede end-to-end
 attraverso l'hub.
+
+## Parte 4 — Satelliti e conversazione di destinazione (2026-10-26)
+
+Un client che mostra la conversazione (per esempio uno schermo a parete
+accanto a un satellite vocale) può scegliere la chat in cui parla un satellite.
+Generico: Arkimede non sa nulla del client, solo di satelliti e chat.
+
+- **Quale satellite**: l'agente di conversazione Wyoming legge
+  `context.satellite_id` (l'entità satellite dell'hub, per esempio
+  `assist_satellite.soggiorno`; Home Assistant lo manda con `conversation_id`
+  e `device_id`, e in mancanza vale `device_id`); la rotta compatibile OpenAI
+  legge il campo standard `user` delle chat completions. Una nuova chat esterna
+  lo conserva (`chats.externalSatellite`, migration 097), così una lista può
+  mostrare da dove è nata.
+- **Destinazione** (`chats/conversation-focus.service.ts`), per utente
+  (l'utente con cui gira il punto d'ingresso):
+
+  ```bash
+  PUT    /api/external-chats/focus          # {satellite, chatId, ttlSeconds?} → {satellite, chatId, expiresAt}
+  DELETE /api/external-chats/focus?satellite=…
+  GET    /api/external-chats/focus          # le destinazioni del chiamante
+  ```
+
+  La chat deve essere del chiamante. Finché la destinazione c'è, i turni del
+  satellite girano con gli ultimi 40 messaggi di quella chat come storia (la
+  finestra tenuta da Wyoming e la storia rimandata da un client OpenAI si
+  ignorano) e vi vengono aggiunti, con o senza persistenza delle conversazioni;
+  una chat vuota (appena creata con `POST /api/chats`) prende il titolo dal
+  primo turno.
+- **Scadenza**: in memoria, 15 minuti di default (`ttlSeconds`, al massimo
+  1 ora): il client la rinnova finché tiene la chat, così un client sparito o un
+  riavvio del backend non lasciano mai un satellite a parlare in una chat
+  vecchia.
+- **Dopo una destinazione** (cancellata o scaduta) il turno successivo del
+  satellite senza destinazione apre una conversazione nuova anche dentro la
+  finestra di inattività: la finestra Wyoming si svuota e la persistenza apre
+  una chat nuova.

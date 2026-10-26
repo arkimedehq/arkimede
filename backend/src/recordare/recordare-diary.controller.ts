@@ -5,8 +5,8 @@
  * @file recordare-diary.controller.ts
  *
  * The user's Diary (Recordare D18, Arkimede Settings → Diary): what Recordare
- * remembers about them — timeline, day / month diary, facts and notes, plans, what
- * awaits confirmation — and their own edits (correct or forget an episode, pin or
+ * remembers about them — timeline, day / month diary, facts and notes, the people they
+ * know (cards), plans, what awaits confirmation — and their own edits (correct or forget an episode, pin or
  * delete a note, confirm or reject what was inferred). A thin proxy over Recordare's
  * read API (its API.md §4) through the shared client library, always for the logged-in
  * user: the browser never sees Recordare's key, and nobody reads another user's diary.
@@ -26,7 +26,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { AuditService } from '../audit/audit.service';
 import { User } from '../users/users.entity';
 import { UserMemoryService } from '../user-memory/user-memory.service';
-import { type EpisodeQuery, type PlanStatus, RecordareHttpError, type RecordareClient } from './client';
+import { type EpisodeQuery, type PlanStatus, RecordareHttpError, type RecordareClient } from '@arkimedehq/recordare-client';
 import { recordareClient } from './recordare.config';
 
 const ISO_DAY = /^\d{4}-\d{2}(-\d{2})?$/;
@@ -122,6 +122,12 @@ export class RecordareDiaryController {
   @Get('notes')
   notes(@CurrentUser() user: User, @Query('includePending') includePending?: string) {
     return this.call(user.id, (c) => c.notes(user.id, { includePending: bool(includePending) }));
+  }
+
+  /** Who the user is and a card per person they know (Recordare WORK_PLAN 8.13): current, confirmed facts and notes. */
+  @Get('cards')
+  cards(@CurrentUser() user: User) {
+    return this.call(user.id, (c) => c.cards(user.id));
   }
 
   @Get('plans')

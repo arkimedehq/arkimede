@@ -13,7 +13,7 @@ import { ForbiddenException } from '@nestjs/common';
 import { FindOperator } from 'typeorm';
 import { UserMemoryService } from '../../src/user-memory/user-memory.service';
 import { RecordareNotesSyncService } from '../../src/recordare/recordare-notes-sync.service';
-import type { NoteChange } from '../../src/recordare/client';
+import type { NoteChange } from '@arkimedehq/recordare-client';
 
 /** An in-memory user_memory table: equality, IsNull() and Not(IsNull()) in `where`. */
 function fakeRepo(rows: any[] = []) {

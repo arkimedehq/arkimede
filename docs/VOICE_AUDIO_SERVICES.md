@@ -255,3 +255,37 @@ Home Assistant setup: Settings → Devices & services → Add integration →
 with a conversation user configured, the conversation agent) entities appear;
 select them in the Assist pipeline. Satellites (Voice PE, Companion app) then
 use Arkimede end-to-end through the hub.
+
+## Part 4 — Satellites and conversation focus (2026-10-26)
+
+A client that shows the conversation (e.g. a wall screen beside a voice
+satellite) can choose the chat a satellite talks into. Generic: Arkimede knows
+nothing of the client, only satellites and chats.
+
+- **Which satellite**: the Wyoming conversation agent reads
+  `context.satellite_id` (the hub's satellite entity, e.g.
+  `assist_satellite.living_room`; Home Assistant sends it with
+  `conversation_id` and `device_id`, falling back to `device_id`); the
+  OpenAI-compatible route reads the standard `user` field of chat
+  completions. A new external chat keeps it (`chats.externalSatellite`,
+  migration 097) so a list can show where it started.
+- **Focus** (`chats/conversation-focus.service.ts`), per user (the user the
+  entry point runs as):
+
+  ```bash
+  PUT    /api/external-chats/focus          # {satellite, chatId, ttlSeconds?} → {satellite, chatId, expiresAt}
+  DELETE /api/external-chats/focus?satellite=…
+  GET    /api/external-chats/focus          # the caller's focuses
+  ```
+
+  The chat must be the caller's own. While a focus is set, the satellite's
+  turns run with the last 40 messages of that chat as history (the window kept
+  by Wyoming and the history resent by an OpenAI client are ignored) and are
+  appended to it, whether or not conversation persistence is on; an empty chat
+  (just created with `POST /api/chats`) takes its title from the first turn.
+- **Expiry**: in memory, 15 minutes by default (`ttlSeconds`, at most 1 hour):
+  the client refreshes it while it holds the chat, so a vanished client or a
+  backend restart never leaves a satellite talking into an old chat.
+- **After a focus** (cleared or expired) the satellite's next unfocused turn
+  starts a new conversation even inside the idle window: the Wyoming window is
+  emptied and persistence opens a new chat.

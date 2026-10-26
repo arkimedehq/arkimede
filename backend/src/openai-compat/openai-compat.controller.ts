@@ -14,6 +14,9 @@
  *    resends in `messages[]` each turn (chatId is never passed). When the API key
  *    has `persistConversations` on, each completed turn is ALSO recorded as a chat
  *    of the key owner (ExternalChatsService) — a record, never read back here.
+ *  - Satellites: the standard `user` field names the satellite. When a client
+ *    focused that satellite on a chat (ConversationFocusService), the turn runs
+ *    with that chat's history instead of the resent one and is appended there.
  *  - Incoming system messages are discarded (the pipeline has its own layered
  *    prompt); tool events stay internal and never map to OpenAI tool_calls.
  *  - `model` selects the pipeline: 'arkimede' (default) runs the user's
@@ -40,6 +43,7 @@ import { TranscriptionService } from '../transcription/transcription.service';
 import { TtsService } from '../tts/tts.service';
 import { InvocationsService } from '../invocations/invocations.service';
 import { ExternalChatsService } from '../chats/external-chats.service';
+import { ConversationFocusService, FOCUS_HISTORY_MESSAGES, satelliteName } from '../chats/conversation-focus.service';
 import { SpeechRequestDto } from './openai-audio.dto';
 import { withTraceUser } from '../observability/genai-tracing';
 import {
@@ -73,6 +77,7 @@ export class OpenAiCompatController {
     private readonly tts: TtsService,
     private readonly invocations: InvocationsService,
     private readonly externalChats: ExternalChatsService,
+    private readonly focus: ConversationFocusService,
   ) {}
 
   /**
@@ -141,7 +146,12 @@ export class OpenAiCompatController {
     let finished = false;
     res.on('close', () => { if (!finished) abort.abort(); });
 
-    const historyMessages = history.map((h) => ({ role: h.role, content: h.content })) as any[];
+    const satellite = satelliteName(body?.user);
+    const focusedId = this.focus.get(user.id, satellite);
+    const focused = focusedId ? await this.externalChats.historyOf(focusedId, user.id, FOCUS_HISTORY_MESSAGES) : null;
+    const fresh = this.focus.freshSince(user.id, satellite);
+    const historyMessages = (focused ?? history.map((h) => ({ role: h.role, content: h.content }))) as any[];
+    if (focused) this.logger.log(`  satellite ${satellite} focused on chat ${focusedId}: ${focused.length} history msg from the chat`);
 
     // Invocation log: external calls are otherwise invisible (no chat rows).
     const tools = makeToolCollector();
@@ -163,13 +173,17 @@ export class OpenAiCompatController {
       });
 
     // Opt-in chat record of a completed turn (per API key; never for JWT callers).
+    // A focused turn always goes into its chat: the client asked for it.
     const persistTurn = (answer: string, usage: any) => {
-      if (!user.apiKeyPersistConversations || abort.signal.aborted) return;
+      if (abort.signal.aborted || !(user.apiKeyPersistConversations || focused)) return;
       void this.externalChats.recordTurn({
         userId: user.id,
         source: 'api',
-        key: `${user.apiKeyId}:${modelId}`,
+        key: `${user.apiKeyId ?? 'jwt'}:${modelId}`,
         idleMs: PERSIST_IDLE_MS,
+        satellite,
+        chatId: focused ? focusedId : null,
+        notBefore: fresh,
         priorUserTexts: history.filter((h) => h.role === 'user').map((h) => h.content),
         userText: userInput,
         answer,

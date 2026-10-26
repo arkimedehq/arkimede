@@ -27,6 +27,8 @@ export interface OpenAiChatRequest {
   messages: OpenAiChatMessage[];
   stream?: boolean;
   stream_options?: { include_usage?: boolean };
+  /** End-user id (OpenAI standard field): read as the satellite's name. */
+  user?: string;
 }
 
 export interface OpenAiUsage {

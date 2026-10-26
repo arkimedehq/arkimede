@@ -16,7 +16,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { type NoteChange } from './client';
+import { type NoteChange } from '@arkimedehq/recordare-client';
 import { recordareClient } from './recordare.config';
 import { type RecordareNoteCopy, UserMemoryService } from '../user-memory/user-memory.service';
 

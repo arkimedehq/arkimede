@@ -2,8 +2,8 @@
 // Copyright © 2026 Andrea Genovese
 
 import {
-  Injectable, NotFoundException, ConflictException, UnauthorizedException,
-  BadRequestException, Optional,
+  Injectable, Logger, NotFoundException, ConflictException, UnauthorizedException,
+  BadRequestException, Optional, ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, Not, Repository } from 'typeorm';
@@ -31,6 +31,8 @@ export interface ListUsersFilter {
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     @InjectRepository(User) private readonly repo: Repository<User>,
     @Optional() private readonly recordare?: RecordareIdentityService,
@@ -296,11 +298,18 @@ export class UsersService {
   /**
    * Delete a user. Protection: you cannot delete the last active admin.
    * The linked history (chats/files) follows the cascade rules defined in the entities.
+   * Their episodic memory in Recordare is erased first: if that fails, the account stays (retry later).
    */
   async deleteUser(id: string): Promise<void> {
     const user = await this.repo.findOne({ where: { id } });
     if (!user) throw new NotFoundException('users.notFound');
     if (user.role === 'admin') await this.assertNotLastAdmin(id);
+    try {
+      await this.recordare?.eraseMemory(id, user.recordareMemoryId);
+    } catch (err: any) {
+      this.logger.warn(`Recordare memory erasure for user ${id}: ${err?.message ?? err}`);
+      throw new ServiceUnavailableException('users.memoryEraseFailed');
+    }
     await this.repo.remove(user);
   }
 

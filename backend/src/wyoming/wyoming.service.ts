@@ -47,6 +47,7 @@ import { UsersService } from '../users/users.service';
 import { InvocationsService } from '../invocations/invocations.service';
 import { makeToolCollector } from '../invocations/tool-collector';
 import { ExternalChatsService } from '../chats/external-chats.service';
+import { ConversationFocusService, FOCUS_HISTORY_MESSAGES, satelliteName } from '../chats/conversation-focus.service';
 import { APP_NAME, APP_NAME_SLUG } from '../config/app.config';
 import { withTraceUser } from '../observability/genai-tracing';
 import {
@@ -129,6 +130,7 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
   private get usersService(): UsersService   { return this.moduleRef.get(UsersService,   { strict: false }); }
   private get invocations(): InvocationsService { return this.moduleRef.get(InvocationsService, { strict: false }); }
   private get externalChats(): ExternalChatsService { return this.moduleRef.get(ExternalChatsService, { strict: false }); }
+  private get focus(): ConversationFocusService { return this.moduleRef.get(ConversationFocusService, { strict: false }); }
 
   async onModuleInit(): Promise<void> {
     await this.applyConfig();
@@ -359,8 +361,17 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
         if (!text) { this.send(socket, { type: 'not-handled', data: { text: '' } }); return; }
         const context = ev.data?.context && typeof ev.data.context === 'object' ? ev.data.context : {};
         const key = typeof context.conversation_id === 'string' && context.conversation_id ? context.conversation_id : `ip:${ip}`;
+        // The hub reports the satellite (its entity) beside the conversation id: a client
+        // may have focused that satellite on a chat (ConversationFocusService).
+        const userId = this.handle.userId;
+        const satellite = satelliteName(context.satellite_id) ?? satelliteName(context.device_id);
+        const focusedId = this.focus.get(userId, satellite);
+        const focused = focusedId ? await this.externalChats.historyOf(focusedId, userId, FOCUS_HISTORY_MESSAGES) : null;
         const window = this.conversationWindow(key);
-        const history = window.messages.map((m) => ({ role: m.role, content: m.content })) as any[];
+        // A focus that ended since this window's last turn closes the window's conversation.
+        const fresh = this.focus.freshSince(userId, satellite);
+        if (!focused && fresh && window.messages.length && window.updatedAt < fresh) window.messages = [];
+        const history = (focused ?? window.messages.map((m) => ({ role: m.role, content: m.content }))) as any[];
         const t0 = Date.now();
         const tools = makeToolCollector();
         const abort = new AbortController();
@@ -376,22 +387,25 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
             tools.onToolResult,
             agentRunOptions(this.handle.agentId ? await this.agentsService.findById(this.handle.agentId).catch(() => null) : null, 'voice'),
           );
-          window.messages.push({ role: 'user', content: text }, { role: 'assistant', content: answer });
-          if (window.messages.length > CONVERSATION_MAX_MESSAGES) window.messages.splice(0, window.messages.length - CONVERSATION_MAX_MESSAGES);
-          window.updatedAt = Date.now();
-          this.logger.log(`Wyoming: handled turn for ${ip} [${this.handle.model}] (${text.length} → ${answer.length} chars, ${history.length} history, key ${key}) in ${Date.now() - t0}ms`);
+          if (!focused) {
+            window.messages.push({ role: 'user', content: text }, { role: 'assistant', content: answer });
+            if (window.messages.length > CONVERSATION_MAX_MESSAGES) window.messages.splice(0, window.messages.length - CONVERSATION_MAX_MESSAGES);
+            window.updatedAt = Date.now();
+          }
+          this.logger.log(`Wyoming: handled turn for ${ip} [${this.handle.model}] (${text.length} → ${answer.length} chars, ${history.length} history, key ${key}, satellite ${satellite ?? '-'}${focused ? `, focused on chat ${focusedId}` : ''}) in ${Date.now() - t0}ms`);
           void this.invocations.record({
             userId: this.handle.userId, origin: 'voice', route: 'chat', model: `wyoming:${this.handle.model}`,
             inputPreview: text, outputPreview: answer || null, toolCalls: tools.records,
             inputTokens: usage?.inputTokens ?? null, outputTokens: usage?.outputTokens ?? null,
             durationMs: Date.now() - t0, status: 'ok',
           });
-          if (this.persistConversations) {
+          if (this.persistConversations || focused) {
             // The hub's conversation id (or the client IP) already identifies the
             // conversation; the window TTL closes the chat like it drops the context.
-            const userId = this.handle.userId;
+            // A focused turn always goes into its chat: the client asked for it.
             void this.externalChats.recordTurn({
               userId, source: 'wyoming', key, idleMs: CONVERSATION_TTL_MS,
+              satellite, chatId: focused ? focusedId : null, notBefore: fresh,
               userText: text, answer, toolCalls: tools.records, usage,
             }).catch((err) => this.logger.warn(`Wyoming: saving the turn failed: ${err?.message ?? err}`));
           }

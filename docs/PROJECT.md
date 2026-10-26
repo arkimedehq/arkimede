@@ -1331,13 +1331,12 @@ Recordare is a separate memory / digital-twin service. Arkimede can use it
 as its users' **episodic memory** (what happened and when), next to — not instead of — A-MEM, which is unchanged
 (`autoMemoryEnabled` / `sharedMemoryEnabled`, `save_memory` / `search_memory`, `search_conversations`); the user can copy
 Recordare's notes into A-MEM, by hand or by category, and the copies follow them (`docs/MEMORY.md`). Code: `backend/src/recordare/`, on
-Recordare's **client library** (`backend/src/recordare/client/`, a copy synced from Recordare's `packages/client` —
-never edited here): official MCP SDK, RFC 9457 errors, `Retry-After`, W3C trace context; requests go through
+Recordare's **client library** (the npm package `@arkimedehq/recordare-client`, Recordare's `packages/client`): official MCP SDK, RFC 9457 errors, `Retry-After`, W3C trace context; requests go through
 `safeFetch`.
 
 ```bash
 RECORDARE_URL=http://recordare:8080   # off unless both are set
-RECORDARE_API_KEY=rk_...              # Recordare client key (scopes ingest + mcp + read + write), secret
+RECORDARE_API_KEY=rk_...              # Recordare client key (scopes ingest + mcp + read + write + erase), secret
 RECORDARE_OUTBOX_POLL_MS=3000         # optional
 ```
 
@@ -1390,9 +1389,14 @@ RECORDARE_OUTBOX_POLL_MS=3000         # optional
   answer without a recall tool round. Measured in Recordare's WORK_PLAN 5.7.
 - **Diary** (Settings → Diary, shown when Recordare is configured): what Recordare remembers about the user — timeline
   (search, detail with the original messages and earlier versions, correct, forget), the nightly day / month diary, who
-  they are (facts with history, notes: pin, delete), plans, and what awaits confirmation (inferred facts and notes:
+  they are (facts with history, notes: pin, delete), the people they know (Recordare's cards, `GET api/v1/cards`: each
+  contact's current facts and notes, aliases, last mention), plans, and what awaits confirmation (inferred facts and notes:
   confirm / reject). Backend proxy `api/recordare/diary/*` over Recordare's read API, always for the logged-in user (the
   browser never sees Recordare's key); the key needs the `write` scope for the edits.
+- **Account deletion** (Admin → Users → delete): the account's whole memory is erased in Recordare first
+  (`DELETE api/v1/me?confirm=<memoryId>`, the key needs the `erase` scope; the user's pending outbox rows are dropped
+  before, so nothing provisions it again). A memory Recordare no longer has counts as erased; any other failure leaves
+  the account in place (503 `users.memoryEraseFailed`, retry later). Nothing to erase for an account never provisioned.
 
 ### OpenTelemetry GenAI traces (optional)
 

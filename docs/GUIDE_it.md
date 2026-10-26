@@ -1406,6 +1406,10 @@ POST /api/openai/v1/chat/completions    # formato OpenAI; streaming SSE e non-st
   gli eventi dei tool restano interni — mai mappati su `tool_calls` OpenAI.
 - Scegliere lo slug di un agente come `model` applica il suo system prompt,
   tool filter, cap di iterazioni e config LLM.
+- Satelliti: il campo standard `user` dà il nome del satellite. Un client può
+  mandare i turni di un satellite in una sua chat con
+  `PUT /api/external-chats/focus` (vale anche per i satelliti Wyoming) — vedi
+  `docs/VOICE_AUDIO_SERVICES_it.md`, Parte 4.
 - Auth: JWT o chiave API come Bearer. I costi sono attribuiti in `llm_calls`
   con origin `voice`.
 

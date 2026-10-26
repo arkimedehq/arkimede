@@ -1335,13 +1335,13 @@ può usarlo come **memoria episodica** dei suoi utenti (cosa è successo e quand
 che resta invariata (`autoMemoryEnabled` / `sharedMemoryEnabled`, `save_memory` / `search_memory`,
 `search_conversations`); l'utente può copiare le note di Recordare in A-MEM, a mano o per categoria, e le copie le
 seguono (`docs/MEMORY.md`). Codice:
-`backend/src/recordare/`, sulla **libreria client** di Recordare (`backend/src/recordare/client/`, copia sincronizzata
-dal `packages/client` di Recordare — mai modificata qui): SDK MCP ufficiale, errori RFC 9457, `Retry-After`, contesto
+`backend/src/recordare/`, sulla **libreria client** di Recordare (il pacchetto npm `@arkimedehq/recordare-client`, il
+`packages/client` di Recordare): SDK MCP ufficiale, errori RFC 9457, `Retry-After`, contesto
 di traccia W3C; le richieste passano da `safeFetch`.
 
 ```bash
 RECORDARE_URL=http://recordare:8080   # spento finché non sono impostati entrambi
-RECORDARE_API_KEY=rk_...              # chiave client Recordare (scope ingest + mcp + read + write), segreta
+RECORDARE_API_KEY=rk_...              # chiave client Recordare (scope ingest + mcp + read + write + erase), segreta
 RECORDARE_OUTBOX_POLL_MS=3000         # opzionale
 ```
 
@@ -1396,10 +1396,16 @@ RECORDARE_OUTBOX_POLL_MS=3000         # opzionale
   di Recordare.
 - **Diario** (Impostazioni → Diario, visibile quando Recordare è configurato): cosa ricorda Recordare dell'utente —
   linea del tempo (ricerca, dettaglio con i messaggi originali e le versioni precedenti, correggi, dimentica), il diario
-  notturno del giorno / mese, chi è (fatti con storia, note: fissa, elimina), i piani e ciò che attende conferma (fatti e
-  note dedotti: conferma / rifiuta). Proxy nel backend `api/recordare/diary/*` sulla API di lettura di Recordare, sempre
-  per l'utente collegato (il browser non vede mai la chiave di Recordare); per le modifiche la chiave richiede lo scope
-  `write`.
+  notturno del giorno / mese, chi è (fatti con storia, note: fissa, elimina), le persone che conosce (le schede di
+  Recordare, `GET api/v1/cards`: di ogni contatto i fatti e le note attuali, gli alias, l'ultima volta che è stato citato),
+  i piani e ciò che attende conferma (fatti e note dedotti: conferma / rifiuta). Proxy nel backend
+  `api/recordare/diary/*` sulla API di lettura di Recordare, sempre per l'utente collegato (il browser non vede mai la
+  chiave di Recordare); per le modifiche la chiave richiede lo scope `write`.
+- **Eliminazione dell'account** (Admin → Utenti → elimina): prima si cancella in Recordare l'intera memoria dell'account
+  (`DELETE api/v1/me?confirm=<memoryId>`, la chiave richiede lo scope `erase`; prima ancora si tolgono le righe
+  dell'outbox ancora da inviare, così niente la ricrea). Una memoria che Recordare non ha più conta come cancellata;
+  qualsiasi altro errore lascia l'account al suo posto (503 `users.memoryEraseFailed`, si riprova più tardi). Niente da
+  cancellare per un account mai creato in Recordare.
 
 ### Tracce OpenTelemetry GenAI (opzionale)
 

@@ -11,6 +11,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as net from 'node:net';
 import { WyomingService } from '../../src/wyoming/wyoming.service';
+import { ConversationFocusService } from '../../src/chats/conversation-focus.service';
 import { WyomingDecoder, WyomingEvent, encodeEvent, parseWav, pcmToWav } from '../../src/wyoming/wyoming.protocol';
 
 const VOICE_USER = 'a1a1a1a1-0000-4000-8000-000000000001';
@@ -41,6 +42,14 @@ function makeService(opts: { enabled?: boolean; cidrs?: string | null; sttEnable
     getById: vi.fn(async (id: string) => { if (id !== VOICE_USER) throw new Error("not found"); return { id, email: "voice@internal.com", status: "active" }; }),
   };
   const invocations = { record: vi.fn(async () => undefined) };
+  const focus = new ConversationFocusService();
+  // One stored chat of the voice user, for focused turns.
+  const externalChats = {
+    historyOf: vi.fn(async (chatId: string, userId: string) => (chatId === 'chat-1' && userId === VOICE_USER
+      ? [{ role: 'user', content: 'prima' }, { role: 'assistant', content: 'ok' }, { role: 'user', content: 'poi' }, { role: 'assistant', content: 'ok' }]
+      : null)),
+    recordTurn: vi.fn(async () => 'chat-1'),
+  };
   const transcription = {
     describe:   vi.fn(async () => ({ provider: 'internal', model: 'faster-whisper-base', enabled: opts.sttEnabled ?? true })),
     transcribe: vi.fn(async (wav: Buffer) => `heard ${parseWav(wav).pcm.length} bytes`),
@@ -51,9 +60,9 @@ function makeService(opts: { enabled?: boolean; cidrs?: string | null; sttEnable
   };
   const env = { get: (k: string, d?: string) => (k === 'WYOMING_PORT' ? '0' : k === 'WYOMING_BIND' ? '127.0.0.1' : d) };
   // ModuleRef stand-in: the service resolves the conversation dependencies lazily by class token.
-  const moduleRef = { get: (token: any) => ({ AgentService: agentService, AgentsService: agentsService, UsersService: usersService, InvocationsService: invocations } as any)[token.name] };
+  const moduleRef = { get: (token: any) => ({ AgentService: agentService, AgentsService: agentsService, UsersService: usersService, InvocationsService: invocations, ConversationFocusService: focus, ExternalChatsService: externalChats } as any)[token.name] };
   const svc = new WyomingService(appConfig as any, transcription as any, tts as any, env as any, moduleRef as any);
-  return { svc, appConfig, transcription, tts, agentService, agentsService, usersService, invocations };
+  return { svc, appConfig, transcription, tts, agentService, agentsService, usersService, invocations, focus, externalChats };
 }
 
 /** Sends events on a fresh connection and collects the replies until the socket idles. */
@@ -220,6 +229,28 @@ describe('WyomingService — conversation (handle program)', () => {
     expect(other.data.text).toContain('history=0');
     // Standard pipeline (no agent): only the origin override is passed
     expect(ctx.agentService.streamResponse.mock.calls[0][12]).toEqual({ origin: 'voice' });
+    await ctx.svc.onModuleDestroy();
+  });
+
+  it('runs a focused satellite inside its chat, and starts fresh once the focus ends', async () => {
+    const ctx = makeService({ handleUser: VOICE_USER });
+    await ctx.svc.applyConfig();
+    const port = ctx.svc.getStatus().port;
+    const living = { conversation_id: 'A', satellite_id: 'assist_satellite.living' };
+    await exchange(port, [{ type: 'transcript', data: { text: 'primo', context: living } }]);
+    ctx.focus.set(VOICE_USER, 'assist_satellite.living', 'chat-1');
+    const [focused] = await exchange(port, [{ type: 'transcript', data: { text: 'continua', context: living } }]);
+    expect(focused.data.text).toContain('history=4');   // the chat's history, not the window's
+    expect(ctx.externalChats.recordTurn).toHaveBeenCalledWith(expect.objectContaining({
+      userId: VOICE_USER, satellite: 'assist_satellite.living', chatId: 'chat-1', userText: 'continua',
+    }));
+    // Another satellite in the same hub conversation is not focused.
+    const [kitchen] = await exchange(port, [{ type: 'transcript', data: { text: 'cucina', context: { conversation_id: 'K', satellite_id: 'assist_satellite.kitchen' } } }]);
+    expect(kitchen.data.text).toContain('history=0');
+    // Focus ended: the hub's conversation A does not continue its earlier window.
+    ctx.focus.clear(VOICE_USER, 'assist_satellite.living', Date.now() + 1);
+    const [after] = await exchange(port, [{ type: 'transcript', data: { text: 'nuova', context: living } }]);
+    expect(after.data.text).toContain('history=0');
     await ctx.svc.onModuleDestroy();
   });
 

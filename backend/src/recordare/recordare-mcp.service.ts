@@ -22,7 +22,7 @@
  */
 import { Injectable, Logger } from '@nestjs/common';
 import { DynamicStructuredTool } from '@langchain/core/tools';
-import { type Tool } from './client';
+import { type Tool } from '@arkimedehq/recordare-client';
 import { recordareClient } from './recordare.config';
 import { RecordareOutboxService } from './recordare-outbox.service';
 

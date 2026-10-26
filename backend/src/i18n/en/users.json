@@ -8,5 +8,6 @@
   "cannotDisableOwnAccount": "You cannot disable your own account.",
   "cannotDeleteOwnAccount": "You cannot delete your own account.",
   "memoryNotEmpty": "The memory mode can only be changed while the memory is empty.",
-  "episodicMemoryOff": "Turn on episodic memory first."
+  "episodicMemoryOff": "Turn on episodic memory first.",
+  "memoryEraseFailed": "Account not deleted: its episodic memory (Recordare) could not be erased. Try again later."
 }

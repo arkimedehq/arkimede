@@ -6,7 +6,7 @@
  *
  * Recordare (external episodic memory / digital-twin service) — configuration and
  * the one client every Recordare component uses: the shared client library
- * (`./client`, synced from Recordare's packages/client — never edited here).
+ * (npm `@arkimedehq/recordare-client`).
  *
  * OFF unless both RECORDARE_URL and RECORDARE_API_KEY are set: then nothing is
  * enqueued, no worker runs, no tool is offered — Arkimede behaves as before.
@@ -16,7 +16,7 @@
  */
 import { context, propagation } from '@opentelemetry/api';
 import { HttpHostPolicy, safeFetch } from '../common/ssrf-guard';
-import { RecordareClient } from './client';
+import { RecordareClient } from '@arkimedehq/recordare-client';
 
 export interface RecordareConfig {
   /** Base URL without trailing slash (e.g. http://recordare:8080). */
