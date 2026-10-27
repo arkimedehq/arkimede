@@ -38,6 +38,7 @@ import {LlmProviderService} from '../app-config/llm-provider.service';
 import {User} from '../users/users.entity';
 import {Project} from '../projects/projects.entity';
 import {ToolManifest, ToolSelectionService} from './tool-selection.service';
+import {BaseCallbackHandler} from '@langchain/core/callbacks/base';
 import {FeedbackService} from '../feedback/feedback.service';
 import { type MemoryUse, UserMemoryService } from '../user-memory/user-memory.service';
 import {FlowsService} from '../flows/flows.service';
@@ -73,7 +74,18 @@ export interface StreamResponseOptions {
   llmConfigId?: string;
   /** Agent.memoryContext: append the user's relevant memories from Recordare to the system prompt. */
   memoryContext?: boolean;
+  /**
+   * Progress of the run, for callers that show it (the chat): a model call starts,
+   * the model starts writing a tool call's arguments (and how much it has written),
+   * the model starts writing text. Fires before the step ends, unlike onToolCall.
+   */
+  onProgress?: (event: AgentProgressEvent) => void;
 }
+
+export type AgentProgressEvent =
+  | { type: 'model_start' }
+  | { type: 'tool_preparing'; name: string; argsChars: number }
+  | { type: 'text' };
 
 @Injectable()
 export class AgentService implements OnModuleInit {
@@ -240,7 +252,7 @@ export class AgentService implements OnModuleInit {
     // The deltas are standardized by LangChain in message.tool_call_chunks: we
     // accumulate them per chunk index and resolve them by tool_call_id when the
     // ToolMessage arrives, so onToolResult can expose the real input.
-    const toolArgsAcc = new Map<number | string, { id?: string; args: string }>();
+    const toolArgsAcc = new Map<number | string, { id?: string; name?: string; args: string }>();
     const takeToolArgs = (callId: string | undefined): any => {
       if (!callId) return undefined;
       for (const [key, acc] of toolArgsAcc) {
@@ -251,6 +263,28 @@ export class AgentService implements OnModuleInit {
       }
       return undefined;
     };
+
+    // ── Progress (opts.onProgress) ────────────────────────────────────────────
+    // A model call starting is only visible through the callbacks (the stream yields
+    // nothing until the model sends its first token); the rest comes from the chunks.
+    const onProgress = opts?.onProgress;
+    const progress = (event: AgentProgressEvent): void => {
+      try { onProgress?.(event); } catch { /* display only: never breaks the run */ }
+    };
+    // Only the agent's own calls count as steps: a model called inside a tool (a
+    // sub-agent, a flow) runs in the 'tools' node or in a nested graph namespace.
+    const modelStart = (metadata?: Record<string, unknown>): void => {
+      if (metadata?.langgraph_node === 'tools' || String(metadata?.langgraph_checkpoint_ns ?? '').includes('|')) return;
+      writingText = false;
+      progress({ type: 'model_start' });
+    };
+    const progressHandler = onProgress
+      ? BaseCallbackHandler.fromMethods({
+          handleChatModelStart: (_llm, _msgs, _runId, _parent, _extra, _tags, metadata) => modelStart(metadata),
+          handleLLMStart: (_llm, _prompts, _runId, _parent, _extra, _tags, metadata) => modelStart(metadata),
+        })
+      : null;
+    let writingText = false;
 
     try {
       // Scheduling class + attribution (P1-F2): the whole graph consumption runs
@@ -269,7 +303,10 @@ export class AgentService implements OnModuleInit {
           // buildModelForConfig must be re-passed via config. Direct invokes
           // (flows, custom tools, …) fire it from the instance instead — the
           // two paths are mutually exclusive, so each call is recorded once.
-          callbacks: Array.isArray((model as any).callbacks) ? (model as any).callbacks : undefined,
+          callbacks: [
+            ...(Array.isArray((model as any).callbacks) ? (model as any).callbacks : []),
+            ...(progressHandler ? [progressHandler] : []),
+          ],
         },
       );
 
@@ -286,8 +323,13 @@ export class AgentService implements OnModuleInit {
             const acc = toolArgsAcc.get(key) ?? { args: '' };
             if (c.id) acc.id = c.id;
             if (c.args) acc.args += c.args;
+            if (c.name) acc.name = c.name;
             toolArgsAcc.set(key, acc);
+            if (onProgress && acc.name) {
+              progress({ type: 'tool_preparing', name: acc.name, argsChars: acc.args.length });
+            }
           }
+          writingText = false;
         }
 
         // ToolMessages contain the raw results returned by the tools:
@@ -315,6 +357,13 @@ export class AgentService implements OnModuleInit {
         // With Anthropic, tool_use arrives as a block in the content array.
         // With DeepSeek/OpenAI-compatible providers, tool calls arrive in message.tool_calls
         // (not in the content blocks). We handle both formats.
+        const hasText = typeof message.content === 'string'
+          ? !!message.content
+          : Array.isArray(message.content) && message.content.some((b: any) => b.type === 'text' && b.text);
+        if (hasText && !writingText && onProgress) {
+          writingText = true;
+          progress({ type: 'text' });
+        }
         if (typeof message.content === 'string') {
           if (message.content) onChunk(message.content);
         } else if (Array.isArray(message.content)) {

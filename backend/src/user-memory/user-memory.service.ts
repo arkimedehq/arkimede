@@ -307,6 +307,20 @@ export class UserMemoryService {
     });
   }
 
+  /**
+   * The caller's own proposals still to confirm that were extracted from CHAT_ID:
+   * the chat shows them again when it is opened (they were sent only to the page
+   * that sent the message). Never another user's: memory is personal.
+   */
+  async pendingForChat(userId: string, chatId: string): Promise<MemoryProposal[]> {
+    const rows = await this.repo.find({
+      where: { userId, status: 'pending', sourceChatId: chatId },
+      select: { id: true, content: true },
+      order: { createdAt: 'ASC' },
+    });
+    return rows.map((r) => ({ id: r.id, content: r.content }));
+  }
+
   /** Confirms one or more pending facts (transitions to `confirmed`). */
   async confirm(userId: string, ids: string[]): Promise<void> {
     if (!ids.length) return;

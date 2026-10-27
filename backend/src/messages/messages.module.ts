@@ -12,11 +12,14 @@ import { AgentsModule } from '../agents/agents.module';
 import { FilesModule } from '../files/files.module';
 import { UserMemoryModule } from '../user-memory/user-memory.module';
 import { UsersModule } from '../users/users.module';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { ChatRunsService } from './chat-runs.service';
+import { ChatRunsController } from './chat-runs.controller';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Message]), ChatsModule, AgentModule, AgentsModule, FilesModule, UserMemoryModule, UsersModule],
-  providers: [MessagesService],
-  controllers: [MessagesController],
-  exports: [MessagesService],
+  imports: [TypeOrmModule.forFeature([Message]), ChatsModule, AgentModule, AgentsModule, FilesModule, UserMemoryModule, UsersModule, NotificationsModule],
+  providers: [MessagesService, ChatRunsService],
+  controllers: [MessagesController, ChatRunsController],
+  exports: [MessagesService, ChatRunsService],
 })
 export class MessagesModule {}

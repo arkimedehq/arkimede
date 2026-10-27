@@ -62,6 +62,8 @@ export interface Chat {
   totalOutputTokens?: number;
   /** True if the chat has content not yet seen (e.g. automation outcome). */
   unread?:    boolean;
+  /** Private chat: the messages written while it is on are private. */
+  isPrivate?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -80,6 +82,8 @@ export interface Message {
   /** Author of the user message (shared threads). null for assistant/system. */
   authorId?:   string | null;
   authorName?: string | null;
+  /** A person's message kept between them and the assistant (user messages). */
+  isPrivate?:  boolean;
   attachments?: {
     name:     string;
     fileId:   string;

@@ -10,8 +10,13 @@
  *   - Conversation search: own chats and chats of accessible projects only, external chats (voice / API) included
  *     like any chat; error turns stay searchable (they are kept out of Recordare only).
  *   - Tools: same names and arguments (one string `query`).
+ *   - Private memories (Recordare 0.5.0, its API.md §1/§2/§4): a private chat reaches the ingest with its messages
+ *     `private: true`, a later change goes out as the message's current flag, the Diary keeps the private marks and an
+ *     empty private list stays empty — against a stub Recordare, on the real outbox rows.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { createServer, type Server } from 'http';
+import type { AddressInfo } from 'net';
 import { In } from 'typeorm';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { startTestDb, type TestDb } from './_db';
@@ -25,6 +30,11 @@ import { Project } from '../../src/projects/projects.entity';
 import { ProjectTeam } from '../../src/projects/project-team.entity';
 import { UserMemoryFts1785300000070 } from '../../src/database/migrations/1785300000070-UserMemoryFts';
 import { MessagesFts1785600000073 } from '../../src/database/migrations/1785600000073-MessagesFts';
+import { RecordareMemory1787200000090 } from '../../src/database/migrations/1787200000090-RecordareMemory';
+import { RecordareMessageSubscriber } from '../../src/recordare/recordare-message.subscriber';
+import { RecordareOutboxService } from '../../src/recordare/recordare-outbox.service';
+import { RecordareDiaryController } from '../../src/recordare/recordare-diary.controller';
+import { MessagesService } from '../../src/messages/messages.service';
 
 /** Pre-Recordare retrieval (ba089fc^): FTS leg, then the accessible notes among its ids. */
 const BASELINE_FTS = `SELECT "id" FROM "user_memory"
@@ -146,5 +156,87 @@ describe('memory tools as before Recordare (6.4)', () => {
       expect(schema.properties[schema.required[0]!]!.type).toBe('string');
     }
     expect(svc.buildMemoryTools(ana).map((t) => t.name)).toEqual(tools.map((t) => t.name));
+  });
+});
+
+describe('private memories reach Recordare (0.5.0)', () => {
+  /** Stub Recordare: records the requests, answers the Diary reads from `diary`. */
+  const requests: Array<{ method: string; path: string; body: any }> = [];
+  const diary: Record<string, unknown> = {};
+  let stub: Server;
+  let carla: string, privateChat: string, publicChat: string;
+
+  beforeAll(async () => {
+    stub = createServer((req, res) => {
+      let raw = '';
+      req.on('data', (c) => { raw += c; });
+      req.on('end', () => {
+        const path = req.url!.split('?')[0]!;
+        requests.push({ method: req.method!, path, body: raw ? JSON.parse(raw) : undefined });
+        const json = (status: number, body?: unknown) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(body === undefined ? '' : JSON.stringify(body)); };
+        if (path === '/api/v1/ingest/messages') return json(200, { conversationId: 'conv', accepted: JSON.parse(raw).messages.length, duplicates: 0, conflicts: [] });
+        if (req.method === 'PATCH') return json(204);
+        if (path === '/api/v1/me') return json(200, { memoryId: 'mem-carla', displayName: 'Carla' });
+        if (path in diary) return json(200, diary[path]);
+        json(404);
+      });
+    });
+    await new Promise<void>((r) => stub.listen(0, '127.0.0.1', r));
+    process.env.RECORDARE_URL = `http://127.0.0.1:${(stub.address() as AddressInfo).port}`;
+    process.env.RECORDARE_API_KEY = 'rk_regression';
+
+    const ds = db.dataSource;
+    await new RecordareMemory1787200000090().up(ds.createQueryRunner());
+    new RecordareMessageSubscriber(ds);
+    const users = ds.getRepository(User);
+    carla = (await users.save(users.create({ email: 'carla@mem.local', name: 'Carla', password: 'x', episodicMemoryEnabled: true }))).id;
+    const chats = ds.getRepository(Chat);
+    privateChat = (await chats.save(chats.create({ title: 'Surprise', userId: carla, isPrivate: true }))).id;
+    publicChat = (await chats.save(chats.create({ title: 'Groceries', userId: carla }))).id;
+  });
+
+  afterAll(async () => {
+    delete process.env.RECORDARE_URL; delete process.env.RECORDARE_API_KEY;
+    await new Promise<void>((r) => stub.close(() => r()));
+  });
+
+  const outbox = () => new RecordareOutboxService(db.dataSource, { cachedMemoryId: () => undefined } as any);
+  const say = (chatId: string, role: 'user' | 'assistant', content: string, isPrivate = false) =>
+    db.dataSource.getRepository(Message).save({ chatId, role, content, authorId: role === 'user' ? carla : null, isPrivate });
+
+  it('a private chat is ingested with its person\'s messages private: true; a public one without the flag', async () => {
+    // Messages are saved with the chat's switch, as the chat stream does (MessagesController).
+    const mine = await say(privateChat, 'user', 'I am planning a surprise party for Marta', true);
+    const reply = await say(privateChat, 'assistant', 'I will keep it between us.');
+    const open = await say(publicChat, 'user', 'buy milk');
+    expect(await outbox().drain()).toMatchObject({ sent: 3, parked: 0 });
+
+    const ingests = requests.filter((r) => r.path === '/api/v1/ingest/messages').map((r) => r.body);
+    const priv = ingests.find((b) => b.conversation.externalId === privateChat)!;
+    expect(priv.messages.map((m: any) => [m.externalId, m.private])).toEqual([[mine.id, true], [reply.id, undefined]]);
+    const pub = ingests.find((b) => b.conversation.externalId === publicChat)!;
+    expect(pub.messages).toEqual([expect.not.objectContaining({ private: expect.anything() })]);
+    expect(pub.messages[0].externalId).toBe(open.id);
+  });
+
+  it('making a message public again goes out as its current flag', async () => {
+    const [mine] = await db.dataSource.getRepository(Message).find({ where: { chatId: privateChat, role: 'user' } });
+    requests.length = 0;
+    await new MessagesService(db.dataSource.getRepository(Message)).setPrivate({ id: privateChat, userId: carla }, mine!.id, carla, false);
+    expect(await outbox().drain()).toMatchObject({ sent: 1 });
+    expect(requests).toEqual([{ method: 'PATCH', path: `/api/v1/ingest/conversations/${privateChat}/messages/${mine!.id}`, body: { private: false } }]);
+    expect((await db.dataSource.getRepository(Message).findOneBy({ id: mine!.id }))!.isPrivate).toBe(false);
+  });
+
+  it('the Diary keeps whose a private memory is, and an empty private list stays empty', async () => {
+    const ctrl = new RecordareDiaryController(db.dataSource.getRepository(User), {} as any, {} as any);
+    diary['/api/v1/episodes'] = { items: [
+      { id: 'e1', content: 'Planning a surprise party for Marta', private: { by: ['Carla'] } },
+      { id: 'e2', content: 'Bought milk' },
+    ], nextCursor: null };
+    diary['/api/v1/private'] = [];
+    const episodes = await ctrl.episodes({ id: carla } as User);
+    expect(episodes.items.map((e) => e.private ?? null)).toEqual([{ by: ['Carla'] }, null]);
+    expect(await ctrl.privateItems({ id: carla } as User)).toEqual([]);
   });
 });

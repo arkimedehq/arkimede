@@ -11,8 +11,11 @@
  *     request), built from the CURRENT message rows (a message deleted meanwhile is
  *     simply dropped — its deletion row follows);
  *   - `delete_message` → `DELETE api/v1/ingest/conversations/{chat}/messages/{id}`;
- *   - `delete_conversation` → `DELETE api/v1/ingest/conversations/{chat}`.
- * 404 on a deletion counts as done. Idempotent by design: Recordare dedups on the
+ *   - `delete_conversation` → `DELETE api/v1/ingest/conversations/{chat}`;
+ *   - `message_privacy` → `PATCH …/conversations/{chat}/messages/{id} {private}` with the
+ *     message's CURRENT flag (a later change overtakes an earlier one; a message
+ *     deleted meanwhile is dropped).
+ * 404 on a deletion or a privacy change counts as done (Recordare never had it). Idempotent by design: Recordare dedups on the
  * message externalId (= Arkimede message id), so a resend never duplicates.
  *
  * Failures follow the library's delivery policy (afterFailure): exponential back-off
@@ -25,7 +28,7 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { APP_NAME } from '../config/app.config';
-import { afterFailure, type RecordareClient } from '@arkimedehq/recordare-client';
+import { afterFailure, RecordareHttpError, type RecordareClient } from '@arkimedehq/recordare-client';
 import { recordareClient } from './recordare.config';
 import { IngestChat, IngestMessage, buildIngestBody } from './recordare-ingest.mapper';
 import type { OutboxOp } from './recordare-outbox';
@@ -108,7 +111,10 @@ export class RecordareOutboxService implements OnModuleInit, OnModuleDestroy {
     for (const [chatId, chatRows] of byChat) {
       const messageRows = chatRows.filter((r) => r.op === 'message');
       if (messageRows.length) await this.sendMessages(client, chatId, messageRows, result);
-      for (const r of chatRows.filter((x) => x.op !== 'message')) await this.sendDeletion(client, r, result);
+      for (const r of chatRows.filter((x) => x.op !== 'message')) {
+        if (r.op === 'message_privacy') await this.sendPrivacy(client, r, result);
+        else await this.sendDeletion(client, r, result);
+      }
     }
     return result;
   }
@@ -119,7 +125,7 @@ export class RecordareOutboxService implements OnModuleInit, OnModuleDestroy {
     const ids = rows.map((r) => r.messageId).filter((x): x is string => !!x);
     const messages: IngestMessage[] = chat
       ? await this.ds.query(
-        `SELECT "id", "role", "content", "toolCalls", "authorId", "createdAt" FROM "messages"
+        `SELECT "id", "role", "content", "toolCalls", "authorId", "createdAt", "isPrivate" FROM "messages"
           WHERE "chatId" = $1 AND "id" = ANY($2::uuid[])`, [chatId, ids])
       : [];
     if (!chat || !messages.length) {
@@ -155,6 +161,27 @@ export class RecordareOutboxService implements OnModuleInit, OnModuleDestroy {
     } catch (err) {
       await this.fail([row], err, result);
     }
+  }
+
+  private async sendPrivacy(client: RecordareClient, row: OutboxRow, result: DrainResult): Promise<void> {
+    const [message]: Array<{ isPrivate: boolean }> = await this.ds.query(
+      `SELECT "isPrivate" FROM "messages" WHERE "id" = $1 AND "chatId" = $2`, [row.messageId, row.chatId]);
+    if (!message) {
+      // Deleted meanwhile: its deletion row follows.
+      await this.remove([row.id]);
+      result.dropped += 1;
+      return;
+    }
+    try {
+      await client.setMessagePrivate(row.userId, row.chatId, row.messageId ?? '', message.isPrivate);
+    } catch (err) {
+      if (!(err instanceof RecordareHttpError && err.status === 404)) {
+        await this.fail([row], err, result);
+        return;
+      }
+    }
+    await this.remove([row.id]);
+    result.sent += 1;
   }
 
   private async remove(ids: string[]): Promise<void> {

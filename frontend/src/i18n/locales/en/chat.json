@@ -106,5 +106,28 @@
     "speak": "Read aloud",
     "stop": "Stop reading",
     "error": "Speech synthesis failed"
+  },
+  "run": {
+    "working": "{{app}} is working",
+    "step": "step {{step}}",
+    "chars": "{{chars}} characters",
+    "seconds": "{{seconds}} s",
+    "stop": "Stop",
+    "stopping": "Stopping…",
+    "phase": {
+      "starting": "Preparing the context",
+      "model": "Waiting for the model",
+      "preparing": "Preparing: {{tool}}",
+      "tool": "Using: {{tool}}",
+      "writing": "Writing the answer",
+      "team": "The agent team is working"
+    }
+  },
+  "private": {
+    "chatOn": "Private chat",
+    "chatOff": "Not private",
+    "chatTitle": "Private chat: what you write stays between you and the assistant. The episodic memory tells it only to you (and to the memory's holder).",
+    "messageOn": "Private message: click to make it public again",
+    "messageOff": "Make this message private (the replies that follow it too)"
   }
 }

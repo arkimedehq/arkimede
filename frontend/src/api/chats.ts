@@ -14,6 +14,9 @@ export const chatsApi = {
     api.patch<Chat>(`/chats/${id}/title`, { title }).then((r) => r.data),
   setAgentTeam: (id: string, agentTeamId: string | null) =>
     api.patch<Chat>(`/chats/${id}/agent-team`, { agentTeamId }).then((r) => r.data),
+  /** Private chat: the messages written while it is on are private. */
+  setPrivate: (id: string, isPrivate: boolean) =>
+    api.patch<{ id: string; isPrivate: boolean }>(`/chats/${id}/private`, { private: isPrivate }).then((r) => r.data),
   markRead: (id: string) => api.patch(`/chats/${id}/read`).then((r) => r.data),
   delete: (id: string) => api.delete(`/chats/${id}`).then((r) => r.data),
 };

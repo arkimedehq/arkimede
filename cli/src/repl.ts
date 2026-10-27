@@ -166,6 +166,7 @@ export async function runRepl(cfg: CliConfig, initialChat: Chat): Promise<void> 
     });
     rl.on('SIGINT', () => {
         if (streaming) {
+            chatsApi.cancelRun(cfg, chat.id).catch(() => undefined);
             streaming.abort();
         } else {
             rl.close();

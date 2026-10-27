@@ -2,8 +2,8 @@
 // Copyright © 2026 Andrea Genovese
 
 import {
-  Controller, Get, Post, Patch, Delete, Body, Param,
-  UseGuards, Inject,
+  Controller, Get, Post, Patch, Delete, Body, Param, Query,
+  UseGuards, Inject, ParseUUIDPipe,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsBoolean, ArrayNotEmpty, IsArray, IsString, IsUUID } from 'class-validator';
@@ -47,6 +47,13 @@ export class UserMemoryController {
   @ApiOperation({ summary: 'User memory list (confirmed + pending)' })
   list(@CurrentUser() user: any) {
     return this.memory.listAll(user.id);
+  }
+
+  /** The caller's proposals still to confirm that came from a chat (shown again when it opens). */
+  @Get('pending')
+  @ApiOperation({ summary: 'Own pending memory proposals extracted from a chat' })
+  async pending(@CurrentUser() user: any, @Query('chatId', ParseUUIDPipe) chatId: string) {
+    return { proposals: await this.memory.pendingForChat(user.id, chatId) };
   }
 
   /** On-demand extraction from the current chat → returns the pending proposals. */

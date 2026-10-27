@@ -6,7 +6,7 @@ import {
   UseGuards, HttpCode, HttpStatus, Inject,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { IsString, IsOptional } from 'class-validator';
+import { IsBoolean, IsString, IsOptional } from 'class-validator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ChatsService } from './chats.service';
@@ -23,6 +23,10 @@ class UpdateTitleDto {
 
 class SetAgentTeamDto {
   @IsOptional() @IsString() agentTeamId?: string | null;
+}
+
+class SetPrivateDto {
+  @IsBoolean() private: boolean;
 }
 
 @ApiTags('chats')
@@ -55,6 +59,12 @@ export class ChatsController {
   @Patch(':id/agent-team')
   setAgentTeam(@Param('id') id: string, @Body() dto: SetAgentTeamDto, @CurrentUser() user: any) {
     return this.service.setAgentTeam(id, user.id, dto.agentTeamId ?? null);
+  }
+
+  /** Private chat: the messages written while it is on are private (Message.isPrivate). */
+  @Patch(':id/private')
+  setPrivate(@Param('id') id: string, @Body() dto: SetPrivateDto, @CurrentUser() user: any) {
+    return this.service.setPrivate(id, user.id, dto.private);
   }
 
   /** Marks the chat as read (clears the "unread" badge in the sidebar). */

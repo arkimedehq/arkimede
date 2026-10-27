@@ -23,7 +23,7 @@ import { RecordareMcpService } from '../../src/recordare/recordare-mcp.service';
 import { RecordareDiaryController } from '../../src/recordare/recordare-diary.controller';
 import {
   enqueueRecordareMessage, enqueueRecordareMessageDeletes, enqueueRecordareConversationDelete,
-  withoutRecordareIngest,
+  enqueueRecordareMessagePrivacy, withoutRecordareIngest,
 } from '../../src/recordare/recordare-outbox';
 import { buildIngestBody, clipUtf8 } from '../../src/recordare/recordare-ingest.mapper';
 import { GenAiTraceHandler, setRecordareMemoryResolver } from '../../src/observability/genai-trace.handler';
@@ -410,6 +410,18 @@ describe('outbox enqueue', () => {
     expect(r.calls[0].params).toEqual(['c1', ['m1', 'm2']]);
     expect(r.calls[1].sql).toMatch(/'delete_conversation'/);
   });
+
+  it('privacy changes are enqueued like deletions (switch on, or provisioned), never when not configured', async () => {
+    const r = fakeRunner();
+    await enqueueRecordareMessagePrivacy(r, 'c1', 'm1');
+    expect(r.calls[0].sql).toMatch(/'message_privacy'/);
+    expect(r.calls[0].sql).toMatch(/"recordareMemoryId" IS NOT NULL/);
+    expect(r.calls[0].params).toEqual(['c1', 'm1']);
+    configure(false);
+    const off = fakeRunner();
+    await enqueueRecordareMessagePrivacy(off, 'c1', 'm1');
+    expect(off.calls).toHaveLength(0);
+  });
 });
 
 // ── Outbox: worker ──────────────────────────────────────────────────────────
@@ -431,6 +443,7 @@ function fakeDb() {
         return outbox.filter((r) => !r.parkedAt && r.due && (!p[1] || r.chatId === p[1])).slice(0, p[0]);
       }
       if (/FROM "chats"/.test(sql)) return chats[p[0]] ? [chats[p[0]]] : [];
+      if (/^\s*SELECT "isPrivate" FROM "messages"/.test(sql)) return messages.filter((m) => m.id === p[0] && m.chatId === p[1]);
       if (/FROM "messages"/.test(sql)) return messages.filter((m) => m.chatId === p[0] && p[1].includes(m.id));
       if (/FROM "users"/.test(sql)) return users.filter((u) => p[0].includes(u.id));
       if (/^\s*DELETE FROM "recordare_outbox"/.test(sql)) { for (const id of p[0]) outbox.splice(outbox.findIndex((r) => r.id === id), 1); return []; }
@@ -522,6 +535,45 @@ describe('RecordareOutboxService', () => {
     ]);
   });
 
+  it('a private message is sent private; the reply is left to Recordare (it follows the person\'s message)', async () => {
+    const db = fakeDb();
+    db.messages[0].isPrivate = true;
+    db.add({ userId: 'u1', chatId: 'c1', messageId: 'm1', op: 'message' });
+    db.add({ userId: 'u1', chatId: 'c1', messageId: 'm2', op: 'message' });
+    await new RecordareOutboxService(db.ds, noIdentity).drain();
+    const body = seen.find((s) => s.path === '/api/v1/ingest/messages')!.body;
+    expect(body.messages.map((m: any) => [m.externalId, m.private])).toEqual([['m1', true], ['m2:tool:0', undefined], ['m2', undefined]]);
+    expect(body.conversation.private).toBeUndefined();
+  });
+
+  it('a privacy change sends the message\'s CURRENT flag after its ingest; 404 and a deleted message are done', async () => {
+    respond = (s) => (s.method === 'PATCH' && s.path.endsWith('/messages/m2') ? { status: 404 } : (s.method === 'PATCH' ? { status: 204 } : undefined));
+    const db = fakeDb();
+    db.messages[0].isPrivate = false;   // made private, then public again: the last word wins
+    db.add({ userId: 'u1', chatId: 'c1', messageId: 'm1', op: 'message_privacy' });
+    db.add({ userId: 'u1', chatId: 'c1', messageId: 'm1', op: 'message' });
+    db.add({ userId: 'u1', chatId: 'c1', messageId: 'm2', op: 'message_privacy' });
+    db.add({ userId: 'u1', chatId: 'c1', messageId: 'gone', op: 'message_privacy' });
+    const res = await new RecordareOutboxService(db.ds, noIdentity).drain();
+    expect(res).toMatchObject({ sent: 3, dropped: 1, retried: 0, parked: 0 });
+    expect(db.outbox).toHaveLength(0);
+    expect(seen.map((s) => `${s.method} ${s.path}`)).toEqual([
+      'POST /api/v1/ingest/messages',
+      'PATCH /api/v1/ingest/conversations/c1/messages/m1',
+      'PATCH /api/v1/ingest/conversations/c1/messages/m2',
+    ]);
+    expect(seen[1]!.body).toEqual({ private: false });
+    expect(seen[1]!.headers['x-recordare-user']).toBe('u1');
+  });
+
+  it('a privacy change is retried on outage', async () => {
+    respond = (s) => (s.method === 'PATCH' ? { status: 503 } : undefined);
+    const db = fakeDb();
+    db.add({ userId: 'u1', chatId: 'c1', messageId: 'm1', op: 'message_privacy' });
+    expect(await new RecordareOutboxService(db.ds, noIdentity).drain()).toMatchObject({ retried: 1, sent: 0 });
+    expect(db.outbox[0]).toMatchObject({ attempts: 1, parkedAt: null });
+  });
+
   it('does nothing when Recordare is not configured', async () => {
     configure(false);
     const db = fakeDb();
@@ -566,6 +618,20 @@ describe('ingest mapper', () => {
       { ref: 'assistant', role: 'assistant', displayName: 'Arkimede' },
       { ref: 'user:marta', role: 'other', displayName: 'Marta', identity: { externalUserId: 'marta' } },
       { ref: 'user:luca', role: 'other', identity: { externalUserId: 'luca' } },
+    ]);
+  });
+
+  it('marks a person\'s private message (owner or other author), never the assistant\'s', () => {
+    const body = buildIngestBody(
+      { id: 'c', title: null, userId: 'andrea', externalSource: null },
+      [{ id: 'a', role: 'user', content: 'between us', toolCalls: null, authorId: 'andrea', createdAt: new Date(0), isPrivate: true },
+       { id: 'b', role: 'assistant', content: 'sure', toolCalls: null, authorId: null, createdAt: new Date(1), isPrivate: false },
+       { id: 'c1', role: 'user', content: 'mine too', toolCalls: null, authorId: 'marta', createdAt: new Date(2), isPrivate: true },
+       { id: 'd', role: 'user', content: 'public', toolCalls: null, authorId: 'andrea', createdAt: new Date(3), isPrivate: false }],
+      new Map(), 'Arkimede',
+    );
+    expect(body.messages.map((m) => [m.externalId, m.role, m.private])).toEqual([
+      ['a', 'user', true], ['b', 'assistant', undefined], ['c1', 'other', true], ['d', 'user', undefined],
     ]);
   });
 
@@ -679,6 +745,29 @@ describe('RecordareDiaryController (Settings → Diary)', () => {
     await expect(new RecordareDiaryController(users(true)).episodes({ id: 'u1' } as any)).rejects.toMatchObject({ status: 503 });
     configure(false);
     await expect(new RecordareDiaryController(users(true)).episodes({ id: 'u1' } as any)).rejects.toMatchObject({ status: 503 });
+  });
+
+  it('passes the private marks through and lists the hidden private memories, as the logged-in user', async () => {
+    const notes = [{ id: 'n1', content: 'Marta is planning a surprise', private: { by: ['Marta'] } }, { id: 'n2', content: 'likes tea' }];
+    const hidden = [{ kind: 'episode', id: 'e9', by: ['Luca'], recordedAt: '2026-10-27T10:00:00Z' }];
+    respond = (s) => (s.path.startsWith('/api/v1/notes') ? { status: 200, body: notes }
+      : s.path === '/api/v1/private' ? { status: 200, body: hidden } : undefined);
+    expect(await new RecordareDiaryController(users(true)).notes({ id: 'u1' } as any)).toEqual(notes);
+    expect(await new RecordareDiaryController(users(true)).privateItems({ id: 'u1' } as any)).toEqual(hidden);
+    expect(seen.find((s) => s.path === '/api/v1/private')!.headers['x-recordare-user']).toBe('u1');
+  });
+
+  it('copies a private note into the personal memory only, never a team or the org', async () => {
+    const note = { id: 'n1', content: 'Marta is planning a surprise', category: 'knowledge', status: 'current', pending: false, private: { by: ['Marta'] } };
+    respond = (s) => (s.path === '/api/v1/notes/n1' ? { status: 200, body: note } : undefined);
+    const memory = { copyRecordareNote: vi.fn(async () => ({ id: 'copy-1' })) };
+    const audit = { record: vi.fn(async () => undefined) };
+    const ctrl = new RecordareDiaryController(users(true), memory as any, audit as any);
+    const admin = { id: 'u1', role: 'admin', email: 'a@x' } as any;
+    await expect(ctrl.copy(admin, 'n1', { scope: 'org' })).rejects.toMatchObject({ status: 409 });
+    await expect(ctrl.copy(admin, 'n1', { scope: 'team', teamId: '11111111-1111-4111-8111-111111111111' })).rejects.toMatchObject({ status: 409 });
+    expect(memory.copyRecordareNote).not.toHaveBeenCalled();
+    await expect(ctrl.copy(admin, 'n1', { scope: 'personal' })).resolves.toEqual({ id: 'copy-1' });
   });
 
   it('reads the cards (who the user is, the people they know) as the logged-in user', async () => {

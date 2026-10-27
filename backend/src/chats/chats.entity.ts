@@ -47,6 +47,13 @@ export class Chat {
   unread: boolean;
 
   /**
+   * Private chat: the messages written while it is on are private
+   * (Message.isPrivate). PATCH /chats/:id/private.
+   */
+  @Column({ type: 'boolean', default: false })
+  isPrivate: boolean;
+
+  /**
    * External entry point that produced the chat ('wyoming' | 'api'), null for
    * chats created in the app. Set only when the entry point persists its
    * conversations (see ExternalChatsService); the chat is otherwise a normal one.

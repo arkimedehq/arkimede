@@ -91,6 +91,14 @@ export class Message {
   @Column({ type: 'uuid', nullable: true, default: null })
   authorId: string | null;
 
+  /**
+   * A person's message kept between them and the assistant (written in a private
+   * chat, or marked afterwards by its author). Passed on to the episodic memory,
+   * when configured, which tells it only to them.
+   */
+  @Column({ type: 'boolean', default: false })
+  isPrivate: boolean;
+
   @CreateDateColumn()
   createdAt: Date;
 }

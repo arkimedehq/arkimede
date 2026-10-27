@@ -117,6 +117,13 @@ export class ChatsService {
     return { ok: true };
   }
 
+  /** Turns the private switch on or off; whoever may write in the chat (each one's messages stay their own). */
+  async setPrivate(id: string, userId: string, isPrivate: boolean) {
+    await this.findOneForWrite(id, userId);
+    await this.repo.update(id, { isPrivate });
+    return { id, isPrivate };
+  }
+
   async updateTitle(id: string, userId: string, title: string) {
     await this.findOneAsAuthor(id, userId);
     await this.repo.update(id, { title });

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright © 2026 Andrea Genovese
 
-import {Body, Controller, Delete, Get, Inject, Logger, Param, Post, Req, Res, UseGuards,} from '@nestjs/common';
-import {Request, Response} from 'express';
+import {Body, Controller, Delete, Get, Inject, Logger, Param, ParseUUIDPipe, Patch, Post, Res, UseGuards,} from '@nestjs/common';
+import {Response} from 'express';
 import {join, resolve, relative, sep, basename} from 'path';
 import {existsSync} from 'fs';
 import {ApiBearerAuth, ApiOperation, ApiTags} from '@nestjs/swagger';
-import {IsArray, IsOptional, IsString} from 'class-validator';
+import {IsArray, IsBoolean, IsOptional, IsString} from 'class-validator';
 import {JwtAuthGuard} from '../common/guards/jwt-auth.guard';
 import {CurrentUser} from '../common/decorators/current-user.decorator';
 import {MessagesService} from './messages.service';
@@ -16,12 +16,17 @@ import {MultiAgentService} from '../agents/multi-agent.service';
 import {FilesService} from '../files/files.service';
 import {UserMemoryService} from '../user-memory/user-memory.service';
 import { withoutRecordareIngest } from '../recordare/recordare-outbox';
+import { ChatRunsService, type ChatRunPatch } from './chat-runs.service';
+import type { AgentProgressEvent } from '../agent/agent.service';
 
 class SendMessageDto {
   @IsString() content: string;
   @IsOptional() @IsArray() attachments?: { name: string; fileId: string; mimeType: string; mode?: 'embed' | 'inline' | 'attachment' }[];
 }
 
+class SetPrivateDto {
+  @IsBoolean() private: boolean;
+}
 
 @ApiTags('messages')
 @ApiBearerAuth()
@@ -35,6 +40,7 @@ export class MessagesController {
     @Inject(MultiAgentService) private readonly multiAgent: MultiAgentService,
     @Inject(FilesService) private readonly filesService: FilesService,
     @Inject(UserMemoryService) private readonly userMemoryService: UserMemoryService,
+    @Inject(ChatRunsService) private readonly runs: ChatRunsService,
   ) {}
 
   @Get()
@@ -60,13 +66,24 @@ export class MessagesController {
     return { deletedCount: deletedIds.length };
   }
 
+  @Patch(':messageId/private')
+  @ApiOperation({ summary: 'Make one of your own messages private, or public again' })
+  async setPrivate(
+    @Param('chatId', ParseUUIDPipe) chatId: string,
+    @Param('messageId', ParseUUIDPipe) messageId: string,
+    @Body() dto: SetPrivateDto,
+    @CurrentUser() user: any,
+  ) {
+    const chat = await this.chatsService.findOneForWrite(chatId, user.id);
+    return this.messagesService.setPrivate(chat, messageId, user.id, dto.private);
+  }
+
   @Post('stream')
   @ApiOperation({ summary: 'Send message — SSE streaming response' })
   async streamMessage(
     @Param('chatId') chatId: string,
     @Body() dto: SendMessageDto,
     @CurrentUser() user: any,
-    @Req() req: Request,
     @Res() res: Response,
   ) {
     // SSE headers — sent immediately before any processing
@@ -78,19 +95,28 @@ export class MessagesController {
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.flushHeaders();
 
+    // The run is NOT tied to this connection: when the page reloads or closes, the
+    // stream stops but the agent goes on, saves its answer, and any page that opens
+    // the chat follows it through ChatRunsService (socket `chat_run`, GET .../run).
+    // Stopping it is explicit: POST /api/chats/:chatId/run/cancel.
+    // (A disconnect shows on `res`, not `req`: by the time the handler runs, the
+    // JSON body has been read and `req` has already closed.)
+    let clientOpen = true;
+    res.on('close', () => { clientOpen = false; });
     const send = (data: object) => {
+      if (!clientOpen) return;
       res.write(`data: ${JSON.stringify(data)}\n\n`);
       // force flush on Node.js HTTP
       (res as any).flush?.();
     };
-
-    // AbortController tied to the lifetime of the SSE connection.
-    // When the client closes the tab/navigates away, 'close' fires
-    // and the signal interrupts LangGraph + the LLM call.
-    const abortCtrl = new AbortController();
-    req.on('close', () => {
-      if (!abortCtrl.signal.aborted) abortCtrl.abort();
-    });
+    let run: { runId: string; signal: AbortSignal } | null = null;
+    let savedMessageId: string | null = null;
+    // Generated output files (skills/sandbox) tracked during this turn → appended to
+    // the assistant message's attachments so they surface in the chat/project file
+    // panel (findByChatId reads message.attachments), even for chats without a project.
+    // Declared here so that an error turn keeps the files made before the error.
+    const outputAttachments: { name: string; fileId: string; mimeType: string }[] = [];
+    const outputTracking: Promise<void>[] = [];
 
     // Immediate heartbeat — confirms that the SSE channel is open
     send({ type: 'connected' });
@@ -99,6 +125,21 @@ export class MessagesController {
       // Write: the chat's author OR a collaborator/owner of the project
       // the chat belongs to (shared threads). Viewer and non-members → 403.
       const chat = await this.chatsService.findOneForWrite(chatId, user.id);
+
+      // One run per chat: a second message while the agent is still answering would
+      // interleave two answers in the same history.
+      run = this.runs.start(chatId);
+      if (!run) {
+        send({ type: 'error', code: 'busy', message: 'The agent is still answering the previous message in this chat.' });
+        send({ type: 'done', messageId: null });
+        return;
+      }
+      const runId = run.runId;
+      // Progress for the watchers (socket) and for this page (SSE 'progress').
+      const progress = (patch: ChatRunPatch): void => {
+        const state = this.runs.update(chatId, runId, patch);
+        if (state) send({ type: 'progress', run: state });
+      };
 
       // Load the history BEFORE saving the current message: this way `history`
       // contains only the previous turns and the current message (dto.content)
@@ -112,6 +153,7 @@ export class MessagesController {
         content: dto.content,
         attachments: dto.attachments || [],
         authorId: user.id, // who wrote the turn (shared threads)
+        isPrivate: chat.isPrivate, // written in a private chat
       });
 
       // The title auto-derived from the first message is set only by the chat's
@@ -127,6 +169,7 @@ export class MessagesController {
       // token usage is not tracked — future improvement.)
       if (chat.agentTeamId) {
         send({ type: 'agent_team_start', teamId: chat.agentTeamId });
+        progress({ phase: 'team' });
         try {
           const result = await this.multiAgent.runTeamById(
             chat.agentTeamId, user.id, dto.content, chat.projectId ?? undefined,
@@ -144,6 +187,7 @@ export class MessagesController {
             provider: result.provider ?? null,
             model:    result.model    ?? null,
           });
+          savedMessageId = assistantMsg.id;
           await this.chatsService.touch(chatId);
           send({
             type: 'done', messageId: assistantMsg.id,
@@ -153,7 +197,6 @@ export class MessagesController {
         } catch (teamErr: any) {
           send({ type: 'error', message: teamErr?.message ?? 'Team execution error' });
         }
-        res.end();
         return;
       }
 
@@ -210,11 +253,6 @@ export class MessagesController {
         durationMs?: number;
       };
       const toolCallRecords: ToolCallRecord[] = [];
-      // Generated output files (skills/sandbox) tracked during this turn → appended to
-      // the assistant message's attachments so they surface in the chat/project file
-      // panel (findByChatId reads message.attachments), even for chats without a project.
-      const outputAttachments: { name: string; fileId: string; mimeType: string }[] = [];
-      const outputTracking: Promise<void>[] = [];
       const seenOutputIds = new Set<string>();
       const mimeForName = (n: string): string => {
         const ext = n.toLowerCase().split('.').pop() ?? '';
@@ -255,8 +293,9 @@ export class MessagesController {
         (toolCall: any) => {
           toolCallRecords.push({ name: toolCall?.name ?? '', input: toolCall?.input, startedAt: Date.now() });
           send({ type: 'tool_call', toolCall });
+          progress({ phase: 'tool', tool: toolCall?.name ?? null });
         },
-        abortCtrl.signal,
+        run.signal,
         // onToolResult — (1) records output/status on the corresponding tool call,
         // (2) recursively scans the result to emit SSE 'file' events.
         // For each string that resolves to an existing file inside UPLOAD_DIR
@@ -273,6 +312,8 @@ export class MessagesController {
             if (input !== undefined) record.input = truncateOutput(input);
           }
           send({ type: 'tool_result', name: toolName, ok: status !== 'error', ...(input !== undefined ? { input: truncateOutput(input) } : {}) });
+          const done = this.runs.toolDone(chatId, runId, { tool: toolName, ok: status !== 'error', durationMs: record?.durationMs });
+          if (done) send({ type: 'progress', run: done });
 
           const seen = new Set<string>();
           // Captures for output tracking (C2 access-aware download): `this`
@@ -303,6 +344,8 @@ export class MessagesController {
                 if (fileId && !seenOutputIds.has(fileId)) {
                   seenOutputIds.add(fileId);
                   outputAttachments.push({ name, fileId, mimeType: mimeForName(name) });
+                  // Pages following the run (reload, another tab) get the download too.
+                  this.runs.fileReady(chatId, runId, { name, fileId, downloadUrl: `/api/files/${fileId}/download` });
                 }
                 send({
                   type: 'file', name,
@@ -362,6 +405,13 @@ export class MessagesController {
 
           walk(result);
         },
+        {
+          onProgress: (event: AgentProgressEvent) => {
+            if (event.type === 'model_start') progress({ phase: 'model', tool: null, nextStep: true });
+            else if (event.type === 'tool_preparing') progress({ phase: 'preparing', tool: event.name, argsChars: event.argsChars });
+            else progress({ phase: 'writing', tool: null });
+          },
+        },
       );
 
       // Let the output-tracking (trackOutput → File) settle so the generated files
@@ -381,8 +431,12 @@ export class MessagesController {
         provider: usage?.provider ?? null,
         model:    usage?.model    ?? null,
       });
+      savedMessageId = assistantMsg.id;
 
       await this.chatsService.touch(chatId);
+      // The answer is saved: the watching pages reload it now, without waiting for
+      // the memory extraction below (which only this page shows).
+      this.runs.finish(chatId, runId, savedMessageId);
 
       // ── Persistent user memory: automatic threshold-based extraction ────────────
       // If the user has enabled memory and enough new turns have accumulated,
@@ -393,6 +447,8 @@ export class MessagesController {
         const proposals = await this.userMemoryService.maybeExtractOnTurn(user.id, chat, fullHistory);
         if (proposals.length) {
           send({ type: 'memory_proposal', proposals });
+          // Also to the user's other pages (this one may have reloaded or left the chat).
+          this.runs.memoryProposals(user.id, chatId, proposals);
         }
       } catch (memErr) {
         new Logger('MessagesController').warn(
@@ -439,11 +495,15 @@ export class MessagesController {
       try {
         // Error turns are shown in the history but are not part of the conversation:
         // never sent to the episodic memory (Recordare).
+        // Files produced before the error stay attached to the turn (not orphaned).
+        await Promise.allSettled(outputTracking);
         const errMsg = await withoutRecordareIngest(() => this.messagesService.save({
           chatId,
           role:    'assistant',
           content: `⚠️ ${userMessage}`,
+          ...(outputAttachments.length ? { attachments: outputAttachments } : {}),
         }));
+        savedMessageId = errMsg.id;
         await this.chatsService.touch(chatId);
         // Dedicated error event + done with real messageId → the frontend reloads
         send({ type: 'error', code: errorCode, message: userMessage });
@@ -454,7 +514,8 @@ export class MessagesController {
         send({ type: 'done',  messageId: null });
       }
     } finally {
-      res.end();
+      if (run) this.runs.finish(chatId, run.runId, savedMessageId);
+      if (clientOpen) res.end();
     }
   }
 

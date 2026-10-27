@@ -16,7 +16,9 @@
  *     owner's memory, never a memory of its own).
  *   - message.externalId = Arkimede message id (stable → idempotent retries);
  *     the owner's turns are `user`, other humans' turns `other`, the assistant's
- *     `assistant`; each recorded tool call of an assistant message becomes a
+ *     `assistant`; a person's private message (Message.isPrivate) is sent
+ *     `private: true` — Recordare makes the replies that follow it private too
+ *     (its D52); each recorded tool call of an assistant message becomes a
  *     `tool` message `<messageId>:tool:<n>` (Recordare D30). `system` is never sent.
  */
 import type { ToolCallRecord } from '../messages/messages.entity';
@@ -38,6 +40,7 @@ export interface IngestMessage {
   toolCalls: ToolCallRecord[] | null;
   authorId: string | null;
   createdAt: Date;
+  isPrivate?: boolean;
 }
 
 /** Recordare's ingest request (the client library's contract). */
@@ -82,6 +85,7 @@ export function buildIngestBody(
       authorRef: byOwner ? 'holder' : `user:${m.authorId}`,
       content: clipUtf8(m.content),
       sentAt,
+      ...(m.isPrivate ? { private: true } : {}),
     });
   }
 

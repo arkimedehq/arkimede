@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright © 2026 Andrea Genovese
 
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Message } from './messages.entity';
-import { enqueueRecordareMessageDeletes } from '../recordare/recordare-outbox';
+import { enqueueRecordareMessageDeletes, enqueueRecordareMessagePrivacy } from '../recordare/recordare-outbox';
 
 @Injectable()
 export class MessagesService {
@@ -55,5 +55,19 @@ export class MessagesService {
     // Recordare (opt-in): propagate the rewind to the episodic memory (outbox; never throws).
     await enqueueRecordareMessageDeletes(this.repo.manager, chatId, toDelete);
     return toDelete;
+  }
+
+  /**
+   * Makes a person's message private or public again. Only whoever wrote it
+   * decides (its author; the chat owner for a message without one). The episodic
+   * memory, when configured, follows (outbox; never throws).
+   */
+  async setPrivate(chat: { id: string; userId: string }, messageId: string, userId: string, isPrivate: boolean) {
+    const message = await this.repo.findOne({ where: { id: messageId, chatId: chat.id }, select: { id: true, role: true, authorId: true } });
+    if (!message || message.role !== 'user') throw new NotFoundException('messages.notFound');
+    if ((message.authorId ?? chat.userId) !== userId) throw new ForbiddenException('messages.notYours');
+    await this.repo.update(message.id, { isPrivate });
+    await enqueueRecordareMessagePrivacy(this.repo.manager, chat.id, message.id);
+    return { id: message.id, isPrivate };
   }
 }

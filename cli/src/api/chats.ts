@@ -19,4 +19,8 @@ export const chatsApi = {
 
     remove: (cfg: CliConfig, chatId: string) =>
         apiFetch<{ deleted: boolean }>(cfg, `/api/chats/${chatId}`, {method: 'DELETE'}),
+
+    /** Stops the agent run in progress (closing the stream alone does not: the run goes on). */
+    cancelRun: (cfg: CliConfig, chatId: string) =>
+        apiFetch<{ cancelled: boolean }>(cfg, `/api/chats/${chatId}/run/cancel`, {method: 'POST'}),
 };

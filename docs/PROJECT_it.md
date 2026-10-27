@@ -803,7 +803,10 @@ lunghe e produceva `GraphRecursionError`. Flusso completo con diagrammi e tabell
   esistente → salvati come `pending`. Soglia = `User.memoryThreshold` (override) ?? `app_config.autoMemoryThreshold` (
   default globale 6)
 - **Estrazione on-demand**: pulsante "Aggiorna memoria" in chat → `POST /api/user-memory/extract`
-- **Conferma inline**: le proposte arrivano in chat via evento SSE `memory_proposal`; l'utente conferma/ignora ogni
+- **Conferma inline**: le proposte arrivano in chat via evento SSE `memory_proposal`, e alle altre pagine dell'utente sul
+  socket delle notifiche (`memory_proposal {chatId, proposals}`, solo a quell'utente: la memoria è personale, gli altri che
+  scrivono in una chat condivisa non le ricevono); una chat che si apre mostra di nuovo le proposte dell'utente ancora da
+  confermare nate lì (`GET /api/user-memory/pending?chatId=`). L'utente conferma/ignora ogni
   fatto (card in `ChatWindow`). I rifiutati vengono eliminati
 - **Iniezione**: i fatti `confirmed` entrano nel system prompt come blocco "cosa so dell'utente" a **livello utente**,
   dentro il prefisso **cacheato** (stabili → cambiano solo su conferma/modifica) — a differenza del feedback/summary che
@@ -860,11 +863,44 @@ risultato senza modificare il flusso dell'agente.
 | `tool_call`   | `{ toolCall: {...} }`               | Il LLM ha invocato un tool                    |
 | `tool_result` | `{ name: string, ok: boolean }`     | Un tool ha restituito un risultato (✓/✗ live) |
 | `file`        | `{ name: string, rel: string }` | Un tool ha prodotto un file su disco; `rel` = path per il download `?rel=` access-aware (`trackOutput` → `canAccess`) |
+| `progress`    | `{ run: ChatRunState }`             | Cosa sta facendo l'agente adesso (vedi sotto) |
 | `usage`       | `{ inputTokens, outputTokens }`     | Fine generazione                              |
+| `error`       | `{ code, message }`                 | `code: 'busy'` = la chat ha già un'esecuzione in corso (non viene salvato niente) |
 | `done`        | —                                   | Stream completato                             |
 
 `messages.controller.ts` passa `onToolResult` che scansiona ricorsivamente ogni risultato JSON: ogni stringa con `/` che
 si risolve in un file esistente dentro `UPLOAD_DIR` genera un evento `file`. URL HTTP e path `/api/…` sono ignorati.
+
+**Esecuzione in corso (`ChatRunsService`).** Ogni messaggio avvia un'*esecuzione* (run) dell'agente, una per chat,
+tenuta in memoria dal backend finché dura. L'esecuzione **non è legata alla connessione SSE**: se la pagina si ricarica
+o si chiude, si ferma solo lo stream; l'agente va avanti, salva la risposta e chiude l'esecuzione. Fermarla è un'azione
+esplicita: `POST /api/chats/:id/run/cancel` (lo chiamano il tasto Stop del web e `Esc`/`Ctrl+C` della CLI). Lo stato di
+un'esecuzione (`ChatRunState`):
+
+| Campo | Contenuto |
+|---|---|
+| `step` | chiamate al modello avviate finora (i passi dell'agente) |
+| `phase` | `starting` (contesto), `model` (chiamata al modello, ancora niente in streaming), `preparing` (il modello sta scrivendo gli argomenti di una chiamata a un tool), `tool` (un tool è in esecuzione), `writing` (la risposta), `team` (team di agenti) |
+| `tool`, `argsChars` | il tool in preparazione o in esecuzione; la dimensione degli argomenti scritti finora |
+| `startedAt`, `phaseSince` | inizio dell'esecuzione e della fase attuale |
+| `recent` | gli ultimi 10 tool conclusi (`tool`, `ok`, `durationMs`) |
+| `files` | i file prodotti finora (`name`, `fileId`, `downloadUrl`; gli ultimi 20): le pagine che seguono l'esecuzione li offrono in download prima che esista la risposta, tramite `/api/files/:id/download` e le sue regole di accesso |
+
+`streamResponse` segnala l'avanzamento con `opts.onProgress` (`model_start` dalle callback LangChain, prima del primo
+token; `tool_preparing` dai `tool_call_chunks` in streaming; `text`). Un modello chiamato dentro un tool non conta come
+passo. Lo stato arriva:
+
+- alla pagina che ha mandato il messaggio, come eventi SSE `progress`;
+- a ogni pagina che ha la chat aperta, sul socket delle notifiche: la pagina emette `watch {kind: 'chat', id}` e riceve
+  `chat_run {chatId, run}`; `run: null` (con `messageId`) = l'esecuzione è finita, si ricaricano i messaggi. Una pagina
+  che apre la chat legge lo stato attuale con `GET /api/chats/:id/run` (`{ run: ChatRunState | null }`).
+
+Seguire, leggere e fermare un'esecuzione richiede lo stesso accesso dell'invio di un messaggio (`findOneForWrite`:
+l'autore della chat, oppure owner/collaborator del suo progetto). Un secondo messaggio mentre un'esecuzione è in corso
+riceve `error` `busy`. I file prodotti da un'esecuzione si allegano alla sua risposta, o al messaggio d'errore se fallisce,
+così compaiono sempre nel pannello file della chat. Le esecuzioni di chat diverse sono indipendenti: più chat possono lavorare insieme (la pagina web
+si stacca dallo stream di una chat quando se ne apre un'altra, e al ritorno ne segue di nuovo l'esecuzione). Un riavvio
+del backend chiude le esecuzioni in corso (in memoria, di proposito).
 
 ### Tool filter dell'agente, wildcard & modello per-agente
 
@@ -1064,6 +1100,10 @@ POST   /api/chats                   ← in un progetto: serve write (collaborato
 GET    /api/chats/:id               ← include canWrite per l'utente corrente
 GET    /api/chats/:id/messages      ← lettura per autore o membro del progetto
 POST   /api/chats/:id/messages/stream   ← SSE; scrittura per autore o collaborator/owner del progetto
+GET    /api/chats/:id/run           ← l'esecuzione dell'agente in corso (null se ferma); stesso accesso dello stream
+POST   /api/chats/:id/run/cancel    ← la ferma (chiudere lo stream non basta)
+PATCH  /api/chats/:id/private       ← { private } interruttore chat privata; accesso in scrittura
+PATCH  /api/chats/:id/messages/:messageId/private  ← { private } solo l'autore del messaggio (messaggi utente)
 
 # File + RAG
 POST   /api/files/upload?projectId=     ← in un progetto serve write (collaborator/owner)
@@ -1394,13 +1434,33 @@ RECORDARE_OUTBOX_POLL_MS=3000         # opzionale
   richiesta; attesa limitata (2,5 s, il turno corrente inviato prima), non fa mai fallire la risposta. Utile dove conta la
   latenza (l'agente vocale): l'agente può rispondere senza un giro di strumento di memoria. Misurato nella WORK_PLAN 5.7
   di Recordare.
+- **Chat e messaggi privati** (Recordare ≥ 0.5.0; la regola e l'API: documentazione pubblica di Recordare,
+  `docs/API.md` §1, §2, §4 e `docs/INTEGRATION.md`, tag `v0.5.0`). Flag di Arkimede, mostrati solo quando la memoria
+  episodica dell'utente è accesa: `chats.isPrivate` (l'interruttore **Chat privata** sopra il campo di scrittura,
+  `PATCH /api/chats/:id/private`, chi può scrivere nella chat) e `messages.isPrivate` (un messaggio scritto con
+  l'interruttore acceso si salva privato; il suo autore lo rende privato o di nuovo pubblico col lucchetto sotto,
+  `PATCH /api/chats/:id/messages/:messageId/private`; mai il messaggio di un altro né quello dell'assistente). L'ingest
+  manda il messaggio privato di una persona con `private: true` (`recordare-ingest.mapper.ts`); Recordare rende private
+  anche le risposte e i turni tool che lo seguono. Un cambio successivo è una riga di outbox `message_privacy`: il worker
+  manda il flag **attuale** del messaggio (`PATCH …/messages/{id} {private}`, `setMessagePrivate` della libreria; il
+  messaggio di una persona si porta dietro le risposte), dopo l'ingest del messaggio stesso; 404 = fatto. Recordare
+  applica la regola in ogni lettura: un ricordo privato lo sa solo chi l'ha detto e, in una memoria personale, il
+  titolare (nel richiamo il lettore è l'autore dell'ultimo turno della conversazione). Si può anche chiederlo a parole
+  ("resti tra noi"): lo riconosce l'estrazione di Recordare, qui non serve altro.
 - **Diario** (Impostazioni → Diario, visibile quando Recordare è configurato): cosa ricorda Recordare dell'utente —
   linea del tempo (ricerca, dettaglio con i messaggi originali e le versioni precedenti, correggi, dimentica), il diario
   notturno del giorno / mese, chi è (fatti con storia, note: fissa, elimina), le persone che conosce (le schede di
   Recordare, `GET api/v1/cards`: di ogni contatto i fatti e le note attuali, gli alias, l'ultima volta che è stato citato),
   i piani e ciò che attende conferma (fatti e note dedotti: conferma / rifiuta). Proxy nel backend
   `api/recordare/diary/*` sulla API di lettura di Recordare, sempre per l'utente collegato (il browser non vede mai la
-  chiave di Recordare); per le modifiche la chiave richiede lo scope `write`.
+  chiave di Recordare); per le modifiche la chiave richiede lo scope `write`. Ricordi privati: in una memoria
+  **personale** episodi, fatti e note arrivano con `private: {by}` e mostrano l'etichetta 🔒 "privato di <nomi>" (senza
+  nome: chi l'ha detto non è identificato); una nota privata si copia solo nella A-MEM personale dell'utente (409
+  `recordare.notePrivate` per un team o l'organizzazione). In una memoria **entity** l'account legge solo quelli
+  pubblici: la scheda **Privati** elenca gli altri senza contenuto (`GET api/recordare/diary/private` → Recordare
+  `GET api/v1/private`, `privateItems` della libreria) come "un ricordo privato di <nomi>", con la sola azione Dimentica
+  (episodio: `forgetEpisode`; fatto / nota: `delete`). Il feed delle modifiche alle note dà `note: null` per una nota che
+  l'account non può leggere: le sue copie in A-MEM non si creano, e quella sostituita si toglie.
 - **Eliminazione dell'account** (Admin → Utenti → elimina): prima si cancella in Recordare l'intera memoria dell'account
   (`DELETE api/v1/me?confirm=<memoryId>`, la chiave richiede lo scope `erase`; prima ancora si tolgono le righe
   dell'outbox ancora da inviare, così niente la ricrea). Una memoria che Recordare non ha più conta come cancellata;
@@ -2043,8 +2103,9 @@ login e chat riusano esattamente i contratti del frontend — `POST
 /api/auth/login`, CRUD chat e lo stream SSE `POST
 /api/chats/:id/messages/stream` parsato dal body della risposta con `fetch`
 (stessi eventi `data: {json}`: `chunk`, `tool_call`, `tool_result`, `file`,
-`agent_step`, `memory_proposal`, `error`, `done`; chiudere la connessione
-annulla l'esecuzione lato server). Non esistono endpoint backend dedicati
+`agent_step`, `memory_proposal`, `error`, `done`; per fermarsi chiama `POST
+/api/chats/:id/run/cancel`, perché chiudere la connessione da sola lascia
+l'esecuzione in corso). Non esistono endpoint backend dedicati
 alla CLI.
 
 Due frontend sopra un layer API/core condiviso:

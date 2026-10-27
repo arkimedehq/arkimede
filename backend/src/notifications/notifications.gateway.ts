@@ -15,11 +15,17 @@
  *   skill_event  { type: 'skill_event', skill: string, event_type: string, payload: any }
  *   daemon_exit  { type: 'daemon_exit', daemon_id: string, skill_id: string }
  *
+ * Watching (client → server, with ack): `watch` / `unwatch` { kind, id }. A socket
+ * that watches `chat:<id>` receives the events emitted to that room (e.g.
+ * `chat_run`, the progress of an agent run). Whether a user may watch is decided by
+ * the authorizer the owning module registers for the kind (registerWatchable), so
+ * this gateway stays independent of chats, projects and their access rules.
+ *
  * A user can have multiple open tabs → multiple sockets for the same userId.
  * emitToUser() sends to ALL of the user's sockets (broadcast by userId).
  */
 import {
-  WebSocketGateway, WebSocketServer,
+  WebSocketGateway, WebSocketServer, SubscribeMessage, MessageBody, ConnectedSocket,
   OnGatewayConnection, OnGatewayDisconnect,
 } from '@nestjs/websockets';
 import { Injectable, Logger } from '@nestjs/common';
@@ -43,6 +49,8 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
   private readonly userSockets = new Map<string, Set<string>>();
   /** socketId → userId — for reverse lookup on disconnection */
   private readonly socketUser  = new Map<string, string>();
+  /** kind → may this user watch this id (registered by the module that owns the kind) */
+  private readonly watchables  = new Map<string, (userId: string, id: string) => Promise<boolean>>();
 
   constructor(
     private readonly jwtService: JwtService,
@@ -93,7 +101,56 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
     }
   }
 
+  // ── Watching (rooms) ───────────────────────────────────────────────────────
+
+  @SubscribeMessage('watch')
+  async handleWatch(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() body: { kind?: unknown; id?: unknown },
+  ): Promise<{ ok: boolean }> {
+    const room = await this.authorizedRoom(socket, body);
+    if (!room) return { ok: false };
+    await socket.join(room);
+    return { ok: true };
+  }
+
+  @SubscribeMessage('unwatch')
+  async handleUnwatch(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() body: { kind?: unknown; id?: unknown },
+  ): Promise<{ ok: boolean }> {
+    if (typeof body?.kind !== 'string' || typeof body?.id !== 'string') return { ok: false };
+    await socket.leave(`${body.kind}:${body.id}`);
+    return { ok: true };
+  }
+
+  private async authorizedRoom(socket: Socket, body: { kind?: unknown; id?: unknown }): Promise<string | null> {
+    const userId = this.socketUser.get(socket.id);
+    const kind = body?.kind, id = body?.id;
+    if (!userId || typeof kind !== 'string' || typeof id !== 'string' || id.length > 64) return null;
+    const authorize = this.watchables.get(kind);
+    if (!authorize) return null;
+    try {
+      return (await authorize(userId, id)) ? `${kind}:${id}` : null;
+    } catch {
+      return null;
+    }
+  }
+
   // ── Public API ─────────────────────────────────────────────────────────────
+
+  /**
+   * Lets sockets watch `<kind>:<id>` rooms; AUTHORIZE decides, per user and id, on
+   * every watch request (it should apply the same access rules as the HTTP routes).
+   */
+  registerWatchable(kind: string, authorize: (userId: string, id: string) => Promise<boolean>): void {
+    this.watchables.set(kind, authorize);
+  }
+
+  /** Sends an event to the sockets watching `<kind>:<id>` (silent when nobody is). */
+  emitToWatchers(kind: string, id: string, event: string, data: unknown): void {
+    this.server?.to(`${kind}:${id}`).emit(event, data);
+  }
 
   /**
    * Sends an event to ALL of the user's sockets.

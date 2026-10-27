@@ -21,6 +21,7 @@ import { io, Socket } from 'socket.io-client';
 import { useQueryClient } from '@tanstack/react-query';
 import { useStore } from '../store/useStore';
 import { notificationsApi } from '../api/notifications';
+import { attachChatRunSocket } from '../api/chatRuns';
 
 /** Derives the Socket.IO backend URL from the env or the current origin. */
 function getSocketUrl(): string {
@@ -61,6 +62,8 @@ export function useNotifications() {
     });
 
     socketRef.current = socket;
+    // The agent runs of the chats open on this page ride the same socket.
+    const detachChatRuns = attachChatRunSocket(socket);
 
     socket.on('connect_error', (err) => {
       console.warn('[notifications] connection error:', err.message);
@@ -125,6 +128,7 @@ export function useNotifications() {
     });
 
     return () => {
+      detachChatRuns();
       socket.disconnect();
       socketRef.current = null;
     };

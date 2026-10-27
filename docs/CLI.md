@@ -66,8 +66,10 @@ pane, an input bar and a status line.
 The assistant reply streams live; tool invocations show up as compact
 `⚙ tool` / `✓ tool` status lines, files produced by skills are listed with
 their download URL, and multi-agent chats render per-agent `◆` blocks with
-`agent_step` events. Stopping generation simply aborts the HTTP connection —
-the backend cancels the run when the client disconnects.
+`agent_step` events. Stopping generation (`Esc`, or `Ctrl+C` in the REPL) asks
+the backend to stop the run (`POST /api/chats/:id/run/cancel`) and closes the
+stream: closing the connection alone would leave the agent working, since a run
+outlives the client that started it.
 
 ## The settings panel
 

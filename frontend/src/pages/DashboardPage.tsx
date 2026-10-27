@@ -30,7 +30,9 @@ export default function DashboardPage() {
           {activeView === 'settings' ? (
             <SettingsPage />
           ) : activeChatId ? (
-            <ChatWindow chatId={activeChatId} />
+            // One window per chat: leaving a chat detaches it from its stream (the run goes
+            // on and is followed again on return), so several chats can be working at once.
+            <ChatWindow key={activeChatId} chatId={activeChatId} />
           ) : (
             <WelcomeScreen />
           )}

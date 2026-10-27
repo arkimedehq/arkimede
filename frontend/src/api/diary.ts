@@ -4,6 +4,12 @@
 /** The user's Diary: what Recordare remembers about them (backend proxy /api/recordare/diary). */
 import api from './client';
 
+/** On a private memory only (personal memory): whose it is; empty = whoever said it is not identified. */
+export interface DiaryPrivateMark { by: string[] }
+
+/** A private memory an entity memory's account may not read: that it exists and whose it is, never its content. */
+export interface DiaryPrivateItem { kind: 'episode' | 'fact' | 'note'; id: string; by: string[]; recordedAt: string }
+
 export type PlanStatus = 'open' | 'confirmed' | 'cancelled' | 'rescheduled' | 'unresolved';
 
 export interface DiaryEpisode {
@@ -23,6 +29,7 @@ export interface DiaryEpisode {
   inferred: boolean;
   corrected: boolean;
   recordedAt: string;
+  private?: DiaryPrivateMark;
 }
 
 export interface DiaryEpisodeDetail extends DiaryEpisode {
@@ -44,6 +51,7 @@ export interface DiaryFact {
   pending: boolean;
   inferred: boolean;
   history: Array<{ id: string; value: string | null; from: string | null; to: string | null; status: string }>;
+  private?: DiaryPrivateMark;
 }
 
 export interface DiaryNote {
@@ -56,6 +64,7 @@ export interface DiaryNote {
   /** A recurring pattern the memory drew from its episodes. */
   pattern?: boolean;
   authorRole: string;
+  private?: DiaryPrivateMark;
 }
 
 /** A person as the memory knows them now (Recordare cards): current, confirmed facts and notes. */
@@ -89,6 +98,8 @@ export const diaryApi = {
   notes: (includePending = false): Promise<DiaryNote[]> => api.get(`${base}/notes`, { params: { includePending } }).then((r) => r.data),
   cards: (): Promise<{ self: DiaryCard; contacts: DiaryCard[] }> => api.get(`${base}/cards`).then((r) => r.data),
   plans: (): Promise<DiaryEpisode[]> => api.get(`${base}/plans`).then((r) => r.data),
+  /** The private memories hidden from the account (entity memory); forget one with forget / remove. */
+  privateItems: (): Promise<DiaryPrivateItem[]> => api.get(`${base}/private`).then((r) => r.data),
   copies: (): Promise<DiaryCopy[]> => api.get(`${base}/copies`).then((r) => r.data),
   /** Copies a note into the persistent memory (A-MEM): personal, a team, or the org (admins). */
   copy: (id: string, scope: DiaryCopy['scope'], teamId: string | null): Promise<void> =>

@@ -86,5 +86,21 @@
     "people": "Nessuna persona ancora."
   },
   "peopleHint": "Le persone che conosci, come la memoria le ricorda adesso. Per correggere o eliminare qualcosa usa «Chi sei» o la linea del tempo.",
-  "lastMentioned": "citata il"
+  "lastMentioned": "citata il",
+  "private": {
+    "label": "privato di {{names}}",
+    "labelUnknown": "privato (chi l'ha detto non è identificato)",
+    "tab": "Privati",
+    "hint": "Ricordi che qualcuno ha detto in privato all'assistente: ne vedi solo l'esistenza e di chi sono, mai il contenuto. Puoi solo dimenticarli.",
+    "item": "Un ricordo privato di {{names}}",
+    "itemUnknown": "Un ricordo privato di qualcuno non identificato",
+    "kind": {
+      "episode": "ricordo",
+      "fact": "fatto",
+      "note": "nota"
+    },
+    "empty": "Nessun ricordo privato.",
+    "forgetConfirm": "Dimenticare questo ricordo privato? Verrà rimosso e non tornerà più.",
+    "copyPersonalOnly": "Nota privata: si copia solo nella tua memoria personale."
+  }
 }

@@ -40,6 +40,10 @@ export const userMemoryApi = {
   list: (): Promise<UserMemoryItem[]> =>
     api.get('/user-memory').then((r) => r.data),
 
+  /** Own proposals still to confirm that came from the chat (shown again when it opens). */
+  pendingForChat: (chatId: string): Promise<MemoryProposal[]> =>
+    api.get('/user-memory/pending', { params: { chatId } }).then((r) => r.data.proposals),
+
   /** On-demand extraction from the indicated chat → pending proposals. */
   extract: (chatId: string): Promise<{ proposals: MemoryProposal[] }> =>
     api.post('/user-memory/extract', { chatId }).then((r) => r.data),

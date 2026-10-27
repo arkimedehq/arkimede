@@ -4,16 +4,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Download, Loader2, Check, X, Brain, Eye, Network } from 'lucide-react';
+import { Download, Loader2, Check, X, Brain, Eye, Network, Lock, LockOpen } from 'lucide-react';
 import { messagesApi } from '../../api/messages';
+import { chatRunsApi, watchChatMemory, watchChatRun, type ChatRunState } from '../../api/chatRuns';
 import { chatsApi } from '../../api/chats';
 import { agentTeamsApi } from '../../api/agents';
+import { profileApi } from '../../api/profile';
 import { feedbackApi } from '../../api/feedback';
 import { userMemoryApi, type MemoryProposal } from '../../api/userMemory';
 import { useStore, type Message } from '../../store/useStore';
 import MessageBubble, { sandboxSkillName } from './MessageBubble';
 import MessageInput from './MessageInput';
 import FilePanel from '../files/FilePanel';
+import RunStatus from './RunStatus';
 import { downloadWithAuth } from '../../utils/downloadWithAuth';
 
 interface Props {
@@ -79,6 +82,16 @@ export default function ChatWindow({ chatId }: Props) {
   const [memoryBusy, setMemoryBusy]   = useState(false);
   const [agentSteps, setAgentSteps]   = useState<{ agent: string; role?: string | null; output: string }[]>([]);
   const { isStreaming, streamingContent, setIsStreaming, setStreamingContent, appendStreamingContent, clearToolCalls, addToolCall, resolveToolCall, pendingToolCalls, filesPanelOpen, registerStopFn } = useStore();
+  // The agent run in progress in this chat: from this page's stream while it sends,
+  // otherwise from the server (another tab or device, or this page before a reload).
+  const [run, setRun] = useState<ChatRunState | null>(null);
+  const runRef = useRef<ChatRunState | null>(null);
+  const showRun = (next: ChatRunState | null) => { runRef.current = next; setRun(next); };
+  const [stopping, setStopping] = useState(false);
+  const chatIdRef = useRef(chatId);
+  chatIdRef.current = chatId;
+  const mountedRef = useRef(true);
+  const remoteRun = !isStreaming ? run : null;
 
   const { data: messages = [], isLoading } = useQuery({
     queryKey: ['messages', chatId],
@@ -107,6 +120,23 @@ export default function ChatWindow({ chatId }: Props) {
     qc.invalidateQueries({ queryKey: ['chat-meta', chatId] });
   };
 
+  // Private chat / messages: shown when the episodic memory is on (it is what keeps them private).
+  const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: profileApi.get, staleTime: 60_000, enabled: !!chatId });
+  const privacyAvailable = !!profile?.episodicMemoryAvailable && !!profile?.episodicMemoryEnabled;
+  const setChatPrivate = async (isPrivate: boolean) => {
+    await chatsApi.setPrivate(chatId, isPrivate);
+    qc.invalidateQueries({ queryKey: ['chat-meta', chatId] });
+  };
+  const setMessagePrivate = async (messageId: string, isPrivate: boolean) => {
+    try {
+      await messagesApi.setPrivate(chatId, messageId, isPrivate);
+      qc.setQueryData(['messages', chatId], (old: Message[] = []) =>
+        old.map((m) => (m.id === messageId ? { ...m, isPrivate } : m)));
+    } catch (err) {
+      console.error('Privacy change failed', err);
+    }
+  };
+
   // Feedback-memory state (global toggle) + feedback already given in this chat
   const { data: feedbackConfig } = useQuery({
     queryKey: ['feedback-config'],
@@ -124,9 +154,65 @@ export default function ChatWindow({ chatId }: Props) {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, streamingContent]);
+  }, [messages, streamingContent, run?.phase]);
+
+  // ── Run in progress: read it when the chat opens, then follow it ─────────────
+  useEffect(() => {
+    showRun(null);
+    setStopping(false);
+    let alive = true;
+    const ended = new Set<string>();
+    const reload = () => {
+      qc.invalidateQueries({ queryKey: ['messages', chatId] });
+      qc.invalidateQueries({ queryKey: ['chats'] });
+      qc.invalidateQueries({ queryKey: ['files', 'chat', chatId] });
+    };
+    const read = () => chatRunsApi.get(chatId)
+      .then((r) => {
+        // While this page sends, its own stream says what the run is doing.
+        if (!alive || abortRef.current || (r && ended.has(r.runId))) return;
+        // The run we were showing is over (its end was missed): show the answer.
+        if (!r && runRef.current) reload();
+        showRun(r);
+      })
+      .catch(() => undefined);  // no access (read-only chat) or offline: nothing to show
+    read();
+    const unwatch = watchChatRun(chatId, (event) => {
+      if (event.run) {
+        if (!ended.has(event.run.runId)) showRun(event.run);
+        return;
+      }
+      if (runRef.current) ended.add(runRef.current.runId);
+      showRun(null);
+      setStopping(false);
+      // The page that sent the message reloads on its stream's `done`.
+      if (!abortRef.current) reload();
+    });
+    // Safety net while another page's run is shown: the socket may have missed its end.
+    const poll = setInterval(() => { if (!abortRef.current) read(); }, 15_000);
+    return () => { alive = false; unwatch(); clearInterval(poll); };
+  }, [chatId, qc]);
+
+  // ── Memory proposals of this chat: the ones still to confirm, and the new ones ──
+  // (also when another page of this user sent the message, or this one reloaded).
+  useEffect(() => {
+    let alive = true;
+    const add = (proposals: MemoryProposal[]) => {
+      if (alive && proposals.length) setMemoryProposals((prev) => mergeProposals(prev, proposals));
+    };
+    userMemoryApi.pendingForChat(chatId).then(add).catch(() => undefined);
+    const unwatch = watchChatMemory(chatId, add);
+    return () => { alive = false; unwatch(); };
+  }, [chatId]);
+
+  const stopRun = () => {
+    setStopping(true);
+    chatRunsApi.cancel(chatIdRef.current).catch(() => setStopping(false));
+  };
 
   const stopStreaming = () => {
+    // Closing the stream alone would not stop the agent (it goes on without the page).
+    chatRunsApi.cancel(chatIdRef.current).catch(() => undefined);
     abortRef.current?.abort();
     abortRef.current = null;
     setIsStreaming(false);
@@ -136,8 +222,21 @@ export default function ChatWindow({ chatId }: Props) {
 
   // Register the stop function in the global store (for GlobalHeader)
   useEffect(() => {
+    mountedRef.current = true;
     registerStopFn(stopStreaming);
-    return () => registerStopFn(null);
+    return () => {
+      registerStopFn(null);
+      mountedRef.current = false;
+      // Leaving the chat (another chat opened): stop following the stream, NOT the run.
+      // The streaming state is global, so it is released for the next chat's window.
+      if (abortRef.current) {
+        abortRef.current.abort();
+        abortRef.current = null;
+        setIsStreaming(false);
+        setStreamingContent('');
+        clearToolCalls();
+      }
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -145,7 +244,7 @@ export default function ChatWindow({ chatId }: Props) {
     content: string,
     attachments: { name: string; fileId: string; mimeType: string; mode?: 'embed' | 'inline' | 'attachment' }[],
   ) => {
-    if (isStreaming || readOnly) return;
+    if (isStreaming || remoteRun || readOnly) return;
 
     // Optimistic update — show the user message immediately
     const tempUserMsg: Message = {
@@ -153,6 +252,7 @@ export default function ChatWindow({ chatId }: Props) {
       role: 'user',
       content,
       attachments,
+      isPrivate: !!chatMeta?.isPrivate,
       createdAt: new Date().toISOString(),
     };
     qc.setQueryData(['messages', chatId], (old: Message[] = []) => [...old, tempUserMsg]);
@@ -169,6 +269,10 @@ export default function ChatWindow({ chatId }: Props) {
 
     const cleanup = () => {
       abortRef.current = null;
+      // A window that was left must not touch the global streaming state, which may
+      // belong to the chat opened since.
+      if (!mountedRef.current) return;
+      showRun(null);
       setIsStreaming(false);
       setStreamingContent('');
       setStreamError(null);
@@ -196,6 +300,8 @@ export default function ChatWindow({ chatId }: Props) {
           qc.invalidateQueries({ queryKey: ['chats'] });
           qc.invalidateQueries({ queryKey: ['files', 'chat', chatId] });
           cleanup();
+          // No message saved (e.g. 'busy': another page's run is in progress): show that run.
+          if (!_messageId) chatRunsApi.get(chatId).then(showRun).catch(() => undefined);
         },
         (errMsg, errCode) => {
           // Dedicated error event: show the banner until done reloads the list
@@ -218,17 +324,21 @@ export default function ChatWindow({ chatId }: Props) {
         (proposals) => setMemoryProposals((prev) => mergeProposals(prev, proposals)),
         // onAgentStep — intermediate steps of an agent team (Multi-Agent)
         (step) => setAgentSteps((prev) => [...prev, step]),
+        // onProgress — what the agent is doing now (step, tool being prepared, model call)
+        showRun,
       );
     } catch (err: any) {
       // AbortError = intentional stop → not an error to log
       if (err?.name !== 'AbortError') console.error(err);
       cleanup();
+      // The stream broke but the agent may still be working: follow it from the server.
+      if (err?.name !== 'AbortError' && mountedRef.current) chatRunsApi.get(chatId).then(showRun).catch(() => undefined);
     }
   };
 
   // ── Truncate/rewind: delete a message and all the following ones ──────────────
   const truncateFrom = async (messageId: string) => {
-    if (isStreaming || readOnly) return;
+    if (isStreaming || remoteRun || readOnly) return;
     if (!window.confirm(t('truncate.confirm'))) return;
     try {
       await messagesApi.truncateFrom(chatId, messageId);
@@ -284,6 +394,10 @@ export default function ChatWindow({ chatId }: Props) {
     }
   };
 
+  const liveFiles: SkillFile[] = remoteRun
+    ? remoteRun.files.map((f) => ({ name: f.name, downloadUrl: f.downloadUrl }))
+    : skillFiles;
+
   if (isLoading) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -310,6 +424,11 @@ export default function ChatWindow({ chatId }: Props) {
               feedback={feedbackByMessage.get(msg.id)}
               onFeedbackChange={() => qc.invalidateQueries({ queryKey: ['feedback', chatId] })}
               onTruncate={readOnly ? undefined : truncateFrom}
+              onTogglePrivate={
+                privacyAvailable && !readOnly && msg.role === 'user' && (msg.authorId ?? chatMeta?.userId) === currentUserId
+                  ? setMessagePrivate
+                  : undefined
+              }
             />
           ))}
 
@@ -364,6 +483,16 @@ export default function ChatWindow({ chatId }: Props) {
             />
           )}
 
+          {/* What the agent is doing now (this page's run, or one already in progress) */}
+          {run && (isStreaming ? !streamingContent || run.phase !== 'writing' : true) && (
+            <RunStatus
+              run={run}
+              showRecent={!isStreaming}
+              onStop={remoteRun ? stopRun : undefined}
+              stopping={stopping}
+            />
+          )}
+
           {/* Error banner — visible between the end of streaming and the message reload */}
           {streamError && !isStreaming && (
             <div className="flex justify-start">
@@ -385,7 +514,7 @@ export default function ChatWindow({ chatId }: Props) {
           )}
 
           {/* Typing indicator (when no content yet) */}
-          {isStreaming && !streamingContent && pendingToolCalls.length === 0 && (
+          {isStreaming && !run && !streamingContent && pendingToolCalls.length === 0 && (
             <div className="flex justify-start">
               <div className="bg-gray-800 rounded-2xl px-4 py-3 flex items-center gap-1">
                 {[0, 1, 2].map((i) => (
@@ -465,11 +594,12 @@ export default function ChatWindow({ chatId }: Props) {
             </div>
           )}
 
-          {/* Skill file chips — files generated by skills during the current response */}
-          {skillFiles.length > 0 && (
+          {/* Skill file chips — files generated during the current response (this page's
+              stream, or the run this page follows: after a reload, from another tab) */}
+          {liveFiles.length > 0 && (
             <div className="flex justify-start">
               <div className="flex flex-wrap gap-2">
-                {skillFiles.map((f) => (
+                {liveFiles.map((f) => (
                   <SkillFileChip key={f.downloadUrl ?? f.rel} name={f.name} rel={f.rel} downloadUrl={f.downloadUrl} />
                 ))}
               </div>
@@ -507,6 +637,18 @@ export default function ChatWindow({ chatId }: Props) {
                 {agentTeams.map((tm) => <option key={tm.id} value={tm.id}>{t('team.option', { name: tm.name })}</option>)}
               </select>
             </label>
+            {privacyAvailable && (
+              <button
+                onClick={() => setChatPrivate(!chatMeta?.isPrivate)}
+                className={`inline-flex items-center gap-1.5 text-xs transition-colors ${
+                  chatMeta?.isPrivate ? 'text-amber-400 hover:text-amber-300' : 'text-gray-400 hover:text-amber-300'}`}
+                title={t('private.chatTitle')}
+                aria-pressed={!!chatMeta?.isPrivate}
+              >
+                {chatMeta?.isPrivate ? <Lock size={13} /> : <LockOpen size={13} />}
+                {chatMeta?.isPrivate ? t('private.chatOn') : t('private.chatOff')}
+              </button>
+            )}
             <button
               onClick={extractMemoryNow}
               disabled={memoryBusy || isStreaming}
@@ -519,7 +661,7 @@ export default function ChatWindow({ chatId }: Props) {
               {t('memory.update')}
             </button>
           </div>
-          <MessageInput onSend={sendMessage} disabled={isStreaming} chatId={chatId} projectId={chatMeta?.projectId} />
+          <MessageInput onSend={sendMessage} disabled={isStreaming || !!remoteRun} chatId={chatId} projectId={chatMeta?.projectId} />
         </div>
       )}
     </div>

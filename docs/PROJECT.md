@@ -803,7 +803,10 @@ explorations and produced `GraphRecursionError`. Full flow with diagrams and thr
   memory → saved as `pending`. Threshold = `User.memoryThreshold` (override) ?? `app_config.autoMemoryThreshold` (
   global default 6)
 - **On-demand extraction**: "Update memory" button in the chat → `POST /api/user-memory/extract`
-- **Inline confirmation**: proposals arrive in the chat via the SSE `memory_proposal` event; the user confirms/ignores each
+- **Inline confirmation**: proposals arrive in the chat via the SSE `memory_proposal` event, and to the user's other
+  pages on the notifications socket (`memory_proposal {chatId, proposals}`, to that user only: memory is personal, so the
+  other writers of a shared chat never get them); a chat that opens shows again the user's own proposals still to
+  confirm that came from it (`GET /api/user-memory/pending?chatId=`). The user confirms/ignores each
   fact (card in `ChatWindow`). The rejected ones are deleted
 - **Injection**: the `confirmed` facts enter the system prompt as a "what I know about the user" block at the **user
   level**, inside the **cached** prefix (stable → they only change on confirmation/edit) — unlike feedback/summary which
@@ -860,11 +863,43 @@ result without modifying the agent's flow.
 | `tool_call`   | `{ toolCall: {...} }`               | The LLM invoked a tool                        |
 | `tool_result` | `{ name: string, ok: boolean }`     | A tool returned a result (✓/✗ live)           |
 | `file`        | `{ name: string, rel: string }` | A tool produced a file on disk; `rel` = path for the access-aware `?rel=` download (`trackOutput` → `canAccess`) |
+| `progress`    | `{ run: ChatRunState }`             | What the agent is doing now (see below)       |
 | `usage`       | `{ inputTokens, outputTokens }`     | End of generation                             |
+| `error`       | `{ code, message }`                 | `code: 'busy'` = the chat already has a run in progress (nothing is saved) |
 | `done`        | —                                   | Stream completed                              |
 
 `messages.controller.ts` passes an `onToolResult` that recursively scans each JSON result: every string with a `/` that
 resolves to an existing file inside `UPLOAD_DIR` generates a `file` event. HTTP URLs and `/api/…` paths are ignored.
+
+**Run in progress (`ChatRunsService`).** Each message starts a *run* of the agent, one per chat, kept in memory by the
+backend while it lasts. The run is **not tied to the SSE connection**: if the page reloads or closes, only the stream
+stops; the agent goes on, saves its answer and ends the run. Stopping is explicit: `POST /api/chats/:id/run/cancel`
+(the web Stop button and the CLI's `Esc`/`Ctrl+C` call it). A run's state (`ChatRunState`):
+
+| Field | Content |
+|---|---|
+| `step` | model calls started so far (the agent's steps) |
+| `phase` | `starting` (context), `model` (a model call, nothing streamed yet), `preparing` (the model is writing a tool call's arguments), `tool` (a tool is running), `writing` (the answer), `team` (agent team) |
+| `tool`, `argsChars` | the tool being prepared or run; the size of the arguments written so far |
+| `startedAt`, `phaseSince` | when the run and the current phase started |
+| `recent` | the last 10 finished tools (`tool`, `ok`, `durationMs`) |
+| `files` | the files produced so far (`name`, `fileId`, `downloadUrl`; the latest 20): pages following the run offer them for download before the answer exists, through `/api/files/:id/download` and its access rules |
+
+`streamResponse` reports the progress through `opts.onProgress` (`model_start` from the LangChain callbacks, before
+the first token; `tool_preparing` from the streamed `tool_call_chunks`; `text`). A model called inside a tool is not a
+step. The state reaches:
+
+- the page that sent the message, as SSE `progress` events;
+- every page that has the chat open, on the notifications socket: the page emits `watch {kind: 'chat', id}` and
+  receives `chat_run {chatId, run}`; `run: null` (with `messageId`) = the run ended, reload the messages. A page that
+  opens the chat reads the current state with `GET /api/chats/:id/run` (`{ run: ChatRunState | null }`).
+
+Watching, reading and stopping a run require the same access as sending a message (`findOneForWrite`: the chat's
+author, or the owner/collaborators of its project). A second message while a run is in progress gets `error`
+`busy`. The files a run produced are attached to its answer, or to its error turn when it fails, so they always show
+in the chat's file panel. Runs of different chats are independent: several chats can be working at once (the web page detaches from a
+chat's stream when another chat is opened, and follows that run again on return). A backend restart ends the runs in
+progress (in memory on purpose).
 
 ### Agent tool filter, wildcards & per-agent model
 
@@ -1062,6 +1097,10 @@ POST   /api/chats                   ← in a project: requires write (collaborat
 GET    /api/chats/:id               ← includes canWrite for the current user
 GET    /api/chats/:id/messages      ← readable by author or project member
 POST   /api/chats/:id/messages/stream   ← SSE; write for author or project collaborator/owner
+GET    /api/chats/:id/run           ← the agent run in progress (null when idle); same access as the stream
+POST   /api/chats/:id/run/cancel    ← stops it (closing the stream does not)
+PATCH  /api/chats/:id/private       ← { private } private chat switch; write access
+PATCH  /api/chats/:id/messages/:messageId/private  ← { private } only the message's author (user messages)
 
 # Files + RAG
 POST   /api/files/upload?projectId=     ← in a project requires write (collaborator/owner)
@@ -1373,6 +1412,18 @@ RECORDARE_OUTBOX_POLL_MS=3000         # optional
   honoured); after 12 attempts (or a 400/413/422) the row is parked (`parkedAt`,
   `lastError`, warning in the log). Rewinds and chat deletions are propagated (`DELETE …/messages/{id}`,
   `DELETE …/conversations/{id}`). The request path never waits on Recordare.
+- **Private chats and messages** (Recordare ≥ 0.5.0; the rule and the API: Recordare's public docs, `docs/API.md` §1,
+  §2, §4 and `docs/INTEGRATION.md`, tag `v0.5.0`). Arkimede's own flags, shown only when the user's episodic memory is
+  on: `chats.isPrivate` (the **Private chat** switch above the composer, `PATCH /api/chats/:id/private`, whoever may
+  write in the chat) and `messages.isPrivate` (a message written while the switch is on is saved private; its author
+  makes it private or public again with the lock under it, `PATCH /api/chats/:id/messages/:messageId/private`; never
+  someone else's message nor the assistant's). The ingest sends a person's private message with `private: true`
+  (`recordare-ingest.mapper.ts`); Recordare makes the replies and tool turns that follow it private too. A later change
+  is an outbox row `message_privacy`: the worker sends the message's **current** flag (`PATCH …/messages/{id}
+  {private}`, library `setMessagePrivate`; a person's message takes its replies along), after the message's own ingest;
+  404 = done. Recordare applies the rule in every read: a private memory is told only to whoever said it and, in a
+  personal memory, to the holder (in the recall, the reader is the author of the conversation's latest turn).
+  Someone can also ask in words ("keep it between us"): Recordare's extraction recognises it, nothing to do here.
 - **Recall tools** (only for users with the switch on, in a persisted chat):
   `recordare_search_episodes`, `recordare_search_memory`, `recordare_resolve_period`, `recordare_remember`,
   `recordare_correct_episode`, `recordare_forget_episode` (no `log_episode`: the ingest already captures the
@@ -1392,7 +1443,14 @@ RECORDARE_OUTBOX_POLL_MS=3000         # optional
   they are (facts with history, notes: pin, delete), the people they know (Recordare's cards, `GET api/v1/cards`: each
   contact's current facts and notes, aliases, last mention), plans, and what awaits confirmation (inferred facts and notes:
   confirm / reject). Backend proxy `api/recordare/diary/*` over Recordare's read API, always for the logged-in user (the
-  browser never sees Recordare's key); the key needs the `write` scope for the edits.
+  browser never sees Recordare's key); the key needs the `write` scope for the edits. Private memories: in a
+  **personal** memory episodes, facts and notes come marked `private: {by}` and show a 🔒 label "private to <names>"
+  (no name: whoever said it is not identified); a private note is copied into the user's personal A-MEM only (409
+  `recordare.notePrivate` for a team or the org). In an **entity** memory the account reads the public ones only: the
+  **Private** tab lists the others without their content (`GET api/recordare/diary/private` → Recordare
+  `GET api/v1/private`, library `privateItems`) as "a private memory of <names>", with Forget as the only action
+  (episode: `forgetEpisode`; fact / note: `delete`). The notes change feed gives `note: null` for a note the account may
+  not read: its copies in A-MEM are not created, and a replaced one is removed.
 - **Account deletion** (Admin → Users → delete): the account's whole memory is erased in Recordare first
   (`DELETE api/v1/me?confirm=<memoryId>`, the key needs the `erase` scope; the user's pending outbox rows are dropped
   before, so nothing provisions it again). A memory Recordare no longer has counts as erased; any other failure leaves
@@ -2031,7 +2089,8 @@ reuse the exact frontend contracts — `POST /api/auth/login`, chat CRUD, and
 the SSE stream `POST /api/chats/:id/messages/stream` parsed from the
 response body with `fetch` (same `data: {json}` events: `chunk`,
 `tool_call`, `tool_result`, `file`, `agent_step`, `memory_proposal`,
-`error`, `done`; aborting the connection cancels the run server-side). No
+`error`, `done`; stopping calls `POST /api/chats/:id/run/cancel`, since closing the
+connection alone leaves the run going). No
 dedicated backend endpoints exist for the CLI.
 
 Two frontends over a shared API/core layer:

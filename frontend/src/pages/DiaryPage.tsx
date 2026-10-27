@@ -5,9 +5,11 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  BookOpen, CalendarDays, Check, ChevronDown, ChevronRight, Copy, CopyCheck, Loader2, Pencil, Pin, PinOff, Search, Trash2, UserRound, X,
+  BookOpen, CalendarDays, Check, ChevronDown, ChevronRight, Copy, CopyCheck, Loader2, Lock, Pencil, Pin, PinOff, Search, Trash2, UserRound, X,
 } from 'lucide-react';
-import { diaryApi, NOTE_CATEGORIES, type DiaryCopy, type DiaryEpisode, type DiaryFact, type DiaryNote, type PlanStatus } from '../api/diary';
+import {
+  diaryApi, NOTE_CATEGORIES, type DiaryCopy, type DiaryEpisode, type DiaryFact, type DiaryNote, type DiaryPrivateItem, type DiaryPrivateMark, type PlanStatus,
+} from '../api/diary';
 import { profileApi } from '../api/profile';
 import { ScopeSelector } from '../components/ScopeSelector';
 import { useStore } from '../store/useStore';
@@ -19,8 +21,10 @@ import { useStore } from '../store/useStore';
  * a note, confirm or reject what was only inferred, copy a note into the persistent
  * memory (A-MEM, Recordare D34: by hand, or by kind with the copy rule). Read through the
  * backend proxy: always the logged-in user's own memory.
+ * Private memories (Recordare D52): in a personal memory they show whose they are; an entity
+ * memory's account does not read them, so the Private tab lists them without content (forget only).
  */
-type Tab = 'timeline' | 'digests' | 'profile' | 'people' | 'plans' | 'pending';
+type Tab = 'timeline' | 'digests' | 'profile' | 'people' | 'plans' | 'pending' | 'private';
 const TABS: Tab[] = ['timeline', 'digests', 'profile', 'people', 'plans', 'pending'];
 
 const STATUS_COLOR: Record<PlanStatus, string> = {
@@ -35,6 +39,8 @@ function errorText(e: any): string {
 export function DiarySection({ enabled }: { enabled: boolean }) {
   const { t } = useTranslation('diary');
   const [tab, setTab] = useState<Tab>('timeline');
+  const profile = useQuery({ queryKey: ['profile'], queryFn: profileApi.get, staleTime: 60_000, enabled });
+  const tabs: Tab[] = profile.data?.episodicMemoryMode === 'entity' ? [...TABS, 'private'] : TABS;
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
@@ -49,11 +55,11 @@ export function DiarySection({ enabled }: { enabled: boolean }) {
       ) : (
         <>
           <div className="flex gap-1 border-b border-gray-800 overflow-x-auto">
-            {TABS.map((id) => (
+            {tabs.map((id) => (
               <button key={id} onClick={() => setTab(id)}
                 className={`px-3 py-2 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors
                   ${tab === id ? 'border-blue-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-200'}`}>
-                {t(`tabs.${id}`)}
+                {id === 'private' ? t('private.tab') : t(`tabs.${id}`)}
               </button>
             ))}
           </div>
@@ -63,6 +69,7 @@ export function DiarySection({ enabled }: { enabled: boolean }) {
           {tab === 'people' && <People />}
           {tab === 'plans' && <Plans />}
           {tab === 'pending' && <Pending />}
+          {tab === 'private' && <PrivateItems />}
         </>
       )}
     </div>
@@ -80,6 +87,18 @@ function Loading() {
 function Failed({ error }: { error: unknown }) {
   const { t } = useTranslation('diary');
   return <p className="text-sm text-red-400 py-4">{t('error')}: {errorText(error)}</p>;
+}
+
+/** Whose a private memory is (personal memory: the holder reads it, marked). */
+function PrivateBadge({ mark }: { mark?: DiaryPrivateMark }) {
+  const { t } = useTranslation('diary');
+  if (!mark) return null;
+  return (
+    <span className="inline-flex items-center gap-1 px-1.5 rounded border border-amber-800 text-amber-300 text-xs">
+      <Lock size={10} />
+      {mark.by.length ? t('private.label', { names: mark.by.join(', ') }) : t('private.labelUnknown')}
+    </span>
+  );
 }
 
 function when(e: DiaryEpisode): string {
@@ -134,6 +153,7 @@ function EpisodeRow({ episode: e }: { episode: DiaryEpisode }) {
             {e.planStatus && <span className={`px-1.5 rounded border ${STATUS_COLOR[e.planStatus]}`}>{t(`status.${e.planStatus}`)}</span>}
             {e.inferred && <span className="text-amber-400">{t('inferred')}</span>}
             {e.corrected && <span>{t('corrected')}</span>}
+            <PrivateBadge mark={e.private} />
           </div>
           <p className="text-sm text-gray-200 mt-1">{e.content}</p>
           {e.people.length > 0 && <p className="text-xs text-gray-500 mt-1">{e.people.join(', ')}</p>}
@@ -268,7 +288,10 @@ function Profile() {
                 <div className="flex items-start gap-3">
                   <div className="flex-1">
                     <p className="text-sm text-gray-200">{n.content}</p>
-                    <p className="text-xs text-gray-500">{t(`category.${n.category}`, n.category)}{n.inferred ? ` · ${t('inferred')}` : ''}</p>
+                    <p className="text-xs text-gray-500 flex flex-wrap items-center gap-2">
+                      <span>{t(`category.${n.category}`, n.category)}{n.inferred ? ` · ${t('inferred')}` : ''}</span>
+                      <PrivateBadge mark={n.private} />
+                    </p>
                   </div>
                   {copied.has(n.id) ? (
                     <span title={t('copied')} className="text-emerald-400"><CopyCheck size={14} /></span>
@@ -283,7 +306,7 @@ function Profile() {
                   <button title={t('delete')} onClick={() => { if (window.confirm(t('deleteConfirm'))) remove.mutate({ what: 'notes', id: n.id }); }}
                     className="text-gray-500 hover:text-red-400"><Trash2 size={14} /></button>
                 </div>
-                {copying === n.id && <CopyNote id={n.id} onDone={() => setCopying(null)} />}
+                {copying === n.id && <CopyNote id={n.id} personalOnly={!!n.private} onDone={() => setCopying(null)} />}
               </li>
             ))}
           </ul>
@@ -293,8 +316,8 @@ function Profile() {
   );
 }
 
-/** Copies one note into the persistent memory: personal, a team of the user's, or the org (admins). */
-function CopyNote({ id, onDone }: { id: string; onDone: () => void }) {
+/** Copies one note into the persistent memory: personal, a team of the user's, or the org (admins); a private note personal only. */
+function CopyNote({ id, personalOnly, onDone }: { id: string; personalOnly?: boolean; onDone: () => void }) {
   const { t } = useTranslation('diary');
   const qc = useQueryClient();
   const isAdmin = useStore((s) => s.user?.role === 'admin');
@@ -310,8 +333,14 @@ function CopyNote({ id, onDone }: { id: string; onDone: () => void }) {
   });
   return (
     <div className="mt-2 ml-1 flex flex-wrap items-center gap-2">
-      <span className="text-xs text-gray-400">{t('copyTo')}</span>
-      <ScopeSelector scope={scope} teamId={teamId} onScope={setScope} onTeam={setTeamId} allowOrg={isAdmin} />
+      {personalOnly ? (
+        <span className="text-xs text-gray-400">{t('private.copyPersonalOnly')}</span>
+      ) : (
+        <>
+          <span className="text-xs text-gray-400">{t('copyTo')}</span>
+          <ScopeSelector scope={scope} teamId={teamId} onScope={setScope} onTeam={setTeamId} allowOrg={isAdmin} />
+        </>
+      )}
       <button onClick={() => copy.mutate()} disabled={copy.isPending || (scope === 'team' && !teamId)}
         className="p-1 rounded text-emerald-400 hover:bg-emerald-500/15 disabled:opacity-50" title={t('copy')}><Check size={14} /></button>
       <button onClick={onDone} className="p-1 rounded text-gray-400 hover:bg-gray-700"><X size={14} /></button>
@@ -363,6 +392,7 @@ function FactRow({ fact: f, onDelete }: { fact: DiaryFact; onDelete: () => void 
             <span className="text-gray-400">{label}:</span> {f.value ?? t('unknown')}
           </p>
           {f.validFrom && <p className="text-xs text-gray-500">{t('since')} {f.validFrom}{f.inferred ? ` · ${t('inferred')}` : ''}</p>}
+          {f.private && <p className="mt-0.5"><PrivateBadge mark={f.private} /></p>}
         </div>
         <button title={t('delete')} onClick={onDelete} className="text-gray-500 hover:text-red-400"><Trash2 size={14} /></button>
       </div>
@@ -439,8 +469,8 @@ function Pending() {
   if (facts.isLoading || notes.isLoading) return <Loading />;
   if (facts.error || notes.error) return <Failed error={facts.error ?? notes.error} />;
   const items = [
-    ...(facts.data ?? []).filter((f) => f.pending).map((f) => ({ what: 'facts' as const, id: f.id, text: `${f.about ? `${f.about} · ` : ''}${f.key.replace(/_/g, ' ')}: ${f.value ?? t('unknown')}` })),
-    ...(notes.data ?? []).filter((n) => n.pending).map((n) => ({ what: 'notes' as const, id: n.id, text: n.content })),
+    ...(facts.data ?? []).filter((f) => f.pending).map((f) => ({ what: 'facts' as const, id: f.id, mark: f.private, text: `${f.about ? `${f.about} · ` : ''}${f.key.replace(/_/g, ' ')}: ${f.value ?? t('unknown')}` })),
+    ...(notes.data ?? []).filter((n) => n.pending).map((n) => ({ what: 'notes' as const, id: n.id, mark: n.private, text: n.content })),
   ];
   if (!items.length) return <Empty text={t('empty.pending')} />;
   return (
@@ -449,7 +479,7 @@ function Pending() {
       <ul className="divide-y divide-gray-800 bg-gray-900 border border-gray-800 rounded-xl">
         {items.map((i) => (
           <li key={i.id} className="px-4 py-2.5 flex items-center gap-3">
-            <p className="flex-1 text-sm text-gray-200">{i.text}</p>
+            <p className="flex-1 text-sm text-gray-200">{i.text} <PrivateBadge mark={i.mark} /></p>
             <button title={t('confirm')} onClick={() => decide.mutate({ what: i.what, id: i.id, decision: 'confirm' })}
               className="p-1.5 rounded-lg text-green-400 hover:bg-gray-800"><Check size={14} /></button>
             <button title={t('reject')} onClick={() => decide.mutate({ what: i.what, id: i.id, decision: 'reject' })}
@@ -457,6 +487,43 @@ function Pending() {
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+// ── Private memories (entity memory) ─────────────────────────────────────────────
+
+/** What someone told the assistant in private: that it exists and whose it is, never its content; forget only. */
+function PrivateItems() {
+  const { t } = useTranslation('diary');
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ['diary', 'private'], queryFn: diaryApi.privateItems });
+  const forget = useMutation({
+    mutationFn: (i: DiaryPrivateItem) => (i.kind === 'episode' ? diaryApi.forget(i.id) : diaryApi.remove(i.kind === 'fact' ? 'facts' : 'notes', i.id)),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['diary'] }),
+  });
+  if (q.isLoading) return <Loading />;
+  if (q.error) return <Failed error={q.error} />;
+  if (!q.data?.length) return <Empty text={t('private.empty')} />;
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-gray-500">{t('private.hint')}</p>
+      <ul className="divide-y divide-gray-800 bg-gray-900 border border-gray-800 rounded-xl">
+        {q.data.map((i) => (
+          <li key={`${i.kind}:${i.id}`} className="px-4 py-2.5 flex items-center gap-3">
+            <Lock size={14} className="text-amber-400 flex-shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm text-gray-200">{i.by.length ? t('private.item', { names: i.by.join(', ') }) : t('private.itemUnknown')}</p>
+              <p className="text-xs text-gray-500">{t(`private.kind.${i.kind}`)} · {new Date(i.recordedAt).toLocaleDateString()}</p>
+            </div>
+            <button onClick={() => { if (window.confirm(t('private.forgetConfirm'))) forget.mutate(i); }} disabled={forget.isPending}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-700 text-xs text-red-400 hover:bg-gray-800">
+              <Trash2 size={12} />{t('forget')}
+            </button>
+          </li>
+        ))}
+      </ul>
+      {forget.error && <Failed error={forget.error} />}
     </div>
   );
 }

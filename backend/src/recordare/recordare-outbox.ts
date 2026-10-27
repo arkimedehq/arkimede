@@ -12,7 +12,7 @@
  *   - no-op when Recordare is not configured (one env check, no query);
  *   - messages are enqueued only for chats whose OWNER has episodicMemoryEnabled
  *     (the gate is part of the INSERT … SELECT: one statement, no extra read);
- *   - deletions are enqueued when the owner has the switch on OR was ever
+ *   - deletions and privacy changes are enqueued when the owner has the switch on OR was ever
  *     provisioned in Recordare (recordareMemoryId set), so turning the switch off
  *     does not leave deleted messages behind in Recordare;
  *   - Recordare has no consent flag (its D50): the user's switch is the only gate;
@@ -26,7 +26,7 @@ import { Logger } from '@nestjs/common';
 import type { EntityManager, QueryRunner } from 'typeorm';
 import { recordareConfig } from './recordare.config';
 
-export type OutboxOp = 'message' | 'delete_message' | 'delete_conversation';
+export type OutboxOp = 'message' | 'delete_message' | 'delete_conversation' | 'message_privacy';
 
 const logger = new Logger('RecordareOutbox');
 
@@ -45,6 +45,12 @@ const ENQUEUE_MESSAGE_DELETES_SQL = `
 const ENQUEUE_CONVERSATION_DELETE_SQL = `
   INSERT INTO "recordare_outbox" ("userId", "chatId", "op")
   SELECT c."userId", c."id", 'delete_conversation'
+    FROM "chats" c JOIN "users" u ON u."id" = c."userId"
+   WHERE c."id" = $1 AND (u."episodicMemoryEnabled" = true OR u."recordareMemoryId" IS NOT NULL)`;
+
+const ENQUEUE_MESSAGE_PRIVACY_SQL = `
+  INSERT INTO "recordare_outbox" ("userId", "chatId", "messageId", "op")
+  SELECT c."userId", c."id", $2::uuid, 'message_privacy'
     FROM "chats" c JOIN "users" u ON u."id" = c."userId"
    WHERE c."id" = $1 AND (u."episodicMemoryEnabled" = true OR u."recordareMemoryId" IS NOT NULL)`;
 
@@ -97,6 +103,12 @@ export async function enqueueRecordareMessage(
 export async function enqueueRecordareMessageDeletes(manager: EntityManager, chatId: string, messageIds: string[]): Promise<void> {
   if (!recordareConfig() || !messageIds.length) return;
   await enqueueSafely(manager, ENQUEUE_MESSAGE_DELETES_SQL, [chatId, messageIds]);
+}
+
+/** A message was made private or public again (the worker sends its current flag). */
+export async function enqueueRecordareMessagePrivacy(manager: EntityManager, chatId: string, messageId: string): Promise<void> {
+  if (!recordareConfig()) return;
+  await enqueueSafely(manager, ENQUEUE_MESSAGE_PRIVACY_SQL, [chatId, messageId]);
 }
 
 /** A chat is about to be deleted: call BEFORE deleting it (the owner is read from the chat row). */

@@ -67,8 +67,10 @@ La risposta dell'assistente arriva in streaming live; le invocazioni dei
 tool compaiono come righe di stato compatte `⚙ tool` / `✓ tool`, i file
 prodotti dalle skill sono elencati con l'URL di download, e le chat
 multi-agente mostrano blocchi `◆` per agente con gli eventi `agent_step`.
-Fermare la generazione chiude semplicemente la connessione HTTP — il backend
-annulla l'esecuzione quando il client si disconnette.
+Fermare la generazione (`Esc`, o `Ctrl+C` nella REPL) chiede al backend di
+fermare l'esecuzione (`POST /api/chats/:id/run/cancel`) e chiude lo stream:
+chiudere solo la connessione lascerebbe l'agente al lavoro, perché un'esecuzione
+sopravvive al client che l'ha avviata.
 
 ## Il pannello impostazioni
 

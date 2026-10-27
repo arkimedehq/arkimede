@@ -131,7 +131,8 @@ Episodic memory ("what happened and when") lives in a separate service,
 it is; the user chooses what crosses over, one way only:
 
 - **by hand** — Diary → Who you are: a note is copied into A-MEM, personal, a team of the user's or the org (admins);
-  copies into a team or the org are recorded in the audit log (`memory.copy_from_recordare`);
+  copies into a team or the org are recorded in the audit log (`memory.copy_from_recordare`). A private note (Recordare
+  ≥ 0.5.0, marked `private: {by}`: told only to whoever said it) is copied into the personal memory only;
 - **by rule** — `recordareCopyCategories`: Recordare notes of the chosen categories are copied into the personal
   memory by themselves. A copy by rule never pushes the user's own notes out: it is skipped when the personal memory
   is full.

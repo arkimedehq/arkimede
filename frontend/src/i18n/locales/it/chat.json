@@ -106,5 +106,28 @@
     "speak": "Leggi ad alta voce",
     "stop": "Interrompi la lettura",
     "error": "Sintesi vocale non riuscita"
+  },
+  "run": {
+    "working": "{{app}} sta lavorando",
+    "step": "passo {{step}}",
+    "chars": "{{chars}} caratteri",
+    "seconds": "{{seconds}} s",
+    "stop": "Ferma",
+    "stopping": "Mi fermo…",
+    "phase": {
+      "starting": "Prepara il contesto",
+      "model": "Chiamata al modello in corso",
+      "preparing": "Sta preparando: {{tool}}",
+      "tool": "Sta usando: {{tool}}",
+      "writing": "Sta scrivendo la risposta",
+      "team": "Il team di agenti è al lavoro"
+    }
+  },
+  "private": {
+    "chatOn": "Chat privata",
+    "chatOff": "Chat non privata",
+    "chatTitle": "Chat privata: quello che scrivi resta tra te e l'assistente. La memoria episodica lo dice solo a te (e al titolare della memoria).",
+    "messageOn": "Messaggio privato: clicca per renderlo di nuovo pubblico",
+    "messageOff": "Rendi privato questo messaggio (vale anche per le risposte che lo seguono)"
   }
 }

@@ -292,8 +292,10 @@ export default function App({cfg, initialChat}: {cfg: CliConfig; initialChat: Ch
         // While the settings panel is open it owns the keyboard.
         if (view === 'settings') return;
         if (key.escape) {
-            if (abortRef.current) abortRef.current.abort();
-            else if (focus === 'chats') setFocus('input');
+            if (abortRef.current) {
+                chatsApi.cancelRun(cfg, chat.id).catch(() => undefined);
+                abortRef.current.abort();
+            } else if (focus === 'chats') setFocus('input');
             return;
         }
         if (key.tab) {

@@ -8,7 +8,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { format } from 'date-fns';
 import { it } from 'date-fns/locale';
-import { Paperclip, Download, Loader2, Wrench, ChevronRight, Check, X, ThumbsUp, ThumbsDown, ExternalLink, Terminal, Trash2, Volume2, Square } from 'lucide-react';
+import { Paperclip, Download, Loader2, Wrench, ChevronRight, Check, X, ThumbsUp, ThumbsDown, ExternalLink, Terminal, Trash2, Volume2, Square, Lock, LockOpen } from 'lucide-react';
 import type { Message, ToolCallRecord } from '../../store/useStore';
 import { useStore } from '../../store/useStore';
 import { downloadWithAuth } from '../../utils/downloadWithAuth';
@@ -31,6 +31,8 @@ interface Props {
   authorLabel?: string | null;
   /** "Rewind" callback: deletes this message and all following ones. Absent = button hidden (e.g. read-only). */
   onTruncate?: (messageId: string) => void;
+  /** Make this (own) message private or public again. Absent = no button (a private message still shows its lock). */
+  onTogglePrivate?: (messageId: string, isPrivate: boolean) => void;
 }
 
 // ── Authenticated link for downloading skill-generated files ─────────────────
@@ -636,7 +638,7 @@ function FeedbackButtons({
 
 // ── MessageBubble ─────────────────────────────────────────────────────────────
 
-export default function MessageBubble({ message, isStreaming, feedbackEnabled, feedback, onFeedbackChange, authorLabel, onTruncate }: Props) {
+export default function MessageBubble({ message, isStreaming, feedbackEnabled, feedback, onFeedbackChange, authorLabel, onTruncate, onTogglePrivate }: Props) {
   const { t } = useTranslation('chat');
   const isUser        = message.role === 'user';
   const time          = format(new Date(message.createdAt), 'HH:mm', { locale: it });
@@ -646,6 +648,7 @@ export default function MessageBubble({ message, isStreaming, feedbackEnabled, f
   const ttsEnabled    = ttsStatus?.enabled ?? false;
   // The "rewind" button only makes sense on already-persisted messages (no streaming/optimistic).
   const canTruncate   = !!onTruncate && !isStreaming && message.id !== 'streaming' && !message.id.startsWith('temp-');
+  const canTogglePrivate = !!onTogglePrivate && !isStreaming && !message.id.startsWith('temp-');
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} gap-3`}>
@@ -709,6 +712,19 @@ export default function MessageBubble({ message, isStreaming, feedbackEnabled, f
               outputTokens={message.outputTokens}
             />
           )}
+          {isUser && canTogglePrivate ? (
+            <button
+              onClick={() => onTogglePrivate!(message.id, !message.isPrivate)}
+              className={message.isPrivate
+                ? 'text-amber-400 hover:text-amber-300'
+                : 'text-gray-700 hover:text-amber-400 opacity-60 hover:opacity-100 transition-colors'}
+              title={message.isPrivate ? t('private.messageOn') : t('private.messageOff')}
+            >
+              {message.isPrivate ? <Lock size={12} /> : <LockOpen size={12} />}
+            </button>
+          ) : isUser && message.isPrivate ? (
+            <span className="text-amber-400" title={t('private.messageOn')}><Lock size={12} /></span>
+          ) : null}
           {canTruncate && (
             <button
               onClick={() => onTruncate!(message.id)}

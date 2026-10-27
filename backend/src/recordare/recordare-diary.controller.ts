@@ -12,6 +12,10 @@
  * user: the browser never sees Recordare's key, and nobody reads another user's diary.
  * A note can be copied into A-MEM (D34): personal, a team of the user's, or the org (admins);
  * the copy follows the note (recordare-notes-sync.service). Copies into a team or the org are audited.
+ * Private memories (Recordare v0.5.0 docs/API.md §1, §4): in a personal memory they come
+ * marked `private: {by}`; in an entity memory the account reads the public ones only and
+ * `private` lists the others without their content (forgotten with the item's delete).
+ * A private note is copied only into the user's personal A-MEM, never a team or the org.
  * Recordare errors keep their status (404 stays 404); an outage is a 503.
  */
 import {
@@ -135,6 +139,12 @@ export class RecordareDiaryController {
     return this.call(user.id, (c) => c.plans(user.id));
   }
 
+  /** The private memories hidden from the account (entity memory): kind, id, whose, when; never their content. */
+  @Get('private')
+  privateItems(@CurrentUser() user: User) {
+    return this.call(user.id, (c) => c.privateItems(user.id));
+  }
+
   /** Where the user copied Recordare notes in A-MEM (D34). */
   @Get('copies')
   async copies(@CurrentUser() user: User) {
@@ -147,6 +157,8 @@ export class RecordareDiaryController {
   async copy(@CurrentUser() user: User, @Param('id') id: string, @Body() body: CopyDto) {
     const note = await this.call(user.id, (c) => c.note(user.id, id));
     if (note.status !== 'current' || note.pending) throw new ConflictException('recordare.noteNotCurrent');
+    // Told only to whoever it belongs to: never widened to a team or the org.
+    if (note.private && body.scope !== 'personal') throw new ConflictException('recordare.notePrivate');
     const copy = await this.memory.copyRecordareNote(user.id, { id: note.id, content: note.content, category: note.category },
       { scope: body.scope, teamId: body.teamId ?? null, isAdmin: user.role === 'admin' });
     // Widening the audience is always the user's own act, and it is recorded (D34). Identifiers only, no content.

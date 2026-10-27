@@ -86,5 +86,21 @@
     "people": "No people yet."
   },
   "peopleHint": "The people you know, as the memory remembers them now. To correct or delete something, use “Who you are” or the timeline.",
-  "lastMentioned": "mentioned"
+  "lastMentioned": "mentioned",
+  "private": {
+    "label": "private to {{names}}",
+    "labelUnknown": "private (whoever said it is not identified)",
+    "tab": "Private",
+    "hint": "Memories someone told the assistant in private: you see only that they exist and whose they are, never their content. You can only forget them.",
+    "item": "A private memory of {{names}}",
+    "itemUnknown": "A private memory of someone unidentified",
+    "kind": {
+      "episode": "memory",
+      "fact": "fact",
+      "note": "note"
+    },
+    "empty": "No private memories.",
+    "forgetConfirm": "Forget this private memory? It will be removed for good.",
+    "copyPersonalOnly": "Private note: it is copied only into your personal memory."
+  }
 }

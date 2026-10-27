@@ -1456,8 +1456,11 @@ POST /api/chats/:chatId/messages/stream
 #   data: {"type":"tool_result","name":"...","ok":true}          # esito tool
 #   data: {"type":"file","name":"report.pdf","rel":"skills-output/report.pdf"}  # file prodotto (download ?rel=, access-aware)
 #   data: {"type":"agent_step","agent":"...","role":"...","output":"..."}       # step team (chat con team)
+#   data: {"type":"progress","run":{"step":2,"phase":"preparing","tool":"...","argsChars":12000,...}}  # cosa sta facendo l'agente
 #   data: {"type":"usage","inputTokens":123,"outputTokens":45}   # statistiche token
 #   data: {"type":"done","messageId":"..."}
+# L'esecuzione continua se lo stream si chiude (ricaricamento): GET /api/chats/:chatId/run la mostra,
+# POST /api/chats/:chatId/run/cancel la ferma.
 ```
 
 ### Custom Tools

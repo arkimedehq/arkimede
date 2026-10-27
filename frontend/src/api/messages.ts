@@ -4,6 +4,7 @@
 import type {Message} from '../store/useStore';
 import {useStore} from '../store/useStore';
 import api from './client';
+import type {ChatRunState} from './chatRuns';
 
 export const messagesApi = {
     list: (chatId: string) =>
@@ -12,6 +13,10 @@ export const messagesApi = {
     /** Truncate/rewind: deletes the indicated message and all following ones. */
     truncateFrom: (chatId: string, messageId: string) =>
         api.delete<{ deletedCount: number }>(`/chats/${chatId}/messages/${messageId}`).then((r) => r.data),
+
+    /** Makes one of your own messages private, or public again. */
+    setPrivate: (chatId: string, messageId: string, isPrivate: boolean) =>
+        api.patch<{ id: string; isPrivate: boolean }>(`/chats/${chatId}/messages/${messageId}/private`, { private: isPrivate }).then((r) => r.data),
 
     stream: async (
         chatId: string,
@@ -26,6 +31,7 @@ export const messagesApi = {
         onToolResult?: (name: string, ok: boolean, input?: any) => void,
         onMemoryProposal?: (proposals: { id: string; content: string }[]) => void,
         onAgentStep?: (step: { agent: string; role?: string | null; output: string }) => void,
+        onProgress?: (run: ChatRunState) => void,
     ) => {
         const token = useStore.getState().token;
 
@@ -70,6 +76,7 @@ export const messagesApi = {
                     else if (event.type === 'tool_result' && onToolResult) onToolResult(event.name, event.ok, event.input);
                     else if (event.type === 'memory_proposal' && onMemoryProposal) onMemoryProposal(event.proposals);
                     else if (event.type === 'agent_step' && onAgentStep) onAgentStep(event);
+                    else if (event.type === 'progress' && onProgress) onProgress(event.run);
                 } catch {
                 }
             }
