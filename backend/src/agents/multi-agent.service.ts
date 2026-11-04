@@ -30,6 +30,7 @@ import { McpServersService } from '../mcp-servers/mcp-servers.service';
 import { SkillsService } from '../skills/skills.service';
 import { FlowsService } from '../flows/flows.service';
 import { LlmConfigsService } from '../llm-configs/llm-configs.service';
+import { AgentMemoryService } from '../agent-memory/agent-memory.service';
 import { AgentsService } from './agents.service';
 import { AgentTeamsService } from './agent-teams.service';
 import { Agent } from './agent.entity';
@@ -57,6 +58,7 @@ export class MultiAgentService {
     private readonly skills: SkillsService,
     private readonly flows: FlowsService,
     private readonly llmConfigs: LlmConfigsService,
+    private readonly memory: AgentMemoryService,
   ) {}
 
   // ── Entry point with access check ───────────────────────────────────────────
@@ -147,7 +149,7 @@ export class MultiAgentService {
   }
 
   private async runAgentWithUsage(agent: Agent, userId: string, input: string, projectId?: string): Promise<{ text: string; usage: LlmUsage }> {
-    const { executor, callbacks } = await this.buildAgent(agent, userId, projectId);
+    const { executor, callbacks } = await this.buildAgent(agent, userId, input, projectId);
     // LangGraph does not fire the model's instance callbacks (serving metrics):
     // re-passed via config, same workaround as AgentService. Class inherited
     // from the surroundings (chat-triggered teams stay interactive).
@@ -160,20 +162,31 @@ export class MultiAgentService {
     return { text: this.contentToString(last?.content), usage: sumUsageFromMessages(messages) };
   }
 
-  private async buildAgent(agent: Agent, userId: string, projectId?: string) {
+  private async buildAgent(agent: Agent, userId: string, input: string, projectId?: string) {
     const entity = agent.llmConfigId
       ? await this.llmConfigs.findOne(agent.llmConfigId)
       : await this.llmConfigs.getDefault();
     if (!entity) throw new BadRequestException('agents.noLlmConfigAgent');
 
-    const model = await this.llmConfigs.buildModelForConfig(entity);
-    const tools = await this.loadFilteredTools(agent, userId, projectId);
+    const [model, tools, memory] = await Promise.all([
+      this.llmConfigs.buildModelForConfig(entity),
+      this.loadFilteredTools(agent, userId, projectId),
+      // The agent's own memory, like the chat's (memory-first contract): off only when the
+      // agent turns it off. Inside a chat it recalls from that chat's conversation.
+      agent.memoryContext === false
+        ? null
+        : this.memory.forTurn({ userId, conversationId: getLlmCallContext().conversationId, query: input }),
+    ]);
+    const memoryNames = new Set(memory?.tools.map((t) => t.name));
+    const systemPrompt = [agent.systemPrompt?.trim(), memory?.prompt, ...(memory?.turnBlocks ?? [])]
+      .filter(Boolean).join('\n\n');
 
     return {
       executor: createReactAgent({
         llm: model,
-        tools,
-        messageModifier: agent.systemPrompt?.trim() || undefined,
+        // Memory tools first (the charter says to search memory before other tools).
+        tools: [...(memory?.tools ?? []), ...tools.filter((t) => !memoryNames.has(t.name))],
+        messageModifier: systemPrompt || undefined,
       }),
       // Serving-metrics handler attached by buildModelForConfig: the caller must
       // re-pass it in the invoke config (LangGraph skips instance callbacks).

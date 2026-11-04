@@ -9,6 +9,7 @@
     "makeOwner": "Make owner",
     "makeMember": "Make member",
     "removeMember": "Remove from team",
+    "saveDetails": "Save",
     "deleteTeam": "Delete team"
   },
   "empty": {
@@ -27,12 +28,14 @@
       "colorLabel": "Color"
     },
     "sections": {
+      "details": "Details",
       "currentMembers": "Members ({{count}})",
       "addMembers": "Add members"
     },
     "search": {
       "placeholder": "Search user by name or email…"
     },
+    "saved": "Saved",
     "confirm": {
       "deleteTeam": "Delete team \"{{name}}\"?"
     }
@@ -40,6 +43,7 @@
   "errors": {
     "deleteTeam": "Deletion failed",
     "createTeam": "Creation failed",
+    "updateTeam": "Update failed",
     "operation": "Operation failed"
   }
 }

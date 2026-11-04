@@ -2934,6 +2934,11 @@ function DaemonStatusBadge({ status }: { status: DaemonStatus }) {
       className: 'bg-emerald-900/60 text-emerald-300 border-emerald-700/60',
       icon: <span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" /><span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" /></span>,
     },
+    restarting: {
+      label: t('daemon.statusRestarting'),
+      className: 'bg-amber-900/60 text-amber-300 border-amber-700/60',
+      icon: <RotateCw size={11} className="animate-spin" />,
+    },
     stopped: {
       label: t('daemon.statusStopped'),
       className: 'bg-gray-800 text-gray-400 border-gray-700',
@@ -2975,7 +2980,7 @@ function DaemonCard({ daemon }: { daemon: SkillDaemon }) {
     onSuccess:  () => qc.invalidateQueries({ queryKey: ['daemons'] }),
   });
 
-  const isActive    = daemon.status === 'running' || daemon.status === 'starting';
+  const isActive    = daemon.status === 'running' || daemon.status === 'starting' || daemon.status === 'restarting';
   const canRemove   = daemon.status === 'stopped' || daemon.status === 'error';
 
   // Format uptime
@@ -2991,6 +2996,7 @@ function DaemonCard({ daemon }: { daemon: SkillDaemon }) {
   return (
     <div className={`bg-gray-900 border rounded-xl p-4 space-y-3 transition-colors
       ${daemon.status === 'error'   ? 'border-red-800/50' :
+        daemon.status === 'restarting' ? 'border-amber-800/50' :
         daemon.status === 'running' ? 'border-emerald-800/40' :
         'border-gray-800'}`}
     >
@@ -3080,9 +3086,10 @@ function DaemonCard({ daemon }: { daemon: SkillDaemon }) {
       </div>
 
       {/* Error */}
-      {daemon.status === 'error' && daemon.lastError && (
-        <div className="bg-red-950/40 border border-red-800/40 rounded-lg px-3 py-2">
-          <p className="text-xs text-red-400 font-mono leading-relaxed">{daemon.lastError}</p>
+      {(daemon.status === 'error' || daemon.status === 'restarting') && daemon.lastError && (
+        <div className={`rounded-lg px-3 py-2 border ${daemon.status === 'error'
+          ? 'bg-red-950/40 border-red-800/40' : 'bg-amber-950/30 border-amber-800/40'}`}>
+          <p className={`text-xs font-mono leading-relaxed whitespace-pre-wrap break-words max-h-48 overflow-y-auto ${daemon.status === 'error' ? 'text-red-400' : 'text-amber-300'}`}>{daemon.lastError}</p>
         </div>
       )}
     </div>

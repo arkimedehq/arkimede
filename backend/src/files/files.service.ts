@@ -312,15 +312,43 @@ export class FilesService {
   }
 
   /**
+   * Stores a file a TOOL returned (e.g. an MCP image, audio or embedded
+   * resource) as a File owned by the user, so it has an id from the start: the
+   * model can hand that id to any `file-ref` parameter (another tool, a
+   * messaging skill) and the chat can attach it. Written under
+   * UPLOAD_DIR/tool-files/<userId>/, scope `personal`.
+   */
+  async saveToolFile(userId: string, name: string, mimeType: string, data: Buffer): Promise<File> {
+    const dir = resolve(join(this.uploadDir, 'tool-files', userId));
+    await fs.promises.mkdir(dir, { recursive: true });
+    const safeName = basename(name || 'file').replace(/[^\w.\-]+/g, '_').replace(/^[_.]+/, '') || 'file';
+    const storagePath = join(dir, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`);
+    await fs.promises.writeFile(storagePath, data);
+    return this.repo.save(this.repo.create({
+      originalName: safeName,
+      storagePath,
+      mimeType:     mimeType || 'application/octet-stream',
+      size:         data.length,
+      userId,
+      projectId:    null as any,
+      scope:        'personal',
+    }));
+  }
+
+  /**
    * Resolves a file reference (C2, copy-in): a fileId (uuid) or a path
    * relative to UPLOAD_DIR → File entity, with an access check. Returns the host
    * path + the name for staging in the job's work dir. `null` if not resolvable.
    * @throws ForbiddenException if the file exists but the user has no access to it.
    */
   async resolveFileRef(value: string, userId: string): Promise<{ hostPath: string; name: string } | null> {
-    const v = String(value ?? '').trim();
+    let v = String(value ?? '').trim();
     if (!v) return null;
     const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    // A file's own link (/api/files/<id>[/download], relative or absolute), as
+    // tool results and answers show it, stands for its id.
+    const link = v.match(/^(?:https?:\/\/[^/]+)?\/api\/files\/([0-9a-f-]{36})(?:\/download)?(?:[?#].*)?$/i);
+    if (link) v = link[1];
 
     let file: File | null;
     if (UUID_RE.test(v)) {

@@ -15,7 +15,8 @@ Writes into <out_dir>:
     is dropped (the broker pulls the runner image by name);
   - the static bundle files from deploy/ (installer, updater, README, …);
   - .env.example and LICENSE copied from the repo root;
-  - scripts/backup.sh and scripts/postgres-to-pgvector.sh (used by update-hub.sh).
+  - scripts/backup.sh (+ backup-lib.sh, pg-wal-archive.sh, restore-test.sh) and
+    scripts/postgres-to-pgvector.sh (used by update-hub.sh).
 
 Line-based on purpose: it keeps every comment of the source files and needs no YAML
 library. It understands the layout used by our compose files (2-space service keys,
@@ -156,7 +157,7 @@ def main() -> None:
     shutil.copy2(ROOT / ".env.example", out / ".env.example")
     shutil.copy2(ROOT / "LICENSE", out / "LICENSE")
     (out / "scripts").mkdir(exist_ok=True)
-    for script in ("backup.sh", "postgres-to-pgvector.sh"):
+    for script in ("backup.sh", "backup-lib.sh", "pg-wal-archive.sh", "restore-test.sh", "postgres-to-pgvector.sh"):
         shutil.copy2(ROOT / "scripts" / script, out / "scripts" / script)
 
     print("deploy bundle written to " + str(out))

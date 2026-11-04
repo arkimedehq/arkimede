@@ -64,6 +64,9 @@ export interface ExternalTurn {
   } | null;
 }
 
+/** What finds the chat a turn continues. */
+export type OpenChatQuery = Pick<ExternalTurn, 'userId' | 'source' | 'key' | 'idleMs' | 'chatId' | 'notBefore' | 'priorUserTexts'>;
+
 @Injectable()
 export class ExternalChatsService {
   constructor(
@@ -102,6 +105,16 @@ export class ExternalChatsService {
   }
 
   /**
+   * The conversation a turn runs under for the agent's memory, before it is recorded:
+   * the chat it will be appended to when that chat exists (its memory is the same
+   * conversation), else a stable id of the source's own conversation.
+   */
+  async memoryConversationId(turn: OpenChatQuery): Promise<string> {
+    if (turn.chatId) return turn.chatId;
+    return (await this.findOpenChat({ ...turn, key: turn.key.slice(0, 200) })) ?? `${turn.source}:${turn.key}`;
+  }
+
+  /**
    * The last `max` user/assistant messages of a chat of the user, oldest first, as
    * agent history; null when the chat does not exist or is not the user's.
    */
@@ -128,7 +141,7 @@ export class ExternalChatsService {
   }
 
   /** Latest chat with the turn's key that the turn may continue, if any. */
-  private async findOpenChat(turn: ExternalTurn): Promise<string | null> {
+  private async findOpenChat(turn: OpenChatQuery): Promise<string | null> {
     const chat = await this.chatRepo.findOne({
       where: { userId: turn.userId, externalSource: turn.source, externalKey: turn.key },
       order: { updatedAt: 'DESC' },

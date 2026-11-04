@@ -64,7 +64,7 @@ export class TranscriptionController {
       throw new BadRequestException('transcription.emptyAudio');
     }
     const lang = language && /^[a-z]{2}$/i.test(language) ? language.toLowerCase() : undefined;
-    const text = await withTraceUser(user?.id, () => this.service.transcribe(audio.buffer, audio.originalname || 'audio.webm', lang));
+    const text = await withTraceUser(user?.id, () => this.service.transcribe(audio.buffer, audio.originalname || 'audio.webm', lang, { userId: user?.id }));
     return { text };
   }
 }

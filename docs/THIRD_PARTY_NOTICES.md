@@ -54,6 +54,7 @@ an explicit patent grant:
 - `ssh2-sftp-client` — https://github.com/theophilusx/ssh2-sftp-client
 - `oracledb` — `Apache-2.0 OR UPL-1.0`, used under Apache-2.0 — https://github.com/oracle/node-oracledb
 - `@opentelemetry/*` (`api`, `sdk-trace-base`, `sdk-trace-node`, `resources`, `exporter-trace-otlp-proto`, `exporter-trace-otlp-http`) — https://github.com/open-telemetry/opentelemetry-js
+- `sherpa-onnx` (Python, whisper-service) — https://github.com/k2-fsa/sherpa-onnx
 
 Full license text: https://www.apache.org/licenses/LICENSE-2.0
 
@@ -87,6 +88,7 @@ Full license text: https://www.apache.org/licenses/LICENSE-2.0
 | uvicorn | BSD-3-Clause |
 | faster-whisper | MIT |
 | python-multipart | Apache-2.0 |
+| sherpa-onnx | **Apache-2.0** — https://github.com/k2-fsa/sherpa-onnx (bundles onnxruntime, MIT) |
 
 (CTranslate2, the backend of `faster-whisper`, is distributed under MIT.)
 
@@ -135,6 +137,7 @@ The only models used are:
 | `BAAI/bge-m3` | Text embedding (embedding-service, default) | **MIT** |
 | `mixedbread-ai/mxbai-embed-large-v1` | Text embedding (embedding-service) | **Apache-2.0** |
 | OpenAI **Whisper** (via faster-whisper / CTranslate2) | Audio transcription (whisper-service) | **MIT** |
+| NVIDIA **Parakeet TDT 0.6B v3** (int8 ONNX export by sherpa-onnx) | Audio transcription (whisper-service, `STT_ENGINE=parakeet`; downloaded on first start) | **CC-BY-4.0** |
 | Piper voice `it_IT-serena-medium` | Default text-to-speech voice (piper-service; baked into the image at build time) | **CC-BY-4.0** |
 | `docling-project/docling-layout-heron` | Page layout analysis (ocr-service, structured level) | **Apache-2.0** |
 | `docling-project/docling-models` (TableFormer) | Table structure (ocr-service, structured level) | **CDLA-Permissive-2.0 / Apache-2.0** |
@@ -144,6 +147,9 @@ The only models used are:
 - bge-m3: https://huggingface.co/BAAI/bge-m3 — MIT
 - mxbai-embed-large-v1: https://huggingface.co/mixedbread-ai/mxbai-embed-large-v1 — Apache-2.0
 - Whisper: https://github.com/openai/whisper — MIT (weights and code released by OpenAI under MIT)
+- Parakeet TDT 0.6B v3: https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3 — **CC-BY-4.0** (© NVIDIA; attribution
+  required: this notice). Used through the ONNX export published by the sherpa-onnx project
+  (https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models), downloaded at runtime, not redistributed.
 - Piper voice `it_IT-serena-medium`: https://huggingface.co/rhasspy/piper-voices/tree/main/it/it_IT/serena/medium
   (model card `MODEL_CARD`), trained on the dataset https://huggingface.co/datasets/committa/serena-synthetic-it-27h —
   **CC-BY-4.0** (attribution required: this notice). Used as the default voice of the bundled piper-service

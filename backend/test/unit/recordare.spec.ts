@@ -20,6 +20,8 @@ import { DEFAULT_DELIVERY, backoffMs } from '@arkimedehq/recordare-client';
 
 const MAX_ATTEMPTS = DEFAULT_DELIVERY.maxAttempts;
 import { RecordareMcpService } from '../../src/recordare/recordare-mcp.service';
+import { AgentMemoryService } from '../../src/agent-memory/agent-memory.service';
+import { agentRunOptions } from '../../src/agents/agent-run-options';
 import { RecordareDiaryController } from '../../src/recordare/recordare-diary.controller';
 import {
   enqueueRecordareMessage, enqueueRecordareMessageDeletes, enqueueRecordareConversationDelete,
@@ -58,6 +60,10 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     }
     if (s.path === '/api/v1/me' && s.method === 'PATCH') return send(204);
     if (s.path.startsWith('/api/v1/episodes')) return send(200, { items: [{ id: 'e1', content: 'Gita a Bologna' }], nextCursor: null });
+    if (s.path.startsWith('/api/v1/charter')) {
+      const full = !s.path.includes('tools=false');
+      return send(200, { charter: full ? '## Your memory (search it)' : '## Your memory (context only)', version: 'charter.v1' });
+    }
     if (s.path === '/api/v1/context') return send(200, { block: `<memory-context>\n- fact: car = Yaris\n</memory-context>`, items: 1 });
     if (s.path === '/api/v1/ingest/messages') return send(200, { conversationId: 'c', accepted: s.body.messages.length, duplicates: 0, conflicts: [] });
     if (s.method === 'DELETE') return send(202, { jobId: 'j' });
@@ -701,28 +707,125 @@ describe('RecordareMcpService', () => {
 
 // ── Tracing ─────────────────────────────────────────────────────────────────
 
-describe('RecordareMcpService.contextBlock (Agent.memoryContext)', () => {
+describe('RecordareMcpService: the memory context of a turn and the charter (D54)', () => {
   const flushed: string[] = [];
   const outbox = { flushChat: async (chatId: string) => { flushed.push(chatId); } } as any;
 
-  it('flushes the current turn, then asks Recordare for the block of this message in this chat', async () => {
-    const block = await new RecordareMcpService(outbox).contextBlock('u1', 'chat-9', 'Che macchina ho?');
-    expect(block).toContain('<memory-context>');
+  it('flushes the current turn, then asks Recordare for the block of this message in this chat, with the self card', async () => {
+    const ctx = await new RecordareMcpService(outbox).context('u1', 'chat-9', 'Che macchina ho?');
+    expect(ctx.reachable).toBe(true);
+    expect(ctx.block).toContain('<memory-context>');
     expect(flushed).toContain('chat-9');
     const req = seen.find((s) => s.path === '/api/v1/context')!;
-    expect(req.body).toEqual({ query: 'Che macchina ho?' });
+    expect(req.body).toEqual({ query: 'Che macchina ho?', card: true });
     expect(req.headers['x-recordare-user']).toBe('u1');
     expect(req.headers['x-recordare-conversation']).toBe('chat-9');
   });
 
-  it('never fails or holds the answer: Recordare down or slow → null', async () => {
+  it('never fails or holds the answer: Recordare down → unreachable, and skipped for a while', async () => {
     respond = (s) => (s.path === '/api/v1/context' ? { status: 503 } : undefined);
-    expect(await new RecordareMcpService(outbox).contextBlock('u1', 'c', 'x')).toBeNull();
-    respond = () => undefined;
-    const slow = { flushChat: () => new Promise<void>((r) => setTimeout(r, 10_000)) } as any;
-    const started = Date.now();
-    expect(await new RecordareMcpService(slow).contextBlock('u1', 'c', 'x')).toBeNull();
-    expect(Date.now() - started).toBeLessThan(4_000);
+    const down = new RecordareMcpService(outbox);
+    expect(await down.context('u1', 'c', 'x')).toEqual({ reachable: false, block: null });
+    expect(down.available).toBe(false);
+  });
+
+  it('slow: no block but still reachable; only timeouts in a row count as down', async () => {
+    vi.useFakeTimers();
+    try {
+      const slow = new RecordareMcpService({ flushChat: () => new Promise<void>(() => undefined) } as any);
+      const turn = async () => { const p = slow.context('u1', 'c', 'x'); await vi.advanceTimersByTimeAsync(3_000); return p; };
+      expect(await turn()).toEqual({ reachable: true, block: null });
+      expect(await turn()).toEqual({ reachable: true, block: null });
+      expect(slow.available).toBe(true);
+      expect(await turn()).toEqual({ reachable: false, block: null });
+      expect(slow.available).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('the charter is fetched once and cached; the context-only form when the agent has no memory tools', async () => {
+    const svc = new RecordareMcpService(outbox);
+    expect(await svc.charter(true)).toBe('## Your memory (search it)');
+    expect(await svc.charter(true)).toBe('## Your memory (search it)');
+    expect(await svc.charter(false)).toBe('## Your memory (context only)');
+    expect(seen.filter((s) => s.path.startsWith('/api/v1/charter')).map((s) => s.path))
+      .toEqual(['/api/v1/charter', '/api/v1/charter?tools=false']);
+  });
+
+  it('no charter yet and Recordare down → null (the turn goes on without it)', async () => {
+    respond = (s) => (s.path.startsWith('/api/v1/charter') ? { status: 503 } : undefined);
+    expect(await new RecordareMcpService(outbox).charter(true)).toBeNull();
+  });
+});
+
+describe('AgentMemoryService: the agent\'s memory for every run', () => {
+  const outbox = { flushChat: async () => undefined } as any;
+  const amem = () => ({
+    getPinnedContents: vi.fn(async () => ['Vive a Ispica']),
+    retrieve: vi.fn(async () => [{ content: 'Ha una Yaris', context: null }]),
+    buildMemoryTools: vi.fn((_u: string, _c: string | undefined, use: any) =>
+      (use.personal ? ['save_memory', 'search_memory', 'search_conversations'] : ['search_memory']).map((name) => ({ name }))),
+  });
+  const user = (over: Record<string, boolean> = {}) => ({ id: 'u1', autoMemoryEnabled: true, sharedMemoryEnabled: false, episodicMemoryEnabled: true, ...over });
+  const service = (notes: any, recordare = new RecordareMcpService(outbox)) =>
+    new AgentMemoryService({ findOne: async () => user() } as any, notes, recordare);
+
+  it('Recordare: its charter in the stable prompt, the context every turn, its tools first — A-MEM notes kept beside it', async () => {
+    const notes = amem();
+    const m = await service(notes).forTurn({ userId: 'u1', user: user(), conversationId: 'chat-1', chatId: 'chat-1', query: 'Chi vive in casa mia?' });
+    expect(m.source).toBe('recordare');
+    expect(m.prompt).toContain('## Your memory (search it)');
+    expect(m.prompt).toContain('Vive a Ispica');
+    expect(m.turnBlocks.join('\n')).toContain('<memory-context>');
+    expect(m.turnBlocks.join('\n')).toContain('Ha una Yaris');
+    expect(m.tools.map((t) => t.name).slice(0, 2)).toEqual(['recordare_search_episodes', 'recordare_search_memory']);
+    expect(m.tools.map((t) => t.name)).toContain('save_memory');
+    expect(notes.buildMemoryTools).toHaveBeenCalledWith('u1', 'chat-1', { personal: true, shared: false });
+  });
+
+  it('Recordare down → A-MEM with its own charter, at once on the next turns too', async () => {
+    respond = (s) => (s.path === '/api/v1/context' ? { status: 503 } : undefined);
+    const recordare = new RecordareMcpService(outbox);
+    const svc = service(amem(), recordare);
+    const first = await svc.forTurn({ userId: 'u1', user: user(), conversationId: 'chat-1', query: 'x' });
+    expect(first.source).toBe('amem');
+    expect(first.prompt).toContain('## Your memory');
+    expect(first.prompt).toContain('save_memory');
+    expect(first.tools.map((t) => t.name)).toEqual(['save_memory', 'search_memory', 'search_conversations']);
+    seen.length = 0;
+    expect((await svc.forTurn({ userId: 'u1', user: user(), conversationId: 'chat-1', query: 'y' })).source).toBe('amem');
+    expect(seen.filter((s) => s.path === '/api/v1/context')).toHaveLength(0);
+  });
+
+  it('no conversation (automations), the episodic switch off or Recordare not configured → A-MEM', async () => {
+    expect((await service(amem()).forTurn({ userId: 'u1', user: user(), query: 'x' })).source).toBe('amem');
+    expect((await service(amem()).forTurn({ userId: 'u1', user: user({ episodicMemoryEnabled: false }), conversationId: 'c', query: 'x' })).source).toBe('amem');
+    configure(false);
+    expect((await service(amem()).forTurn({ userId: 'u1', user: user(), conversationId: 'c', query: 'x' })).source).toBe('amem');
+    expect(seen.filter((s) => s.path === '/api/v1/context')).toHaveLength(0);
+  });
+
+  it('team / org notes only: the search-only charter; no notes and no Recordare: no memory', async () => {
+    configure(false);
+    const shared = await service(amem()).forTurn({ userId: 'u1', user: user({ autoMemoryEnabled: false, sharedMemoryEnabled: true }), query: 'x' });
+    expect(shared.prompt).not.toContain('save_memory');
+    expect(shared.tools.map((t) => t.name)).toEqual(['search_memory']);
+    const none = await service(amem()).forTurn({ userId: 'u1', user: user({ autoMemoryEnabled: false }), query: 'x' });
+    expect(none).toEqual({ source: 'none', prompt: null, turnBlocks: [], tools: [] });
+  });
+
+  it('loads the switches when the caller has not (delegated agents, team members)', async () => {
+    const m = await service(amem()).forTurn({ userId: 'u1', conversationId: 'chat-2', query: 'x' });
+    expect(m.source).toBe('recordare');
+  });
+});
+
+describe('Agent.memoryContext: memory on unless turned off explicitly', () => {
+  it('maps onto the run options', () => {
+    expect(agentRunOptions({ memoryContext: true } as any, 'voice').memoryContext).toBeUndefined();
+    expect(agentRunOptions({ memoryContext: false } as any, 'voice').memoryContext).toBe(false);
+    expect(agentRunOptions(null, 'voice').memoryContext).toBeUndefined();
   });
 });
 

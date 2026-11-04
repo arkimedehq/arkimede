@@ -19,8 +19,8 @@
  *   describe → info                       (capabilities: asr + tts + handle programs)
  *   transcribe, audio-start/chunk/stop → transcript
  *   synthesize → audio-start/chunk/stop
- *   transcript → handled | not-handled   (conversation: the hub sends the text
- *                                         to handle, the configured user's agent answers)
+ *   transcript → handled | not-handled   (conversation: the hub sends the text to handle, the configured
+ *                                         user's agent answers; `handled` carries `continue_conversation`)
  *   ping → pong
  *
  * Conversation ("handle" program): exposed only when an admin picked the user
@@ -79,6 +79,26 @@ const CONVERSATION_TTL_MS = 10 * 60 * 1000;
 
 /** Model id advertised for the standard pipeline (no agent) — same as the OpenAI shim. */
 const DEFAULT_HANDLE_MODEL = APP_NAME_SLUG;
+
+/**
+ * Whether ANSWER waits for the user's reply: it ends with a question mark (also when closed by quotes, brackets or
+ * emphasis). Sent as `continue_conversation` in the `handled` event: a hub that honours it listens again without the
+ * wake word (proposed for the Wyoming protocol and Home Assistant's Wyoming integration).
+ */
+export function expectsReply(answer: string): boolean {
+  return /[?？]\s*["'»”’)\]*_]*\s*$/.test(answer);
+}
+
+/**
+ * What a satellite says when the agent could not answer (an LLM error, the step limit reached, a tool timing out):
+ * a sentence for people, in the turn's language (Italian or English), instead of the error's own text, which the hub
+ * would read out ("Recursion limit of 13 reached…"). The error itself goes to the log and the invocation record.
+ */
+export function spokenFailure(language?: string): string {
+  return (language ?? '').toLowerCase().startsWith('it')
+    ? 'Scusa, non sono riuscito a finire. Riprova, magari chiedendolo in un altro modo.'
+    : "Sorry, I couldn't finish that. Please try again, maybe asking in another way.";
+}
 
 interface ConversationWindow { messages: { role: 'user' | 'assistant'; content: string }[]; updatedAt: number }
 
@@ -344,7 +364,7 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
         const t0 = Date.now();
         // Speech requests act for the configured conversation user (trace attribution only).
         const text = pcm.length
-          ? await withTraceUser(this.handle?.userId, () => this.transcription.transcribe(pcmToWav(pcm, asr.fmt), 'audio.wav', asr.language))
+          ? await withTraceUser(this.handle?.userId, () => this.transcription.transcribe(pcmToWav(pcm, asr.fmt), 'audio.wav', asr.language, { userId: this.handle?.userId }))
           : '';
         this.logger.log(`Wyoming: transcript for ${ip} (${pcm.length} bytes → ${text.length} chars) in ${Date.now() - t0}ms`);
         this.send(socket, { type: 'transcript', data: { text, ...(asr.language ? { language: asr.language } : {}) } });
@@ -359,6 +379,7 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
         }
         const text = String(ev.data?.text ?? '').trim();
         if (!text) { this.send(socket, { type: 'not-handled', data: { text: '' } }); return; }
+        const language = typeof ev.data?.language === 'string' ? ev.data.language : asr.language;
         const context = ev.data?.context && typeof ev.data.context === 'object' ? ev.data.context : {};
         const key = typeof context.conversation_id === 'string' && context.conversation_id ? context.conversation_id : `ip:${ip}`;
         // The hub reports the satellite (its entity) beside the conversation id: a client
@@ -385,7 +406,13 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
             tools.onToolCall,
             abort.signal,
             tools.onToolResult,
-            agentRunOptions(this.handle.agentId ? await this.agentsService.findById(this.handle.agentId).catch(() => null) : null, 'voice'),
+            {
+              ...agentRunOptions(this.handle.agentId ? await this.agentsService.findById(this.handle.agentId).catch(() => null) : null, 'voice'),
+              // The memory's conversation: the chat this turn continues (as recordTurn below groups it).
+              conversationId: await this.externalChats.memoryConversationId({
+                userId, source: 'wyoming', key, idleMs: CONVERSATION_TTL_MS, chatId: focused ? focusedId : null, notBefore: fresh,
+              }),
+            },
           );
           if (!focused) {
             window.messages.push({ role: 'user', content: text }, { role: 'assistant', content: answer });
@@ -409,7 +436,9 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
               userText: text, answer, toolCalls: tools.records, usage,
             }).catch((err) => this.logger.warn(`Wyoming: saving the turn failed: ${err?.message ?? err}`));
           }
-          this.send(socket, { type: 'handled', data: { text: answer, ...(context.conversation_id ? { context } : {}) } });
+          this.send(socket, { type: 'handled', data: {
+            text: answer, continue_conversation: expectsReply(answer), ...(context.conversation_id ? { context } : {}),
+          } });
         } catch (err: any) {
           const message = err?.message ?? 'Internal error';
           this.logger.warn(`Wyoming: handle failed for ${ip} in ${Date.now() - t0}ms: ${message}`);
@@ -418,7 +447,7 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
             inputPreview: text, outputPreview: answer || null, toolCalls: tools.records,
             durationMs: Date.now() - t0, status: 'error', error: abort.signal.aborted ? 'client aborted' : message,
           });
-          this.send(socket, { type: 'not-handled', data: { text: message } });
+          this.send(socket, { type: 'not-handled', data: { text: spokenFailure(language) } });
         }
         return;
       }

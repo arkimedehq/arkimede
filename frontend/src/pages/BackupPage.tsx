@@ -6,17 +6,9 @@ import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Archive, DatabaseBackup, Download, Trash2, Loader2, Plus } from 'lucide-react';
 import { backupApi, type BackupInfo } from '../api/backup';
+import { HostBackupCard, humanSize } from './HostBackupCard';
 
-function humanSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ['KB', 'MB', 'GB', 'TB'];
-  let v = bytes / 1024;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
-  return `${v.toFixed(1)} ${units[i]}`;
-}
-
-/** Admin section: create / download / delete platform backups. */
+/** Admin section: scheduled host backups, then on-demand downloadable backups. */
 export function BackupSection() {
   const { t } = useTranslation('backup');
   const qc = useQueryClient();
@@ -49,11 +41,15 @@ export function BackupSection() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <DatabaseBackup size={18} className="text-indigo-400" />
-          <h2 className="text-lg font-semibold text-white">{t('title')}</h2>
-        </div>
+      <div className="flex items-center gap-2">
+        <DatabaseBackup size={18} className="text-indigo-400" />
+        <h2 className="text-lg font-semibold text-white">{t('title')}</h2>
+      </div>
+
+      <HostBackupCard />
+
+      <div className="flex items-center justify-between gap-2 pt-2">
+        <h3 className="text-base font-semibold text-white">{t('onDemand')}</h3>
         <button
           onClick={() => createMut.mutate()}
           disabled={createMut.isPending}
@@ -65,7 +61,6 @@ export function BackupSection() {
             : <><Plus size={13} /> {t('create')}</>}
         </button>
       </div>
-
       <p className="text-xs text-gray-500">{t('description')}</p>
       <p className="text-xs text-gray-600">{t('note')}</p>
 

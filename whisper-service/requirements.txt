@@ -4,3 +4,5 @@ faster-whisper>=1.1.0
 # PyAV 19 dropped open(metadata_errors=…), which faster-whisper 1.2.1 still passes: every transcription fails.
 av>=11,<19
 python-multipart>=0.0.12
+# Parakeet engine (STT_ENGINE=parakeet): ONNX runtime for NVIDIA Parakeet TDT, bundles onnxruntime.
+sherpa-onnx==1.12.40

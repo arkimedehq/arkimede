@@ -32,7 +32,11 @@ in `backend/src/app-config/`.
   FastAPI + faster-whisper; porta 9000, **non esposta sull'host in
   prod** (`docker-compose.yml:77-93`), env
   `WHISPER_MODEL`/`WHISPER_DEVICE`/`WHISPER_COMPUTE_TYPE`
-  (`.env.example:147-153`).
+  (`.env.example:147-153`); dal 2026-11-02 anche `WHISPER_BEAM_SIZE`
+  (predefinito 1, ricerca greedy: su turni vocali brevi lo stesso testo
+  del beam 5, un po' più veloce) e `WHISPER_CPU_THREADS` (0 = i 4 di
+  CTranslate2; i core dell'host li usano tutti: su un Core i3-1215U 6
+  thread portano un turno di 4 s da 2,6 a 1,9 s).
 - `backend/src/transcription/` lo proxya per il frontend con una forma
   *non standard* (`POST /api/transcription`, campo multipart `audio`,
   limite 25 MB, memory storage) tramite `TranscriptionService`, che
@@ -200,6 +204,50 @@ scelto dall'admin per il provider interno (vuoto = modello corrente del
 servizio); la card mostra le taglie come chip con la guida RAM e "Testa" avvia
 il download.
 
+## Parte 2b-bis — Motore Parakeet (2026-11-02)
+
+`whisper-service` ha un secondo motore, NVIDIA Parakeet. Si carica un solo motore
+alla volta e l'API non cambia (`POST /v1/audio/transcriptions`, `GET /v1/models`,
+`GET /health`, che ora riporta anche `engine`): backend, server Wyoming, Home Assistant
+e satelliti vocali non richiedono nulla.
+
+L'admin sceglie il modello in **Impostazioni → Voce e audio**, accanto alle taglie
+Whisper (`parakeet-tdt-0.6b-v3`): il backend lo invia nel campo `model` e il servizio
+cambia motore al volo, come già faceva con le taglie Whisper. `STT_ENGINE` (`whisper`,
+il default, oppure `parakeet`) è il motore caricato all'avvio e quello che usa "auto"
+finché una richiesta non ne indica un altro. Il modello Whisper di default resta
+nell'immagine, quindi tornare a Whisper non richiede mai un download.
+
+- **Modello**: NVIDIA Parakeet TDT 0.6B v3, export ONNX int8 di sherpa-onnx
+  (`PARAKEET_MODEL`, default `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8`), eseguito
+  con `sherpa-onnx`. Scaricato al primo uso (archivio ~490 MB, ~640 MB estratto) nel
+  volume `whisper_models` in `parakeet/<modello>/`; con `PARAKEET_OFFLINE=1` non viene
+  mai scaricato (deve essere già lì). Thread: `PARAKEET_THREADS`, altrimenti
+  `WHISPER_CPU_THREADS`, altrimenti 4.
+- **Audio**: decodificato come per Whisper (av/ffmpeg: wav, webm, ogg, mp3 → 16 kHz mono).
+- **Lingue**: 25 lingue europee (italiano e inglese inclusi), riconosciute dal modello.
+  Il `language` della richiesta è accettato e ignorato; una lingua fuori da quelle 25
+  non viene trascritta bene: per quella resta Whisper.
+- **Campo `model`**: una taglia Whisper o l'id di Parakeet caricano quel modello (vuoto
+  o `whisper-1` tengono quello caricato; un nome sconosciuto è un 400). Tra taglie
+  Whisper il vecchio modello risponde mentre si carica il nuovo; tra motori diversi
+  quello caricato viene liberato prima, così due modelli non condividono mai la memoria
+  del container, e viene ricaricato se il nuovo fallisce (la richiesta riceve un 503).
+  `/v1/models` elenca per primo il modello caricato (la sonda del backend legge
+  `data[0]`), poi le taglie Whisper e Parakeet, ciascuno con `engine` e `downloaded`.
+  Un cambio richiede ~0,3–2 s quando il modello è già su disco.
+- **Misure sul Kinox** (Core i3-1215U, 6 thread, sei frasi italiane sintetizzate con
+  Piper): Whisper small int8 1,75–2,06 s per frase, anche per un "Che ore sono?" di
+  0,9 s (finestra fissa di 30 s); Parakeet 0,18–0,80 s, proporzionale alla frase;
+  qualità pari (un errore a testa); Parakeet scrive i numeri in cifre ("2019"). Picco
+  RSS 849 MB contro 992 MB; caricamento del modello 2,7 s. Da confermare con una voce
+  vera in una stanza vera. Thread: su questa CPU ibrida (2 core performance + 4
+  efficienti) **4 thread** sono i più veloci e stabili, 0,15–0,47 s per frase, contro
+  0,25–0,61 s con 6 e fino a 1,2 s con 8: imposta `PARAKEET_THREADS` ai thread dei core
+  performance.
+- **Audio lunghi**: un solo passaggio su tutto il file; va bene per turni vocali e
+  dettature di qualche minuto, non per registrazioni di ore.
+
 ## Parte 2c — Toggle TTS e rilevamento servizi interni (2026-09-29)
 
 - `app_config.ttsEnabled` (migration 086, default true) abilita la sintesi
@@ -261,10 +309,21 @@ Design (rispecchia il resto della piattaforma: una feature, configurata dall'adm
   (`agentRunOptions`, condiviso con lo shim OpenAI), mantiene una finestra per
   `conversation_id` (20 messaggi, TTL 10 min) per il contesto multi-turno —
   l'hub manda solo il testo corrente — e risponde `handled` (o `not-handled`
-  con il testo dell'errore). Ogni turno è loggato in `agent_invocations`
+  con una frase per le persone nella lingua del turno, `spokenFailure`: il
+  satellite la legge ad alta voce, quindi mai il testo dell'errore, che va nel
+  log). Ogni turno è loggato in `agent_invocations`
   (origin `voice`, model `wyoming:<slug-agente>`). Un utente eliminato/disabilitato
   o un agente scomparso disattivano il programma handle (loggato) senza toccare
   STT/TTS; il PATCH valida entrambi.
+- **Conversazione continua** (2026-10-28): `handled` porta anche
+  `continue_conversation: true` quando la risposta finisce con una domanda
+  (`expectsReply`), così il satellite torna in ascolto senza la wake word. Non
+  ancora nel protocollo Wyoming né nell'integrazione Wyoming di Home Assistant:
+  proposto a monte (un campo facoltativo su `handled` / `handled-stop`, passato a
+  `ConversationResult.continue_conversation`). Finché non arriva, l'Home
+  Assistant di casa usa quella modifica come copia dell'integrazione `wyoming` in
+  `custom_components/`, da togliere quando il rilascio ufficiale la contiene. Gli
+  hub che non conoscono il campo lo ignorano.
 - Fuori scope: `synthesize-*` in streaming, wake-word, riconoscimento intent.
 
 Configurazione in Home Assistant: Impostazioni → Dispositivi e servizi →

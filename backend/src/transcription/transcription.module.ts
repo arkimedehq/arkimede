@@ -4,7 +4,9 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { TranscriptionService } from './transcription.service';
 import { TranscriptionController } from './transcription.controller';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppConfigModule } from '../app-config/app-config.module';
+import { User } from '../users/users.entity';
 
 /**
  * Voice transcription module (Whisper).
@@ -15,7 +17,7 @@ import { AppConfigModule } from '../app-config/app-config.module';
  * same pattern as EmbedModule ↔ AppConfigModule.
  */
 @Module({
-  imports: [forwardRef(() => AppConfigModule)],
+  imports: [forwardRef(() => AppConfigModule), TypeOrmModule.forFeature([User])],   // User: the vocabulary's memory switch
   providers: [TranscriptionService],
   controllers: [TranscriptionController],
   exports: [TranscriptionService],

@@ -287,6 +287,11 @@ export class LlmConfigsService {
     );
   }
 
+  /** The config designated for vision (`isVision`), without the default fallback. */
+  async getDesignatedVision(): Promise<LlmConfigEntity | null> {
+    return this.repo.findOne({ where: { isVision: true } });
+  }
+
   /**
    * Config to use for summaries: the designated `isSummarizer`, otherwise
    * fallback to `isDefault`. null only if the table is empty.

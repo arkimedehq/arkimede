@@ -18,6 +18,7 @@ import {UserMemoryService} from '../user-memory/user-memory.service';
 import { withoutRecordareIngest } from '../recordare/recordare-outbox';
 import { ChatRunsService, type ChatRunPatch } from './chat-runs.service';
 import type { AgentProgressEvent } from '../agent/agent.service';
+import {runWithLlmCallContext} from '../usage/llm-call-context';
 
 class SendMessageDto {
   @IsString() content: string;
@@ -171,9 +172,10 @@ export class MessagesController {
         send({ type: 'agent_team_start', teamId: chat.agentTeamId });
         progress({ phase: 'team' });
         try {
-          const result = await this.multiAgent.runTeamById(
-            chat.agentTeamId, user.id, dto.content, chat.projectId ?? undefined,
-          );
+          // The members recall from this chat's memory (AgentMemoryService via the call context).
+          const result = await runWithLlmCallContext({ userId: user.id, conversationId: chatId }, () => this.multiAgent.runTeamById(
+            chat.agentTeamId!, user.id, dto.content, chat.projectId ?? undefined,
+          ));
           for (const step of result.steps) {
             send({ type: 'agent_step', agent: step.agent, role: step.role, output: step.output });
           }
@@ -357,6 +359,22 @@ export class MessagesController {
             outputTracking.push(tracked);
           };
 
+          // A file a tool already stored as a File (files/tool-files.ts): attached by
+          // its id, once the caller's access to it is checked.
+          const emitById = (fileId: string): void => {
+            if (seenOutputIds.has(fileId)) return;
+            seenOutputIds.add(fileId);
+            const tracked = filesSvc.findOneReadable(fileId, outUserId)
+              .then((file) => {
+                const name = file.originalName;
+                outputAttachments.push({ name, fileId, mimeType: file.mimeType || mimeForName(name) });
+                this.runs.fileReady(chatId, runId, { name, fileId, downloadUrl: `/api/files/${fileId}/download` });
+                send({ type: 'file', name, fileId, downloadUrl: `/api/files/${fileId}/download` });
+              })
+              .catch(() => { /* not found / no access: no attachment */ });
+            outputTracking.push(tracked);
+          };
+
           // Maps a bare output name into the caller's own skills-output subdir (guarded).
           const emitFromName = (rawName: string): void => {
             const abs = resolve(join(userOutDir, basename(rawName)));
@@ -381,6 +399,11 @@ export class MessagesController {
 
           function walk(value: any): void {
             if (typeof value === 'string') {
+              // (0) the reference line of a file a tool stored (files/tool-files.ts,
+              //     `file_id: <uuid>`) → attach it by id
+              const idMatches = [...value.matchAll(/file_id: ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi)];
+              for (const m of idMatches) emitById(m[1].toLowerCase());
+              if (idMatches.length && !/[?&]rel=/.test(value)) return;
               // (a) a ?rel=<x> in one of OUR download URLs → surface the output it points to
               const relMatches = [...value.matchAll(/[?&]rel=([^&\s'"]+)/g)];
               if (relMatches.length) {

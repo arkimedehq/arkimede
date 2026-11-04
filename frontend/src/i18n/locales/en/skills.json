@@ -196,6 +196,7 @@
   "daemon": {
     "statusStarting": "Starting…",
     "statusRunning": "Active",
+    "statusRestarting": "Restarting…",
     "statusStopped": "Stopped",
     "statusError": "Error",
     "stopTitle": "Stop daemon",

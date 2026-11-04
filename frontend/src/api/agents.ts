@@ -19,7 +19,7 @@ export interface Agent {
   toolFilter: AgentToolFilter;
   maxIterations: number | null;
   exposeAsTool: boolean;
-  /** Recordare memory context before each answer. */
+  /** The agent uses its memory (charter, context before each answer, memory tools); on by default. */
   memoryContext: boolean;
   scope: AgentScope;
   teamId: string | null;

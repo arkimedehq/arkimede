@@ -243,7 +243,7 @@ curl -s localhost:3000/api/health                     # verify
 
 > **Re-running `install.sh` instead** also works for an upgrade (it is idempotent and rebuilds the broker images), but **only after** a `git pull` — on its own it just rebuilds the version already on disk. Prefer `update.sh` for a running deployment.
 
-**Rollback.** Every run leaves a snapshot under `backups/arkimede-backup-<timestamp>/`. To restore the database: `gunzip -c backups/<snapshot>/db.sql.gz | ./scripts/compose.sh exec -T postgres psql -U <DB_USER> -d <DB_NAME>`. Volume tarballs (`uploads`/`skills_data`/`qdrant_data`) restore into their volumes with the `docker run --rm -v <project>_<volume>:/dst …` pattern shown at the top of `scripts/backup.sh`.
+**Rollback.** Every run leaves a snapshot `arkimede-backup-<timestamp>/` in the backup destination (`backups/` unless configured). Restoring it, scheduled backups to a NAS or network share, and point-in-time recovery: **[BACKUP.md](BACKUP.md)**.
 
 ---
 
@@ -583,6 +583,33 @@ Transport: remote
 
 Naming follows the pattern `mcp_{server_name}_{tool_name}`:
 - Server "filesystem" + tool "read_file" → `mcp_filesystem_read_file`
+
+### Files returned by tools (images, audio, documents)
+
+An MCP tool may return files: `image` and `audio` blocks, an embedded `resource`
+with a binary `blob`, a `resource_link` to a file. Each becomes a **file of the
+user** (`files` table, under `UPLOAD_DIR/tool-files/<userId>/`, at most
+`TOOL_FILE_MAX_MB`, default 50) and the model reads one line for it:
+
+```
+[file] image-1793443533335.jpg (image/jpeg, 84 KB) — file_id: <uuid> — download: /api/files/<uuid>/download
+```
+
+- **Passing it on**: the model hands the `file_id` to any `file-ref` parameter —
+  "take a snapshot and send it on Telegram" is the camera tool, then
+  `send_message(file=<file_id>)`. A large file (a video) never goes through the
+  model: it costs one line.
+- **Looking at it**: before each model call the content goes in a user message
+  right after the tool results (the one place every provider accepts images):
+  images as images when the agent's model is the designated **vision** model
+  (Settings → AI System, *vision*), described in words by the vision model
+  otherwise; audio as a transcript (the speech-to-text service); small text
+  files as text. With no designated vision model, images are known by their
+  line only.
+- **In the chat** the file is attached to the answer (download chip).
+- A `resource_link` is fetched when its URI is http(s) (with the server's
+  headers when it is on the server's own origin) or readable through
+  `resources/read`; otherwise the model gets the link.
 
 ---
 
@@ -1145,6 +1172,16 @@ The backend automatically leverages the provider's prompt caching:
 | **OpenAI** | Automatic on the stable prefix | Prefix ≥1024 tok cached automatically; 50% discount. No markers needed. |
 | **Gemini** | Automatic | `cachedContentTokenCount` mapped in LangChain → logged as `cache_read`. |
 | **DeepSeek** | Automatic | `prompt_cache_hit_tokens` intercepted by the SSE interceptor in `LlmProviderService`. Logs hit/miss in debug. |
+
+**What changes per request goes after the stable part.** An automatic cache reuses a request's
+tokens only up to the first one that differs from the previous request, and a request reads
+system message → tool definitions → conversation. So the system message holds only the stable
+prompt, the tools are sorted by name (their sources load concurrently), and the per-request
+blocks — current date/time, conversation summary, feedback corrections, retrieved memory notes,
+Recordare context — open the turn's user message, under their own headings and before
+`## The user's message` (`agent/turn-context.ts`). The whole system prompt and tool list are then
+cached from one request to the next. Anthropic keeps those blocks in the system message, after
+its explicit cache marker.
 
 **How to read the cache logs:**
 ```

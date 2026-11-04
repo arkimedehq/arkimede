@@ -10,7 +10,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as net from 'node:net';
-import { WyomingService } from '../../src/wyoming/wyoming.service';
+import { WyomingService, expectsReply, spokenFailure } from '../../src/wyoming/wyoming.service';
 import { ConversationFocusService } from '../../src/chats/conversation-focus.service';
 import { WyomingDecoder, WyomingEvent, encodeEvent, parseWav, pcmToWav } from '../../src/wyoming/wyoming.protocol';
 
@@ -49,6 +49,7 @@ function makeService(opts: { enabled?: boolean; cidrs?: string | null; sttEnable
       ? [{ role: 'user', content: 'prima' }, { role: 'assistant', content: 'ok' }, { role: 'user', content: 'poi' }, { role: 'assistant', content: 'ok' }]
       : null)),
     recordTurn: vi.fn(async () => 'chat-1'),
+    memoryConversationId: vi.fn(async (turn: any) => turn.chatId ?? `${turn.source}:${turn.key}`),
   };
   const transcription = {
     describe:   vi.fn(async () => ({ provider: 'internal', model: 'faster-whisper-base', enabled: opts.sttEnabled ?? true })),
@@ -113,7 +114,7 @@ describe('WyomingService', () => {
       { type: 'audio-stop', data: {} },
     ]);
     expect(replies).toEqual([{ type: 'transcript', data: { text: 'heard 4800 bytes', language: 'it' }, payload: undefined }]);
-    expect(ctx.transcription.transcribe).toHaveBeenCalledWith(expect.any(Buffer), 'audio.wav', 'it');
+    expect(ctx.transcription.transcribe).toHaveBeenCalledWith(expect.any(Buffer), 'audio.wav', 'it', expect.any(Object));
   });
 
   it('synthesizes text into audio-start / audio-chunk* / audio-stop with the WAV format', async () => {
@@ -189,6 +190,28 @@ describe('WyomingService — access control and toggle', () => {
   });
 });
 
+describe('expectsReply', () => {
+  it('is true for an answer ending with a question, also closed by quotes, brackets or emphasis', () => {
+    for (const answer of ['In quale stanza?', 'Vuoi che la accenda? ', 'Ti dico "quale?"', 'Quale (cucina o sala?)', 'Davvero?**']) {
+      expect(expectsReply(answer)).toBe(true);
+    }
+  });
+  it('is false for statements and questions in the middle', () => {
+    for (const answer of ['Fatto.', 'Luce accesa', '', 'Chi era? Era Mario.']) {
+      expect(expectsReply(answer)).toBe(false);
+    }
+  });
+});
+
+describe('spokenFailure', () => {
+  it('speaks the turn language, Italian or else English, and never the error', () => {
+    expect(spokenFailure('it')).toMatch(/^Scusa/);
+    expect(spokenFailure('it-IT')).toMatch(/^Scusa/);
+    expect(spokenFailure('en')).toMatch(/^Sorry/);
+    expect(spokenFailure(undefined)).toMatch(/^Sorry/);
+  });
+});
+
 describe('WyomingService — conversation (handle program)', () => {
   it('advertises the handle program with the agent slug when a user + agent are configured', async () => {
     const { svc } = makeService({ handleUser: VOICE_USER, handleAgent: VOICE_AGENT });
@@ -200,6 +223,15 @@ describe('WyomingService — conversation (handle program)', () => {
     await svc.onModuleDestroy();
   });
 
+  it('asks the hub to keep listening when the answer is a question', async () => {
+    const ctx = makeService({ handleUser: VOICE_USER, handleAgent: VOICE_AGENT });
+    await ctx.svc.applyConfig();
+    ctx.agentService.streamResponse.mockImplementationOnce(async (...args: any[]) => { args[8]('In quale stanza?'); return null; });
+    const [handled] = await exchange(ctx.svc.getStatus().port, [{ type: 'transcript', data: { text: 'accendi la luce', context: { conversation_id: 'conv-q' } } }]);
+    expect(handled).toMatchObject({ type: 'handled', data: { text: 'In quale stanza?', continue_conversation: true } });
+    await ctx.svc.onModuleDestroy();
+  });
+
   it('runs the agent as the configured user with its overrides and answers with handled', async () => {
     const ctx = makeService({ handleUser: VOICE_USER, handleAgent: VOICE_AGENT });
     await ctx.svc.applyConfig();
@@ -208,6 +240,7 @@ describe('WyomingService — conversation (handle program)', () => {
     expect(handled.type).toBe('handled');
     expect(handled.data.text).toBe('risposta a "accendi la luce" (history=0)');
     expect(handled.data.context).toEqual(context);
+    expect(handled.data.continue_conversation).toBe(false);
     const call = ctx.agentService.streamResponse.mock.calls[0];
     expect(call[1]).toBe(VOICE_USER);
     expect(call[12]).toMatchObject({ origin: 'voice', agentPromptOverride: 'Rispondi in una frase.', toolOverride: { mode: 'names' }, maxIterations: 7 });
@@ -227,8 +260,8 @@ describe('WyomingService — conversation (handle program)', () => {
     const [other]  = await exchange(port, [{ type: 'transcript', data: { text: 'altro', context: { conversation_id: 'B' } } }]);
     expect(second.data.text).toContain('history=2');
     expect(other.data.text).toContain('history=0');
-    // Standard pipeline (no agent): only the origin override is passed
-    expect(ctx.agentService.streamResponse.mock.calls[0][12]).toEqual({ origin: 'voice' });
+    // Standard pipeline (no agent): the origin, and the conversation for the memory
+    expect(ctx.agentService.streamResponse.mock.calls[0][12]).toEqual({ origin: 'voice', conversationId: 'wyoming:A' });
     await ctx.svc.onModuleDestroy();
   });
 
@@ -264,8 +297,10 @@ describe('WyomingService — conversation (handle program)', () => {
     const ctx = makeService({ handleUser: VOICE_USER });
     await ctx.svc.applyConfig();
     ctx.agentService.streamResponse.mockRejectedValueOnce(new Error('llm down'));
-    const [err] = await exchange(ctx.svc.getStatus().port, [{ type: 'transcript', data: { text: 'ciao' } }]);
-    expect(err).toMatchObject({ type: 'not-handled', data: { text: 'llm down' } });
+    const [err] = await exchange(ctx.svc.getStatus().port, [{ type: 'transcript', data: { text: 'ciao', language: 'it' } }]);
+    // The satellite says a sentence for people; the error stays in the invocation record.
+    expect(err).toMatchObject({ type: 'not-handled', data: { text: spokenFailure('it') } });
+    expect(err.data.text).not.toContain('llm down');
     expect(ctx.invocations.record).toHaveBeenCalledWith(expect.objectContaining({ status: 'error', error: 'llm down' }));
     await ctx.svc.onModuleDestroy();
   });

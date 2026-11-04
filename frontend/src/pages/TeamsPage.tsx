@@ -107,6 +107,10 @@ function MembersEditor({ team, onClose }: { team: TeamWithCount; onClose: () => 
   const [err, setErr] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Details: the saved values and the ones being edited (the title follows the saved name).
+  const [saved, setSaved] = useState({ name: team.name, description: team.description ?? '', color: team.color ?? '#6b7280' });
+  const [details, setDetails] = useState(saved);
+  const [savedOk, setSavedOk] = useState(false);
 
   const membersQ = useQuery({ queryKey: ['team-members', team.id], queryFn: () => teamsApi.members(team.id) });
   const usersQ = useQuery({
@@ -133,6 +137,21 @@ function MembersEditor({ team, onClose }: { team: TeamWithCount; onClose: () => 
     mutationFn: (userId: string) => teamsApi.removeMember(team.id, userId),
     onSuccess: () => { setErr(null); invalidate(); }, onError: onErr,
   });
+  const detailsM = useMutation({
+    mutationFn: () => teamsApi.update(team.id, {
+      name: details.name.trim(), description: details.description.trim() || null, color: details.color,
+    }),
+    onSuccess: (updated) => {
+      const next = { name: updated.name, description: updated.description ?? '', color: updated.color ?? details.color };
+      setSaved(next); setDetails(next); setErr(null); setSavedOk(true);
+      qc.invalidateQueries({ queryKey: ['teams'] });
+    },
+    onError: (e: any) => setErr(e?.response?.data?.message ?? t('errors.updateTeam')),
+  });
+  const detailsChanged = details.name.trim() !== saved.name
+    || details.description.trim() !== saved.description || details.color !== saved.color;
+  const editDetails = (patch: Partial<typeof details>) => { setDetails((d) => ({ ...d, ...patch })); setSavedOk(false); };
+
   const deleteTeamM = useMutation({
     mutationFn: () => teamsApi.remove(team.id),
     onSuccess: onClose, // section's onClose invalidates the list + goes back
@@ -144,8 +163,31 @@ function MembersEditor({ team, onClose }: { team: TeamWithCount; onClose: () => 
   const candidates = (usersQ.data?.items ?? []).filter((u) => !memberIds.has(u.id));
 
   return (
-    <InlineEditor backLabel="Team" title={t('modal.membersTitle', { name: team.name })} onBack={onClose}>
+    <InlineEditor backLabel="Team" title={t('modal.membersTitle', { name: saved.name })} onBack={onClose}>
       {err && <p className="text-sm text-red-400 mb-3">{err}</p>}
+
+      {/* Details: name, description, color */}
+      <div className="mb-5 pb-4 border-b border-gray-800">
+        <p className="text-xs font-medium text-gray-400 mb-2">{t('modal.sections.details')}</p>
+        <Field label={t('modal.form.nameLabel')}>
+          <input className="input-field w-full" value={details.name} onChange={(e) => editDetails({ name: e.target.value })} />
+        </Field>
+        <Field label={t('modal.form.descriptionLabel')}>
+          <input className="input-field w-full" value={details.description} onChange={(e) => editDetails({ description: e.target.value })} />
+        </Field>
+        <Field label={t('modal.form.colorLabel')}>
+          <input type="color" className="h-9 w-16 bg-gray-800 rounded border border-gray-700" value={details.color}
+            onChange={(e) => editDetails({ color: e.target.value })} />
+        </Field>
+        <div className="flex items-center gap-3">
+          <button onClick={() => detailsM.mutate()}
+            disabled={!detailsChanged || details.name.trim().length < 2 || detailsM.isPending}
+            className="btn-primary px-3 py-1.5 text-sm flex items-center gap-1.5 disabled:opacity-50">
+            {detailsM.isPending && <Loader2 size={13} className="animate-spin" />} {t('actions.saveDetails')}
+          </button>
+          {savedOk && <span className="text-xs text-green-400">{t('modal.saved')}</span>}
+        </div>
+      </div>
 
       {/* Current members */}
       <div className="mb-4">

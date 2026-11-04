@@ -13,6 +13,8 @@
  */
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
+import { HumanMessage } from '@langchain/core/messages';
+import { TOOL_IMAGE_DESCRIBE_PROMPT } from '../prompts/prompts';
 import { LlmConfigsService } from '../llm-configs/llm-configs.service';
 import { LlmProvider } from './app-config.entity';
 
@@ -120,6 +122,41 @@ export class LlmProviderService {
       provider: entity.provider as LlmProvider,
       modelName: entity.model ?? null,
       isReasoning: LlmProviderService.requiresReasoningContent(entity.provider, entity.model),
+    };
+  }
+
+  /**
+   * How the agent's model can take images, for the files tools return
+   * (agent/tool-media.ts): it sees them itself when it IS the designated vision
+   * config (`isVision`); otherwise the designated vision config, if any,
+   * describes them in words. No designated config → neither (the default
+   * fallback of getVision() is not used: the default model may reject images).
+   */
+  async getImageSupport(activeConfigId?: string): Promise<{
+    seesImages: boolean;
+    describe: ((base64: string, mimeType: string) => Promise<string>) | null;
+  }> {
+    const vision = await this.llmConfigsService.getDesignatedVision();
+    if (!vision) return { seesImages: false, describe: null };
+    const activeId = activeConfigId ?? (await this.llmConfigsService.getDefault())?.id;
+    if (vision.id === activeId) return { seesImages: true, describe: null };
+    // Built on the first image only: most runs have none.
+    let model: BaseChatModel | null = null;
+    return {
+      seesImages: false,
+      describe: async (base64, mimeType) => {
+        model ??= await this.llmConfigsService.buildModelForConfig(vision, { maxTokens: 1024 });
+        const response = await model.invoke([new HumanMessage({
+          content: [
+            { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}` } },
+            { type: 'text', text: TOOL_IMAGE_DESCRIBE_PROMPT },
+          ],
+        })]);
+        const content: any = response.content;
+        return typeof content === 'string'
+          ? content
+          : (content as any[]).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('');
+      },
     };
   }
 

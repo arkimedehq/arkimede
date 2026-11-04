@@ -34,8 +34,15 @@ export interface TranscriptionConfig {
   transcriptionModel:     string | null;
   hasTranscriptionApiKey: boolean;
   transcriptionBaseUrl:   string | null;
+  /** Pass the expected words to the model as its prompt (the admin's + the names the memory knows). */
+  transcriptionVocabularyEnabled: boolean;
+  transcriptionVocabulary:        string | null;
+  /** Model of the bundled service used when a cloud provider fails; null = none. */
+  transcriptionFallbackModel:     string | null;
   /** Whether the bundled whisper-service is deployed (GET only). */
   internalAvailable?:     boolean;
+  /** Models the bundled service has downloaded: the only fallback choices (GET only). */
+  localModels?:           { id: string; engine: string }[];
 }
 
 export interface UpdateTranscriptionConfigPayload {
@@ -45,6 +52,9 @@ export interface UpdateTranscriptionConfigPayload {
   /** Non-empty string → save, null → clear, undefined → leave untouched */
   transcriptionApiKey?:   string | null;
   transcriptionBaseUrl?:  string | null;
+  transcriptionVocabularyEnabled?: boolean;
+  transcriptionVocabulary?:        string | null;
+  transcriptionFallbackModel?:     string | null;
 }
 
 export type TtsProvider = 'internal' | 'openai' | 'openai-compatible';

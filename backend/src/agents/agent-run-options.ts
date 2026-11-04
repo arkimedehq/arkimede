@@ -21,7 +21,8 @@ export function agentRunOptions(
     ...(agent.systemPrompt?.trim() ? { agentPromptOverride: agent.systemPrompt } : {}),
     ...(agent.toolFilter ? { toolOverride: agent.toolFilter } : {}),
     ...(agent.llmConfigId ? { llmConfigId: agent.llmConfigId } : {}),
-    ...(agent.memoryContext ? { memoryContext: true } : {}),
+    // Memory is on unless the agent turns it off.
+    ...(agent.memoryContext === false ? { memoryContext: false } : {}),
     // Agent.maxIterations counts ReAct TOOL ROUNDS (user-facing semantics);
     // the LangGraph recursion limit counts graph super-steps — each round is
     // agent + tool (2 steps) plus the final agent step.

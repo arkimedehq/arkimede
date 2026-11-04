@@ -1557,6 +1557,16 @@ The `event_type` field is free-form. Recommended conventions:
 > **`daemon_exit`** is emitted automatically by the executor when the process terminates.
 > You do not need to emit it manually unless you want to do so before `sys.exit()`.
 
+> **Automatic restart.** A daemon that terminates without being stopped (any exit
+> code, or found missing from the executor) goes to `restarting` and is started again
+> after 5 s, 30 s, 2 min, 10 min and 30 min; after the fifth failed attempt it stays in
+> `error`. A daemon that had run for at least 15 minutes starts again from the first
+> delay. The last 20 lines of its output are kept in `lastError` (shown on the daemon
+> card), so the cause survives the rotation of the executor's log. Stopping or
+> restarting it by hand cancels a pending automatic restart. The restart is a safety
+> net: handle transient errors (network, rate limits, a conflicting session) inside
+> the daemon's loop and exit only for unrecoverable ones.
+
 ### Python template
 
 ```python

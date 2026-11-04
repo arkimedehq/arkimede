@@ -109,6 +109,7 @@ export class InternalDaemonsController {
         await this.daemonsSvc.handleDaemonExit(
           daemonId,
           (dto.payload?.exit_code as number | null) ?? null,
+          typeof dto.payload?.output_tail === 'string' ? dto.payload.output_tail : undefined,
         );
       } catch { /* non-critical */ }
     }

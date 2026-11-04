@@ -20,7 +20,7 @@
  *   - streamResponse()  → SSE/streaming for the chat interface (progressive response)
  *   - invoke()          → Synchronous response (used internally or for tests)
  */
-import {Inject, Injectable, Logger, OnModuleInit, Optional} from '@nestjs/common';
+import {forwardRef, Inject, Injectable, Logger, OnModuleInit, Optional} from '@nestjs/common';
 import {InjectRepository} from '@nestjs/typeorm';
 import {Repository} from 'typeorm';
 import {AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage, trimMessages} from '@langchain/core/messages';
@@ -40,11 +40,10 @@ import {Project} from '../projects/projects.entity';
 import {ToolManifest, ToolSelectionService} from './tool-selection.service';
 import {BaseCallbackHandler} from '@langchain/core/callbacks/base';
 import {FeedbackService} from '../feedback/feedback.service';
-import { type MemoryUse, UserMemoryService } from '../user-memory/user-memory.service';
 import {FlowsService} from '../flows/flows.service';
 import {
-  GET_CURRENT_DATETIME_DESC, languageLine, userMemoryBlock, summaryBlock,
-  feedbackBlock, memoryBlock, nowBlock, summarizerPrompt,
+  GET_CURRENT_DATETIME_DESC, languageLine, summaryBlock,
+  feedbackBlock, nowBlock, summarizerPrompt,
 } from '../prompts/prompts';
 import {MultiAgentService} from '../agents/multi-agent.service';
 import {SchedulingService} from '../scheduling/scheduling.service';
@@ -52,7 +51,10 @@ import {SandboxService} from '../sandbox/sandbox.service';
 import {LlmUsage, sumUsageFromMessages} from '../common/llm-usage.util';
 import {runWithLlmCallContext} from '../usage/llm-call-context';
 import {withAgentSpan} from '../observability/genai-tracing';
-import {RecordareMcpService} from '../recordare/recordare-mcp.service';
+import {AgentMemoryService} from '../agent-memory/agent-memory.service';
+import {TranscriptionService} from '../transcription/transcription.service';
+import {toolMediaModifier} from './tool-media';
+import {withTurnContext} from './turn-context';
 import {APP_NAME} from '../config/app.config';
 
 /**
@@ -72,8 +74,13 @@ export interface StreamResponseOptions {
   origin?: 'chat' | 'voice';
   /** LLM config override (Agent.llmConfigId): run on that model instead of the default. */
   llmConfigId?: string;
-  /** Agent.memoryContext: append the user's relevant memories from Recordare to the system prompt. */
+  /** Agent.memoryContext: false turns the agent's memory off (on by default — agent-memory.service.ts). */
   memoryContext?: boolean;
+  /**
+   * The conversation the turn belongs to when it runs without an Arkimede chat
+   * (external entry points): the memory recalls and writes under it.
+   */
+  conversationId?: string;
   /**
    * Progress of the run, for callers that show it (the chat): a model call starts,
    * the model starts writing a tool call's arguments (and how much it has written),
@@ -136,12 +143,12 @@ export class AgentService implements OnModuleInit {
     @InjectRepository(Project)          private readonly projectRepo:        Repository<Project>,
     @InjectRepository(Chat)             private readonly chatRepo:           Repository<Chat>,
     @Optional() @Inject(FeedbackService) private readonly feedbackService:   FeedbackService | null,
-    @Optional() @Inject(UserMemoryService) private readonly userMemoryService: UserMemoryService | null,
+    @Inject(AgentMemoryService)         private readonly agentMemory:        AgentMemoryService,
     @Inject(FlowsService)               private readonly flowsService:       FlowsService,
     @Inject(MultiAgentService)          private readonly multiAgentService:  MultiAgentService,
     @Inject(SchedulingService)          private readonly schedulingService:  SchedulingService,
     @Inject(SandboxService)             private readonly sandboxService:     SandboxService,
-    @Optional() @Inject(RecordareMcpService) private readonly recordareMcp: RecordareMcpService | null = null,
+    @Optional() @Inject(forwardRef(() => TranscriptionService)) private readonly transcription: TranscriptionService | null = null,
   ) {}
 
   /**
@@ -216,10 +223,12 @@ export class AgentService implements OnModuleInit {
     opts?: StreamResponseOptions,
   ): Promise<{ inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; provider: string; model: string | null } | null> {
     this.logger.log(`Chat: "${userInput}"`);
+    // The conversation of this turn for the memory: the chat, else the entry point's own.
+    const conversationId = chatId ?? opts?.conversationId;
     const isReasoning = opts?.llmConfigId
       ? (await this.llmProviderService.getModelBundleForConfigId(opts.llmConfigId)).isReasoning
       : await this.llmProviderService.isReasoningModel();
-    const { agent, contextBreakdown, effectiveMaxHistoryTokens, model, effectiveHistory, provider, modelName } = await this.resolveAgent(userId, projectId, userInput, history, chatId, opts?.toolOverride, opts?.agentPromptOverride, opts?.llmConfigId, opts?.memoryContext);
+    const { agent, contextBreakdown, effectiveMaxHistoryTokens, model, effectiveHistory, provider, modelName } = await this.resolveAgent(userId, projectId, userInput, history, chatId, opts?.toolOverride, opts?.agentPromptOverride, opts?.llmConfigId, opts?.memoryContext, conversationId);
     const messages = await this.buildMessages(userInput, effectiveHistory, attachments, inlineContents, attachmentBlocks, isReasoning, effectiveMaxHistoryTokens, model, provider);
 
     // ── Context breakdown log ─────────────────────────────────────────────────
@@ -292,7 +301,7 @@ export class AgentService implements OnModuleInit {
       // when each model call actually fires during the iteration below.
       // invoke_agent span (OpenTelemetry, opt-in; pass-through when off).
       await withAgentSpan({ name: APP_NAME, userId, conversationId: chatId }, () =>
-      runWithLlmCallContext({ priority: 'interactive', userId, origin: opts?.origin ?? 'chat' }, async () => {
+      runWithLlmCallContext({ priority: 'interactive', userId, origin: opts?.origin ?? 'chat', conversationId }, async () => {
       const stream = await agent.stream(
         { messages },
         {
@@ -807,7 +816,7 @@ export class AgentService implements OnModuleInit {
     userPrompt?:    string | null,
     projectPrompt?: string | null,
     skillsPrompt?:  string | null,
-    userMemory?:    string[] | null,
+    memoryPrompt?:  string | null,
     language?:      string | null,
   ): string {
     const parts: string[] = [basePrompt];
@@ -815,11 +824,9 @@ export class AgentService implements OnModuleInit {
     const langName = language === 'en' ? 'English' : language === 'it' ? 'Italian' : null;
     if (langName) parts.push(languageLine(langName));
     if (userPrompt?.trim())    parts.push(userPrompt.trim());
-    // Persistent user memory: confirmed, stable facts → they stay in the cached
-    // prefix (they change only when the user confirms/deletes a fact).
-    if (userMemory?.length) {
-      parts.push(userMemoryBlock(userMemory));
-    }
+    // The agent's memory: its charter and the pinned notes → stable, they stay in
+    // the cached prefix (they change only with the charter's version or a pinned note).
+    if (memoryPrompt?.trim()) parts.push(memoryPrompt.trim());
     if (projectPrompt?.trim()) parts.push(projectPrompt.trim());
     if (skillsPrompt?.trim())  parts.push(skillsPrompt.trim());
     return parts.join('\n\n');
@@ -974,8 +981,10 @@ export class AgentService implements OnModuleInit {
     agentPromptOverride?: string,
     /** LLM config override (Agent.llmConfigId): null/undefined = platform default. */
     llmConfigOverride?: string,
-    /** Agent.memoryContext: the user's relevant memories from Recordare, appended to the system prompt. */
+    /** Agent.memoryContext: false = no memory for this agent (charter, context, tools). */
     memoryContext?: boolean,
+    /** The conversation of the turn for the memory (chatId, or an external entry point's); none → A-MEM only. */
+    conversationId?: string,
   ): Promise<{ agent: any; contextBreakdown: ContextBreakdown; effectiveMaxHistoryTokens: number; model: any; effectiveHistory: Message[]; provider: string; modelName: string | null }> {
     // Per-agent model override: resolved once (cached per config id), BEFORE the
     // parallel loads so the bundle is not built twice concurrently.
@@ -1028,6 +1037,18 @@ export class AgentService implements OnModuleInit {
       chatId, history, effectiveMaxHistoryTokens,
       globalToolConfig.historyCompactionEnabled, globalToolConfig.historyCompactionThreshold,
     ));
+
+    // ── The agent's memory (agent-memory.service.ts) ─────────────────────────
+    // Recordare, else A-MEM: the charter and the pinned notes go in the stable
+    // prompt, what came to mind for this message in the per-request blocks, the
+    // memory tools first. Started now, it runs while the tools are selected. The
+    // tail of the rolling summary gives short replies ("yes, go ahead") topical signal.
+    const memoryPromise = userId && memoryContext !== false
+      ? this.agentMemory.forTurn({
+          userId, user, conversationId, chatId, query: userInput,
+          querySignal: summary?.trim() ? summary.trim().slice(-400) : undefined,
+        })
+      : Promise.resolve(null);
 
     // ── Convert tools into manifests for ToolSelectionService ─────────────────
     const fullManifests: ToolManifest[] = [
@@ -1136,24 +1157,9 @@ export class AgentService implements OnModuleInit {
     const userPrompt    = user?.systemPrompt;
     const projectPrompt = project?.systemPrompt;
 
-    // ── Persistent user memory (A-MEM F2) ─────────────────────────────────────
-    // Only the PINNED notes live in the cached prefix (stable, they change
-    // rarely). The rest of the memory enters per-query via hybrid retrieval,
-    // in the NON-cached blocks below — injecting everything here would both
-    // bloat the prompt and (if per-query) invalidate the stable-prefix cache.
-    // Two independent choices (Recordare D34): the personal notes and the team / org ones.
-    const memoryUse: MemoryUse = { personal: !!user?.autoMemoryEnabled, shared: !!user?.sharedMemoryEnabled };
-    const usesNotes = memoryUse.personal || memoryUse.shared;
-    let userMemory: string[] | null = null;
-    if (usesNotes && userId && this.userMemoryService) {
-      try {
-        userMemory = await this.userMemoryService.getPinnedContents(userId, memoryUse);
-      } catch (err: any) {
-        this.logger.warn(`Failed to load user memory: ${err?.message ?? err}`);
-      }
-    }
+    const memory = await memoryPromise;
 
-    const builtPrompt   = this.buildSystemPrompt(basePrompt, userPrompt, projectPrompt, skillsPrompt, userMemory, user?.language);
+    const builtPrompt   = this.buildSystemPrompt(basePrompt, userPrompt, projectPrompt, skillsPrompt, memory?.prompt, user?.language);
     // Agent-specific instructions (e.g. a named agent invoked through the
     // OpenAI-compat endpoint) go after the 4-level prompt, same position they
     // would occupy in a dedicated agent runtime.
@@ -1180,27 +1186,6 @@ export class AgentService implements OnModuleInit {
       }
     }
 
-    // ── Retrieved memory notes (A-MEM F2) ─────────────────────────────────────
-    // Hybrid FTS+vector retrieval over the confirmed notes, driven by the current
-    // message (+ the tail of the rolling summary, so short replies like "yes, go
-    // ahead" still carry topical signal). Per-query → NON-cached block. Pinned
-    // notes are excluded here: they already sit in the stable prefix.
-    let memoryTextBlock: string | null = null;
-    if (usesNotes && userId && userInput?.trim() && this.userMemoryService) {
-      try {
-        const query = summary?.trim()
-          ? `${userInput}\n${summary.trim().slice(-400)}`
-          : userInput;
-        const notes = await this.userMemoryService.retrieve(userId, query, memoryUse);
-        if (notes.length) {
-          memoryTextBlock = memoryBlock(notes);
-          this.logger.debug(`Memory: ${notes.length} retrieved notes injected`);
-        }
-      } catch (err: any) {
-        this.logger.warn(`Memory retrieval failed: ${err?.message ?? err}`);
-      }
-    }
-
     // ── Current date/time ─────────────────────────────────────────────────────
     // Absolute time reference: without it the model does not know "what time it is
     // now" and for relative requests ("in 3 minutes") it hallucinates a timestamp,
@@ -1208,16 +1193,8 @@ export class AgentService implements OnModuleInit {
     // blocks because it changes on every request (like summary/feedback).
     const nowTextBlock = nowBlock(isoWithOffset(new Date(), DEFAULT_TIMEZONE), DEFAULT_TIMEZONE);
 
-    // ── Recordare memory context (Agent.memoryContext) ────────────────────────
-    // The user's memories relevant to this message, as Recordare's fenced block
-    // (data, not instructions). Per-query → NON-cached, last; bounded wait, never
-    // fails the answer. Recordare applies the viewer rule.
-    const recordareContextBlock = memoryContext && user?.episodicMemoryEnabled && userId && chatId && userInput?.trim() && this.recordareMcp?.enabled
-      ? await this.recordareMcp.contextBlock(userId, chatId, userInput)
-      : null;
-
-    // Extra non-cached blocks (change per request): date/time + summary + feedback + memory + Recordare context.
-    const extraBlocks = [nowTextBlock, summaryTextBlock, feedbackTextBlock, memoryTextBlock, recordareContextBlock]
+    // Extra non-cached blocks (change per request): date/time + summary + feedback + what came to mind (memory).
+    const extraBlocks = [nowTextBlock, summaryTextBlock, feedbackTextBlock, ...(memory?.turnBlocks ?? [])]
       .filter((b): b is string => !!b);
 
     // ── Prompt caching: build the messageModifier based on the provider ───────
@@ -1233,6 +1210,11 @@ export class AgentService implements OnModuleInit {
     //
     // DeepSeek — automatic cache; `prompt_cache_hit_tokens` intercepted
     //   in LlmProviderService's fetch interceptor.
+    //
+    // For these automatic caches the extra blocks go in the turn's user message
+    // (turn-context.ts): the request reads system → tools → conversation, so in the
+    // system message they would stop the cache before the tool definitions.
+    const turnContext = provider !== 'anthropic' && extraBlocks.length ? extraBlocks.join('\n\n') : null;
     const messageModifier: string | SystemMessage =
       provider === 'anthropic'
         ? new SystemMessage({
@@ -1247,20 +1229,12 @@ export class AgentService implements OnModuleInit {
               ...extraBlocks.map((b) => ({ type: 'text', text: b } as any)),
             ],
           })
-        : extraBlocks.length
-          ? `${systemPrompt}\n\n${extraBlocks.join('\n\n')}`
-          : systemPrompt;
+        : systemPrompt;
 
     // Always-available built-in tools: automation scheduling (Auto-Scheduling),
     // with a confirmation flow (schedule_task prepares → confirm_scheduled_task activates).
     // Origin chatId: for one-shots it becomes the delivery chat of the result.
     const schedulingTools = userId ? this.schedulingService.buildSchedulingTools(userId, projectId, chatId) : [];
-
-    // Memory (A-MEM F5): save_memory / search_memory, gated by the notes the user
-    // uses (D34: search only, for the team / org ones alone). save_memory only proposes (pending).
-    const memoryTools = usesNotes && userId && this.userMemoryService
-      ? this.userMemoryService.buildMemoryTools(userId, chatId, memoryUse)
-      : [];
 
     // Sandbox (arbitrary code/shell): gated per-request built-in. When enabled
     // for the user/project/team it is always present (bypasses the RAG); otherwise absent.
@@ -1268,21 +1242,19 @@ export class AgentService implements OnModuleInit {
       ? this.sandboxService.buildSandboxTools(userId, projectId, chatId)
       : [];
 
-    // Episodic memory in Recordare (opt-in per user, separate from A-MEM above):
-    // recordare_* tools bound to this user and chat (the conversation is the
-    // viewer context — no chat id, no tools).
-    const recordareTools = user?.episodicMemoryEnabled && userId && chatId && this.recordareMcp?.enabled
-      ? await this.recordareMcp.buildTools(userId, chatId)
-      : [];
-
+    // The memory tools first (the charter says to search memory before other
+    // tools), the rest sorted by name: the sources load concurrently or without
+    // an ORDER BY, and a different order between requests would defeat the prompt cache.
+    const memoryTools = memory?.tools ?? [];
     const allTools = [
-      ...this.builtInTools,
-      ...optimizedExtraTools,
-      ...schedulingTools,
       ...memoryTools,
-      ...recordareTools,
-      ...sandboxTools,
-      ...(deferredMetaTool ? [deferredMetaTool] : []),
+      ...[
+        ...this.builtInTools,
+        ...optimizedExtraTools,
+        ...schedulingTools,
+        ...sandboxTools,
+        ...(deferredMetaTool ? [deferredMetaTool] : []),
+      ].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)),
     ];
 
     // ── Context breakdown (token estimates) ──────────────────────────────────
@@ -1313,7 +1285,9 @@ export class AgentService implements OnModuleInit {
       agent: createReactAgent({
         llm:             model,
         tools:           allTools,
-        messageModifier,
+        // The system prompt, then the conversation with the content of the files
+        // tools returned (images, transcripts) after their results.
+        messageModifier: await this.withToolMedia(messageModifier, llmConfigOverride, user?.language, turnContext),
       }),
       contextBreakdown,
       effectiveMaxHistoryTokens,
@@ -1322,6 +1296,33 @@ export class AgentService implements OnModuleInit {
       provider,
       modelName,
     };
+  }
+
+  /**
+   * The agent's message modifier with the files tools return shown to the
+   * model (agent/tool-media.ts): images as images when the model is the
+   * designated vision model, else described by it; audio transcribed.
+   */
+  private async withToolMedia(
+    system: string | SystemMessage,
+    llmConfigOverride: string | undefined,
+    language: string | null | undefined,
+    /** Per-request blocks for the turn's user message (turn-context.ts); null = none. */
+    turnContext: string | null = null,
+  ) {
+    const images = await this.llmProviderService.getImageSupport(llmConfigOverride)
+      .catch(() => ({ seesImages: false, describe: null }));
+    const transcription = this.transcription;
+    const modifier = toolMediaModifier(system, {
+      seesImages: images.seesImages,
+      describeImage: images.describe ? (file, base64) => images.describe!(base64, file.mimeType) : undefined,
+      transcribe: transcription
+        ? (file, data) => transcription.transcribe(data, file.name, language ?? undefined)
+        : undefined,
+    });
+    return turnContext
+      ? (messages: BaseMessage[]) => modifier(withTurnContext(messages, turnContext))
+      : modifier;
   }
 
   /**

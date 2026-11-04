@@ -200,6 +200,24 @@ export class AppConfigEntity {
   @Column({ type: 'varchar', length: 500, nullable: true })
   transcriptionBaseUrl: string | null;
 
+  /**
+   * Pass the expected words (the admin's vocabulary + the names the user's memory
+   * knows) to the model as its prompt: proper names and places come out right.
+   */
+  @Column({ type: 'boolean', default: false })
+  transcriptionVocabularyEnabled: boolean;
+
+  /** The admin's own words (places, rooms, devices), one per line or comma-separated. */
+  @Column({ type: 'text', nullable: true })
+  transcriptionVocabulary: string | null;
+
+  /**
+   * A model of the bundled whisper-service used when a cloud provider fails
+   * (down, rate-limited). Null = no fallback; used only while it is downloaded.
+   */
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  transcriptionFallbackModel: string | null;
+
   // ── Text-to-speech configuration (Piper) ────────────────────────────────────
 
   /**

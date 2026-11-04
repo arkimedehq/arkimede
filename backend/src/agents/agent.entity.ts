@@ -57,11 +57,11 @@ export class Agent {
   exposeAsTool: boolean;
 
   /**
-   * Before each answer, the user's memories relevant to the message from Recordare
-   * (episodic memory), appended to the system prompt. Off by default: useful where
-   * latency matters (voice) — the agent may answer without calling a recall tool.
+   * The agent's memory is active (agent-memory.service.ts): the memory charter,
+   * what came to mind before each answer and the memory tools — Recordare, else
+   * A-MEM. On by default; an agent without memory is an explicit choice.
    */
-  @Column({ type: 'boolean', default: false })
+  @Column({ type: 'boolean', default: true })
   memoryContext: boolean;
 
   @Column({ type: 'varchar', length: 16, default: 'personal' })

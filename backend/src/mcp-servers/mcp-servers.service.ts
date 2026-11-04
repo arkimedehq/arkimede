@@ -23,9 +23,8 @@
  * the bridge connects to the McpBridgeGateway (WebSocket) and notifies
  * the available tools. The service keeps them in an in-memory Map.
  */
-import {BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException, OnModuleDestroy,} from '@nestjs/common';
-import {promises as fsp} from 'fs';
-import {join, resolve} from 'path';
+import {BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, OnModuleDestroy, Optional,} from '@nestjs/common';
+import {basename} from 'path';
 import {InjectRepository} from '@nestjs/typeorm';
 import {In, Repository} from 'typeorm';
 import {DynamicStructuredTool} from '@langchain/core/tools';
@@ -34,7 +33,9 @@ import {McpServer, McpServerScope, McpTransport} from './mcp-server.entity';
 import {TeamsService} from '../teams/teams.service';
 import {McpServerSecret} from './mcp-server-secret.entity';
 import {decrypt, encrypt} from '../custom-tools/crypto.utils';
-import {HttpHostPolicy} from '../common/ssrf-guard';
+import {HttpHostPolicy, safeFetch} from '../common/ssrf-guard';
+import {FilesService} from '../files/files.service';
+import {ToolFile, ToolFilesArtifact, toolFileLine} from '../files/tool-files';
 import {AppConfigEntity} from '../app-config/app-config.entity';
 import {
   isSessionError, mcpInitialize, mcpRpc, McpHttpSession, McpHttpTarget, withLegacySseSession,
@@ -122,6 +123,12 @@ export interface UpdateMcpServerDto extends Partial<CreateMcpServerDto> {
   enabled?: boolean;
 }
 
+/** A file fetched for a `resource_link` block. */
+interface LinkedFile {
+  data: Buffer;
+  mimeType?: string;
+}
+
 @Injectable()
 export class McpServersService implements OnModuleDestroy {
   /** Registry of tools announced by the active bridges (transport 'remote'). Updated by McpBridgeGateway. */
@@ -150,6 +157,9 @@ export class McpServersService implements OnModuleDestroy {
     private readonly appConfigRepo: Repository<AppConfigEntity>,
     private readonly teams: TeamsService,
     private readonly audit: AuditService,
+    // Files returned by tools are stored through it (absent in unit contexts:
+    // file blocks are then only described in the text).
+    @Optional() @Inject(FilesService) private readonly files: FilesService | null = null,
   ) {}
 
   private static readonly LIST_SELECT = {
@@ -486,14 +496,15 @@ export class McpServersService implements OnModuleDestroy {
               name:        toolName,
               description: mcpTool.description ?? mcpTool.name,
               schema,
+              responseFormat: 'content_and_artifact',
               func: async (args: Record<string, unknown>) => {
                 this.logger.log(`MCP ${server.transport} "${toolName}": ${JSON.stringify(args).slice(0, 200)}`);
                 try {
                   const raw = await this.callRemoteMcpTool(server, secrets, mcpTool.name, args);
-                  return await this.sanitizeMcpResult(raw, userId);
+                  return await this.sanitizeMcpResult(raw, userId, (uri) => this.fetchRemoteLink(server, secrets, uri));
                 } catch (err: any) {
                   this.logger.error(`MCP "${toolName}" error: ${err.message}`);
-                  return `MCP error: ${err.message}`;
+                  return McpServersService.noFiles(`MCP error: ${err.message}`);
                 }
               },
             }));
@@ -528,16 +539,17 @@ export class McpServersService implements OnModuleDestroy {
               name:        toolName,
               description: mcpTool.description ?? mcpTool.name,
               schema,
+              responseFormat: 'content_and_artifact',
               func: async (args: Record<string, unknown>) => {
                 this.logger.log(`MCP local "${toolName}": ${JSON.stringify(args).slice(0, 200)}`);
                 if (procRef.status !== 'running') {
-                  return `Local MCP server not running (status: ${procRef.status}). Check the backend logs.`;
+                  return McpServersService.noFiles(`Local MCP server not running (status: ${procRef.status}). Check the backend logs.`);
                 }
                 try {
                   return await this.sanitizeMcpResult(await procRef.callTool(mcpTool.name, args), userId);
                 } catch (err: any) {
                   this.logger.error(`MCP local "${toolName}" error: ${err.message}`);
-                  return `Local MCP error: ${err.message}`;
+                  return McpServersService.noFiles(`Local MCP error: ${err.message}`);
                 }
               },
             }));
@@ -559,17 +571,18 @@ export class McpServersService implements OnModuleDestroy {
               name:        toolName,
               description: mcpTool.description ?? mcpTool.name,
               schema,
+              responseFormat: 'content_and_artifact',
               func: async (args: Record<string, unknown>) => {
                 this.logger.log(`MCP remote "${toolName}" via bridge`);
                 if (!bridgeSession) {
-                  return 'Bridge not connected. Start the Electron bridge to use remote servers.';
+                  return McpServersService.noFiles('Bridge not connected. Start the Electron bridge to use remote servers.');
                 }
                 try {
                   return await this.sanitizeMcpResult(
                     await bridgeSession.callTool(server.id, mcpTool.name, args), userId,
                   );
                 } catch (err: any) {
-                  return `Bridge error: ${err.message}`;
+                  return McpServersService.noFiles(`Bridge error: ${err.message}`);
                 }
               },
             }));
@@ -878,30 +891,23 @@ export class McpServersService implements OnModuleDestroy {
       schema: z.object({
         uri: z.string().describe('URI of the resource to read, from the list above or built from a URI template'),
       }),
+      responseFormat: 'content_and_artifact',
       func: async ({ uri }: { uri: string }) => {
         this.logger.log(`MCP ${server.transport} "${toolName}": ${uri}`);
         try {
           const result = await this.httpRpc(server, secrets, 'resources/read', { uri }, { timeoutMs: 30_000 });
-          return await this.sanitizeMcpResult(this.renderResourceContents(result), userId);
+          const contents: any[] = Array.isArray(result?.contents) ? result.contents : [];
+          if (!contents.length) return McpServersService.noFiles('Empty resource');
+          // Each content is rendered as an embedded-resource block: text verbatim,
+          // a binary blob stored as a file.
+          return await this.sanitizeMcpResult(
+            JSON.stringify({ content: contents.map((c) => ({ type: 'resource', resource: c })) }), userId);
         } catch (err: any) {
           this.logger.error(`MCP "${toolName}" error: ${err.message}`);
-          return `MCP error: ${err.message}`;
+          return McpServersService.noFiles(`MCP error: ${err.message}`);
         }
       },
     });
-  }
-
-  /** resources/read result → text: text contents verbatim, binary blobs omitted. */
-  private renderResourceContents(result: any): string {
-    const contents: any[] = Array.isArray(result?.contents) ? result.contents : [];
-    if (!contents.length) return 'Empty resource';
-    const many = contents.length > 1;
-    return contents.map((c) => {
-      const body = typeof c?.text === 'string'
-        ? c.text
-        : `[binary resource omitted${c?.mimeType ? ` (${c.mimeType})` : ''}]`;
-      return many ? `### ${c?.uri ?? ''}\n${body}` : body;
-    }).join('\n\n');
   }
 
   /**
@@ -988,23 +994,159 @@ export class McpServersService implements OnModuleDestroy {
   private static readonly MCP_RESULT_MAX_CHARS = 20_000;
 
   /**
-   * Renders MCP content blocks into LLM-safe text: text blocks pass through,
-   * image blocks are saved as per-user files and replaced with a download
-   * link, anything else is stringified with a hard cap. Keeps base64 blobs
-   * out of the model context and of the persisted toolCalls.
+   * Renders MCP content blocks for the model, LangChain `content_and_artifact`
+   * style (files/tool-files.ts):
+   *   - text                    → passes through;
+   *   - image / audio           → stored as a File (FilesService.saveToolFile);
+   *   - resource (embedded)     → its text verbatim, or its blob stored as a File;
+   *   - resource_link           → fetched through `fetchLink` when given and
+   *                               stored as a File, otherwise named with its URI.
+   * The text gets one reference line per file (its id and download link); the
+   * artifact lists the files, which the agent shows the model before its next
+   * call (agent/tool-media.ts). Nothing binary reaches the text.
    */
-  private async renderMcpContent(content: any[], userId: string): Promise<string> {
+  private async renderMcpContent(
+    content: any[],
+    userId: string,
+    fetchLink?: (uri: string) => Promise<LinkedFile | null>,
+  ): Promise<{ text: string; files: ToolFile[] }> {
     const parts: string[] = [];
+    const files: ToolFile[] = [];
+    const keep = async (name: string, mimeType: string, data: Buffer): Promise<void> => {
+      const file = await this.storeToolFile(userId, name, mimeType, data);
+      if (file) {
+        files.push(file);
+        parts.push(toolFileLine(file));
+      } else {
+        parts.push(`[file omitted: ${name} (${mimeType})]`);
+      }
+    };
     for (const b of content) {
       if (b?.type === 'text' && typeof b.text === 'string') {
         parts.push(b.text);
-      } else if (b?.type === 'image' && typeof b.data === 'string') {
-        parts.push(await this.saveMcpImage(b.data, b.mimeType, userId));
+      } else if ((b?.type === 'image' || b?.type === 'audio') && typeof b.data === 'string') {
+        const mimeType = b.mimeType || (b.type === 'image' ? 'image/png' : 'audio/wav');
+        await keep(`${b.type}-${Date.now()}.${McpServersService.extFor(mimeType)}`, mimeType, Buffer.from(b.data, 'base64'));
+      } else if (b?.type === 'resource' && b.resource) {
+        const r = b.resource;
+        if (typeof r.text === 'string') {
+          parts.push(r.uri ? `### ${r.uri}\n${r.text}` : r.text);
+        } else if (typeof r.blob === 'string') {
+          const mimeType = r.mimeType || 'application/octet-stream';
+          await keep(McpServersService.nameFor(r.uri, mimeType), mimeType, Buffer.from(r.blob, 'base64'));
+        }
+      } else if (b?.type === 'resource_link' && typeof b.uri === 'string') {
+        let linked: LinkedFile | null = null;
+        try {
+          linked = fetchLink ? await fetchLink(b.uri) : null;
+        } catch (err: any) {
+          this.logger.warn(`MCP resource link ${b.uri} not fetched: ${err.message}`);
+        }
+        if (linked) {
+          const mimeType = b.mimeType || linked.mimeType || 'application/octet-stream';
+          await keep(b.name || McpServersService.nameFor(b.uri, mimeType), mimeType, linked.data);
+        } else {
+          parts.push(`[link] ${b.name ?? b.uri}${b.mimeType ? ` (${b.mimeType})` : ''} — ${b.uri}`
+            + (b.description ? ` — ${b.description}` : ''));
+        }
       } else if (b != null) {
         parts.push(JSON.stringify(b).slice(0, 500));
       }
     }
-    return parts.join('\n');
+    return { text: parts.join('\n'), files };
+  }
+
+  /** Stores one file a tool returned; null when it cannot be kept (no file service, too big, write error). */
+  private async storeToolFile(userId: string, name: string, mimeType: string, data: Buffer): Promise<ToolFile | null> {
+    if (!this.files || !userId) return null;
+    if (data.length > McpServersService.toolFileMaxBytes()) {
+      this.logger.warn(`MCP file ${name} not kept: ${data.length} bytes over TOOL_FILE_MAX_MB`);
+      return null;
+    }
+    try {
+      const f = await this.files.saveToolFile(userId, name, mimeType, data);
+      return { fileId: f.id, name: f.originalName, mimeType: f.mimeType, size: Number(f.size), path: f.storagePath };
+    } catch (err: any) {
+      this.logger.warn(`MCP file ${name} not saved: ${err.message}`);
+      return null;
+    }
+  }
+
+  /** Largest file a tool may hand over (TOOL_FILE_MAX_MB, default 50: Telegram's bot limit). */
+  private static toolFileMaxBytes(): number {
+    const mb = Number(process.env.TOOL_FILE_MAX_MB);
+    return (Number.isFinite(mb) && mb > 0 ? mb : 50) * 1024 * 1024;
+  }
+
+  private static readonly EXTENSIONS: Record<string, string> = {
+    'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp',
+    'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/mpeg': 'mp3', 'audio/ogg': 'ogg', 'audio/webm': 'webm',
+    'audio/mp4': 'm4a', 'audio/aac': 'aac', 'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov',
+    'application/pdf': 'pdf', 'text/plain': 'txt', 'application/json': 'json',
+  };
+
+  private static extFor(mimeType: string): string {
+    return McpServersService.EXTENSIONS[mimeType]
+      ?? ((mimeType.split('/')[1] ?? 'bin').replace(/[^a-z0-9]/gi, '').slice(0, 8) || 'bin');
+  }
+
+  /** A file name from a resource URI (its last path segment), else from the type. */
+  private static nameFor(uri: string | undefined, mimeType: string): string {
+    let last = '';
+    try {
+      last = basename(decodeURIComponent(new URL(uri ?? '').pathname));
+    } catch {
+      last = basename(String(uri ?? ''));
+    }
+    return /\.[a-z0-9]{1,8}$/i.test(last) ? last : `${last || 'resource'}.${McpServersService.extFor(mimeType)}`;
+  }
+
+  /** A tool result with no files (errors, plain answers), in the `content_and_artifact` shape. */
+  private static noFiles(text: string): [string, ToolFilesArtifact] {
+    return [text, { toolFiles: [] }];
+  }
+
+  /**
+   * The file behind a `resource_link` of a remote (http/sse) server:
+   *   - an http(s) URI on the server's own origin → fetched with the server's
+   *     headers (its credentials);
+   *   - another http(s) URI → fetched without them;
+   *   - any other scheme → `resources/read` on the server (its blob).
+   * Through the MCP host policy (SSRF guard), capped at TOOL_FILE_MAX_MB.
+   */
+  private async fetchRemoteLink(server: McpServer, secrets: Record<string, string>, uri: string): Promise<LinkedFile | null> {
+    const max = McpServersService.toolFileMaxBytes();
+    let url: URL;
+    try { url = new URL(uri); } catch { return null; }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      const result = await this.httpRpc(server, secrets, 'resources/read', { uri }, { timeoutMs: 60_000 });
+      const blob = (Array.isArray(result?.contents) ? result.contents : []).find((c: any) => typeof c?.blob === 'string');
+      return blob ? { data: Buffer.from(blob.blob, 'base64'), mimeType: blob.mimeType } : null;
+    }
+    const target = await this.buildHttpTarget(server, secrets);
+    const sameOrigin = (() => { try { return new URL(target.url).origin === url.origin; } catch { return false; } })();
+    const resp = await safeFetch(url.toString(), {
+      headers: sameOrigin ? target.headers : {},
+      signal: AbortSignal.timeout(120_000),
+    }, target.policy);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const declared = Number(resp.headers.get('content-length'));
+    if (Number.isFinite(declared) && declared > max) throw new Error(`${declared} bytes over TOOL_FILE_MAX_MB`);
+    const chunks: Buffer[] = [];
+    let size = 0;
+    const reader = resp.body?.getReader();
+    if (!reader) return null;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > max) {
+        await reader.cancel().catch(() => undefined);
+        throw new Error(`over TOOL_FILE_MAX_MB`);
+      }
+      chunks.push(Buffer.from(value));
+    }
+    return { data: Buffer.concat(chunks), mimeType: resp.headers.get('content-type')?.split(';')[0].trim() };
   }
 
   /** MCP content block types (spec): anything else is not a block list. */
@@ -1026,44 +1168,28 @@ export class McpServersService implements OnModuleDestroy {
    * Safety net applied to every MCP tool result, whatever the transport:
    * extracts the content blocks from stringified results (bridge/local
    * pre-serialize them), strips residual base64 runs and caps the length.
+   * The files' reference lines come after the cap, so they are never cut off.
    */
-  private async sanitizeMcpResult(raw: string, userId: string): Promise<string> {
+  private async sanitizeMcpResult(
+    raw: string,
+    userId: string,
+    fetchLink?: (uri: string) => Promise<LinkedFile | null>,
+  ): Promise<[string, ToolFilesArtifact]> {
     let text = raw ?? '';
+    let files: ToolFile[] = [];
     try {
       const parsed = JSON.parse(text);
       const content = Array.isArray(parsed) ? parsed : parsed?.content;
-      if (this.isMcpContentBlocks(content)) text = await this.renderMcpContent(content, userId);
+      if (this.isMcpContentBlocks(content)) ({ text, files } = await this.renderMcpContent(content, userId, fetchLink));
     } catch { /* plain text — keep as is */ }
+    const fileLines = new Set(files.map(toolFileLine));
+    let body = text.split('\n').filter((l) => !fileLines.has(l)).join('\n');
     // Residual base64 runs (inside JSON or free text) never reach the LLM.
-    text = text.replace(/[A-Za-z0-9+/=]{2048,}/g, '[binary data omitted]');
+    body = body.replace(/[A-Za-z0-9+/=]{2048,}/g, '[binary data omitted]');
     const max = McpServersService.MCP_RESULT_MAX_CHARS;
-    return text.length > max
-      ? `${text.slice(0, max)}… [truncated — ${text.length} chars total]`
-      : text;
-  }
-
-  /**
-   * Saves a base64 image from an MCP result and returns a Markdown link to it.
-   *
-   * The file goes FLAT into the caller's own output dir — the same per-user root
-   * and layout as the skill outputs — because that is what the message pipeline
-   * tracks: it resolves a `?rel=` back to `<SKILLS_OUTPUT_DIR>/<userId>/<name>`,
-   * registers the file (access-aware download by id) and attaches it to the
-   * assistant message. In a subdir the file exists but no chip/attachment is
-   * produced, so the image is unreachable from the chat.
-   */
-  private async saveMcpImage(b64: string, mimeType: string | undefined, userId: string): Promise<string> {
-    try {
-      const ext  = (mimeType?.split('/')[1] ?? 'png').replace(/[^a-z0-9]/gi, '') || 'png';
-      const dir  = resolve(join(process.env.SKILLS_OUTPUT_DIR ?? './uploads/skills-output', userId || '_shared'));
-      await fsp.mkdir(dir, { recursive: true });
-      const name = `mcp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-      await fsp.writeFile(join(dir, name), Buffer.from(b64, 'base64'));
-      return `[${name}](/api/files/raw?rel=${encodeURIComponent(name)})`;
-    } catch (err: any) {
-      this.logger.warn(`MCP image not saved: ${err.message}`);
-      return '[image omitted]';
-    }
+    if (body.length > max) body = `${body.slice(0, max)}… [truncated — ${body.length} chars total]`;
+    const out = [body, ...fileLines].filter((s) => s.length).join('\n');
+    return [out, { toolFiles: files }];
   }
 
   private async callRemoteMcpTool(

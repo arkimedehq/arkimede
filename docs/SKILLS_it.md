@@ -1557,6 +1557,16 @@ Il campo `event_type` è libero. Convenzioni raccomandate:
 > **`daemon_exit`** viene emesso automaticamente dall'executor quando il processo termina.
 > Non è necessario emetterlo manualmente a meno che non si voglia farlo prima di `sys.exit()`.
 
+> **Riavvio automatico.** Un daemon che termina senza essere stato fermato (qualsiasi
+> exit code, o non più trovato nell'executor) passa a `restarting` e viene riavviato
+> dopo 5 s, 30 s, 2 min, 10 min e 30 min; dopo il quinto tentativo fallito resta in
+> `error`. Un daemon che era rimasto attivo almeno 15 minuti riparte dal primo
+> intervallo. Le ultime 20 righe del suo output restano in `lastError` (visibile nella
+> card del daemon), così la causa sopravvive alla rotazione del log dell'executor.
+> Fermarlo o riavviarlo a mano annulla un riavvio automatico in attesa. Il riavvio è
+> una rete di sicurezza: gestisci gli errori temporanei (rete, rate limit, una sessione
+> in conflitto) dentro il loop del daemon ed esci solo per quelli non recuperabili.
+
 ### Template Python
 
 ```python

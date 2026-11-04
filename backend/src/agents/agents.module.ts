@@ -17,6 +17,7 @@ import { McpServersModule } from '../mcp-servers/mcp-servers.module';
 import { SkillsModule } from '../skills/skills.module';
 import { FlowsModule } from '../flows/flows.module';
 import { LlmConfigsModule } from '../llm-configs/llm-configs.module';
+import { AgentMemoryModule } from '../agent-memory/agent-memory.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { LlmConfigsModule } from '../llm-configs/llm-configs.module';
     SkillsModule,
     FlowsModule,
     LlmConfigsModule,    // per-agent model
+    AgentMemoryModule,   // each agent's memory (charter, context, tools)
   ],
   providers: [AgentsService, AgentTeamsService, MultiAgentService],
   controllers: [AgentsController, AgentTeamsController],

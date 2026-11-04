@@ -153,6 +153,17 @@ export class OpenAiCompatController {
     const historyMessages = (focused ?? history.map((h) => ({ role: h.role, content: h.content }))) as any[];
     if (focused) this.logger.log(`  satellite ${satellite} focused on chat ${focusedId}: ${focused.length} history msg from the chat`);
 
+    // Same grouping as persistTurn below: the turn's memory conversation is the chat it continues.
+    const persistKey = `${user.apiKeyId ?? 'jwt'}:${modelId}`;
+    const priorUserTexts = history.filter((h) => h.role === 'user').map((h) => h.content);
+    opts = {
+      ...opts,
+      conversationId: await this.externalChats.memoryConversationId({
+        userId: user.id, source: 'api', key: persistKey, idleMs: PERSIST_IDLE_MS,
+        chatId: focused ? focusedId : null, notBefore: fresh, priorUserTexts,
+      }),
+    };
+
     // Invocation log: external calls are otherwise invisible (no chat rows).
     const tools = makeToolCollector();
     const logInvocation = (outputText: string, usage: any, error?: string) =>
@@ -179,12 +190,12 @@ export class OpenAiCompatController {
       void this.externalChats.recordTurn({
         userId: user.id,
         source: 'api',
-        key: `${user.apiKeyId ?? 'jwt'}:${modelId}`,
+        key: persistKey,
         idleMs: PERSIST_IDLE_MS,
         satellite,
         chatId: focused ? focusedId : null,
         notBefore: fresh,
-        priorUserTexts: history.filter((h) => h.role === 'user').map((h) => h.content),
+        priorUserTexts,
         userText: userInput,
         answer,
         toolCalls: tools.records,
@@ -308,7 +319,7 @@ export class OpenAiCompatController {
 
     let text: string;
     try {
-      text = await withTraceUser(user.id, () => this.transcription.transcribe(file.buffer, file.originalname || 'audio.webm', lang));
+      text = await withTraceUser(user.id, () => this.transcription.transcribe(file.buffer, file.originalname || 'audio.webm', lang, { userId: user.id }));
     } catch (err: any) {
       log(null, err?.message ?? 'transcription failed');
       throw err;

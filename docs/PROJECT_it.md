@@ -649,6 +649,29 @@ NestJS McpServersService
 
 `mcp_{server_name_snake}_{tool_name}` — es. `mcp_filesystem_read_file`
 
+### File nei risultati dei tool
+
+`renderMcpContent` trasforma i blocchi `image` / `audio` / `resource` (blob) /
+`resource_link` in File (`FilesService.saveToolFile`,
+`UPLOAD_DIR/tool-files/<userId>/`, limite `TOOL_FILE_MAX_MB`) e restituisce, come
+tool `content_and_artifact`, il testo con una riga di riferimento per file
+(`files/tool-files.ts`: nome, tipo, dimensione, `file_id`, link di download) e
+l'artifact `{ toolFiles }`. I blocchi di testo e le risorse testuali passano
+invariati; il limite di 20 000 caratteri vale per il testo, mai per le righe dei
+file. `resource_link`: http(s) scaricato con `safeFetch` (header del server solo
+sulla sua origine), altri schemi con `resources/read`.
+
+Il `messageModifier` dell'agente è `toolMediaModifier` (`agent/tool-media.ts`):
+a ogni chiamata al modello aggiunge, dopo ogni gruppo di risultati di tool con
+file, un messaggio utente con il loro contenuto — parti `image_url` se il
+modello dell'agente è la config vision designata
+(`LlmProviderService.getImageSupport`), altrimenti la descrizione della config
+vision (`TOOL_IMAGE_DESCRIBE_PROMPT`, in cache per run); le trascrizioni
+dell'audio (`TranscriptionService`); i file di testo piccoli. Mai salvato: la
+tool call registrata conserva le righe di riferimento, così un turno successivo
+può ancora passare il `file_id`. Lo stream della chat allega i file per id
+(`file_id:` nell'output del tool → `findOneReadable` → allegato).
+
 ---
 
 ## 8. Agent ReAct (`agent.service.ts`)
@@ -702,7 +725,8 @@ messageModifier = (provider === 'anthropic')
         content: [{type: 'text', text: systemPrompt, cache_control: {type: 'ephemeral'}},
             ...(summary ? [{type: 'text', text: summaryBlock}] : [])]
     })
-    : (summary ? `${systemPrompt}\n\n${summaryBlock}` : systemPrompt)
+    : systemPrompt   // other providers: the per-request blocks open the turn's user message
+                     // (agent/turn-context.ts), after the cached system prompt and tools
 
 return {
     agent: createReactAgent({llm: model, tools: optimizedExtraTools, messageModifier}),
@@ -2136,7 +2160,7 @@ dalla config LLM default. Riferimento: [CLI_it.md](CLI_it.md).
 | ~~Tool call history / debug~~    | ✅ Fatto  | Tool call persistite su `Message.toolCalls` (name/input/output troncato ~8KB/ok/durationMs). Pannello debug collassabile in `MessageBubble`. Evento SSE `tool_result` per stato ✓/✗ live                                                                                                                          |
 | ~~Feedback loop 👍👎~~           | ✅ Fatto  | `message_feedback` + memoria attiva: i feedback con correzione sono vettorizzati in `feedback_memory` e reiniettati nel system prompt sulle richieste simili (scope personal/shared con approvazione admin). Toggle `feedbackMemoryEnabled`                                                                       |
 | ~~Memoria utente persistente~~   | ✅ Fatto  | `user_memory` (fatti pending/confirmed) + toggle per-utente `autoMemoryEnabled`. Estrazione automatica a soglia (`autoMemoryThreshold` globale, override `memoryThreshold`) o on-demand; conferma inline in chat (SSE `memory_proposal`); fatti confermati iniettati nel system prompt (livello utente, cacheato) |
-| ~~Input vocale (Whisper)~~       | ✅ Fatto  | Pulsante microfono in chat (`MessageInput`): `MediaRecorder` → `POST /api/transcription` (audio transiente, mai su disco) → testo nella textarea, rivedibile prima dell'invio. Engine = endpoint OpenAI-compatibile `/v1/audio/transcriptions`. **Default = servizio interno `whisper-service`** (faster-whisper small, incluso in Docker, provider `internal` auto-configurato via `TRANSCRIPTION_BASE_URL` + sondaggio `/v1/models`); l'admin può scegliere OpenAI/Groq/self-hosted nei campi `transcription*` di `app_config`. Modulo `transcription/`; toggle globale (ON di default) + sezione UI accanto a Embedding; hint lingua da `i18n.language` |
+| ~~Input vocale (Whisper)~~       | ✅ Fatto  | Pulsante microfono in chat (`MessageInput`): `MediaRecorder` → `POST /api/transcription` (audio transiente, mai su disco) → testo nella textarea, rivedibile prima dell'invio. Engine = endpoint OpenAI-compatibile `/v1/audio/transcriptions`. **Default = servizio interno `whisper-service`** (faster-whisper small, incluso in Docker, provider `internal` auto-configurato via `TRANSCRIPTION_BASE_URL` + sondaggio `/v1/models`); l'admin può scegliere OpenAI/Groq/self-hosted nei campi `transcription*` di `app_config`. Modulo `transcription/`; toggle globale (ON di default) + sezione UI accanto a Embedding; hint lingua da `i18n.language`. **Vocabolario** opzionale (`transcriptionVocabularyEnabled`: le parole dell'admin + i nomi che la memoria Recordare dell'utente conosce, inviati come `prompt` del modello) e **ripiego locale** (`transcriptionFallbackModel`: un modello già scaricato nel servizio interno prende il turno quando il provider cloud fallisce) |
 | ~~Token usage dashboard~~        | ✅ Fatto  | Modulo `usage/`: aggregazione token per utente/progetto/modello + costi **stimati provider-aware** (prezzi su `llm_configs`, cache calcolata per provider). Admin vede token+costi (`/api/usage`), utente solo token (`/api/usage/me`). Sezione "Consumi" in Impostazioni                                         |
 | ~~Gestione utenti & Team~~       | ✅ Fatto  | CRUD admin utenti + status account (bootstrap 1° admin) · `teams`/`team_memberships` (owner/member) · scope risorse **personal\|team\|org** su tool/skill/datasource (`assertCanManage` + `visibilityWhere`). UI: Impostazioni → Utenti / Team. Vedi [sezione dedicata](#gestione-utenti-team--scope)             |
 | ~~Progetti condivisi~~           | ✅ Fatto  | Progetti condivisibili a **N team** via join `project_teams` (ruoli collaborator/viewer); chat e file del progetto visibili a tutti i membri. Vedi [Progetti collaborativi](#gestione-utenti-team--scope)                                                                                                          |

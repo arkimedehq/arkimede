@@ -22,6 +22,11 @@ export interface LlmCallContext {
   /** Attribution, when the caller knows it. */
   userId?: string;
   origin?: 'chat' | 'automation' | 'flow' | 'team' | 'system' | 'voice';
+  /**
+   * The conversation the run answers in, when it has one: agents run inside it
+   * (delegates, team members) recall from the same conversation's memory.
+   */
+  conversationId?: string;
 }
 
 const als = new AsyncLocalStorage<LlmCallContext>();

@@ -24,7 +24,10 @@ import {
 import { User } from '../users/users.entity';
 import { Skill } from '../skills/skill.entity';
 
-export type DaemonStatus = 'starting' | 'running' | 'stopped' | 'error';
+export type DaemonStatus = 'starting' | 'running' | 'restarting' | 'stopped' | 'error';
+
+/** States in which the daemon is meant to be alive (or about to be). */
+export const ACTIVE_DAEMON_STATUSES: DaemonStatus[] = ['starting', 'running', 'restarting'];
 
 @Entity('skill_daemons')
 export class SkillDaemon {
@@ -58,8 +61,9 @@ export class SkillDaemon {
    * Current state of the daemon:
    *   starting — startup in progress (waiting for confirmation from the executor)
    *   running  — process active in the executor
+   *   restarting — exited unexpectedly; an automatic restart is scheduled (see lastError)
    *   stopped  — stopped explicitly by the user
-   *   error    — exited unexpectedly (see lastError)
+   *   error    — exited unexpectedly and not restarted any more (see lastError)
    */
   @Column({
     type:    'varchar',

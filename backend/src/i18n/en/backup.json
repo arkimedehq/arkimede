@@ -1,0 +1,11 @@
+{
+  "notFound": "Backup not found.",
+  "invalidId": "Invalid backup identifier.",
+  "host": {
+    "invalidSchedule": "Invalid schedule: a 5-field cron expression (minute hour day month weekday) with a fixed minute (not * ).",
+    "invalidDestination": "Invalid destination type: local, smb, sftp or webdav.",
+    "destinationIncomplete": "Give at least the network destination's host and user.",
+    "shareRequired": "For SMB, give the share name.",
+    "passwordRequired": "Give the network destination's password."
+  }
+}

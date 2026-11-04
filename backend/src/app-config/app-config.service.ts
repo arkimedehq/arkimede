@@ -72,6 +72,10 @@ export interface TranscriptionConfigDto {
   /** Plaintext key — encrypted before saving. Null = remove. Undefined = leave untouched. */
   transcriptionApiKey?:  string | null;
   transcriptionBaseUrl:  string | null;
+  /** Optional: undefined = leave untouched (as for the three below). */
+  transcriptionVocabularyEnabled?: boolean;
+  transcriptionVocabulary?:        string | null;
+  transcriptionFallbackModel?:     string | null;
 }
 
 export interface WyomingConfigDto {
@@ -273,6 +277,9 @@ export class AppConfigService implements OnModuleInit {
     transcriptionModel:      string | null;
     hasTranscriptionApiKey:  boolean;
     transcriptionBaseUrl:    string | null;
+    transcriptionVocabularyEnabled: boolean;
+    transcriptionVocabulary:        string | null;
+    transcriptionFallbackModel:     string | null;
   }> {
     const config = await this.repo.findOne({ where: { id: CONFIG_ID } });
     return {
@@ -281,6 +288,9 @@ export class AppConfigService implements OnModuleInit {
       transcriptionModel:     config?.transcriptionModel    ?? null,
       hasTranscriptionApiKey: !!config?.transcriptionApiKey,
       transcriptionBaseUrl:   config?.transcriptionBaseUrl  ?? null,
+      transcriptionVocabularyEnabled: config?.transcriptionVocabularyEnabled ?? false,
+      transcriptionVocabulary:        config?.transcriptionVocabulary        ?? null,
+      transcriptionFallbackModel:     config?.transcriptionFallbackModel     ?? null,
     };
   }
 
@@ -314,6 +324,9 @@ export class AppConfigService implements OnModuleInit {
       transcriptionModel:    dto.transcriptionModel || null,
       transcriptionApiKey:   encryptedKey,
       transcriptionBaseUrl:  dto.transcriptionBaseUrl || null,
+      ...(dto.transcriptionVocabularyEnabled !== undefined ? { transcriptionVocabularyEnabled: dto.transcriptionVocabularyEnabled } : {}),
+      ...(dto.transcriptionVocabulary !== undefined ? { transcriptionVocabulary: dto.transcriptionVocabulary?.trim() || null } : {}),
+      ...(dto.transcriptionFallbackModel !== undefined ? { transcriptionFallbackModel: dto.transcriptionFallbackModel?.trim() || null } : {}),
     });
 
     this.logger.log(`TranscriptionConfig: updated — provider=${dto.transcriptionProvider} enabled=${dto.transcriptionEnabled}`);

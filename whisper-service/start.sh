@@ -18,13 +18,14 @@ source .venv/bin/activate
 # Install/update dependencies
 pip install -q -r requirements.txt
 
-# Config from the ROOT .env: ONLY the WHISPER_* variables (no backend secrets).
+# Config from the ROOT .env: ONLY the WHISPER_*, PARAKEET_* and STT_ENGINE variables (no backend secrets).
 # Single source shared with docker-compose; this service has no .env of its own.
 if [ -f "../.env" ]; then
-  export $(grep -E '^WHISPER_' ../.env | xargs)
+  export $(grep -E '^(WHISPER_|PARAKEET_|STT_ENGINE=)' ../.env | xargs)
 fi
 
 echo "Starting whisper service on http://localhost:9000"
+echo "Engine: ${STT_ENGINE:-whisper}"
 echo "Model:  ${WHISPER_MODEL:-small}"
 echo "Device: ${WHISPER_DEVICE:-cpu} (${WHISPER_COMPUTE_TYPE:-int8})"
 

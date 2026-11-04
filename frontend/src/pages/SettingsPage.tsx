@@ -5024,6 +5024,10 @@ function InternalServiceMissing({ title, desc }: { title: string; desc: string }
 }
 
 // ── Transcription provider metadata (Whisper) ──────────────────────────────────
+/** NVIDIA Parakeet model of the bundled service (its second engine); shown with a short label. */
+const PARAKEET_MODEL_ID = 'sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8';
+const internalModelLabel = (m: string) => (m === PARAKEET_MODEL_ID ? 'parakeet-tdt-0.6b-v3' : m);
+
 const TRANSCRIPTION_PROVIDERS: {
   value:         TranscriptionProvider;
   label:         string;
@@ -5038,8 +5042,8 @@ const TRANSCRIPTION_PROVIDERS: {
     value: 'internal', label: 'Interno (default)',
     descKey: 'transcription.providerInternalDesc',
     needsKey: false, needsUrl: false,
-    // Sizes the bundled whisper-service can switch to at runtime (download on first use)
-    defaultModels: ['tiny', 'base', 'small', 'medium', 'large-v3', 'large-v3-turbo'], internal: true,
+    // Models the bundled service can switch to at runtime (download on first use): Whisper sizes, then Parakeet
+    defaultModels: ['tiny', 'base', 'small', 'medium', 'large-v3', 'large-v3-turbo', PARAKEET_MODEL_ID], internal: true,
   },
   {
     value: 'openai', label: 'OpenAI',
@@ -5077,6 +5081,9 @@ function TranscriptionConfigCard() {
   const [model,    setModel]    = useState('');
   const [apiKey,   setApiKey]   = useState('');
   const [baseUrl,  setBaseUrl]  = useState('');
+  const [vocabularyEnabled, setVocabularyEnabled] = useState(false);
+  const [vocabulary,        setVocabulary]        = useState('');
+  const [fallbackModel,     setFallbackModel]     = useState('');
   const [showKey,  setShowKey]  = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [testState, setTestState] = useState<'idle' | 'pending' | 'ok' | 'error'>('idle');
@@ -5089,6 +5096,9 @@ function TranscriptionConfigCard() {
     setProvider(data.transcriptionProvider);
     setModel(data.transcriptionModel ?? '');
     setBaseUrl(data.transcriptionBaseUrl ?? '');
+    setVocabularyEnabled(data.transcriptionVocabularyEnabled);
+    setVocabulary(data.transcriptionVocabulary ?? '');
+    setFallbackModel(data.transcriptionFallbackModel ?? '');
   }, [data]);
 
   // Provider change: pre-populate the default URL if empty
@@ -5108,6 +5118,10 @@ function TranscriptionConfigCard() {
       transcriptionModel:    model || null,
       transcriptionApiKey:   apiKey || undefined,   // undefined = don't touch the key
       transcriptionBaseUrl:  baseUrl || null,
+      transcriptionVocabularyEnabled: vocabularyEnabled,
+      transcriptionVocabulary:        vocabulary.trim() || null,
+      // A fallback only backs a cloud provider.
+      transcriptionFallbackModel:     providerMeta.internal ? null : fallbackModel || null,
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['transcription-config'] });
@@ -5194,7 +5208,7 @@ function TranscriptionConfigCard() {
             <p className="text-gray-300 font-medium mb-0.5">{t('transcription.internalInfoTitle')}</p>
             <p>{t('transcription.internalInfoDesc')}</p>
             {detectedModel && (
-              <p className="mt-1 text-emerald-400 font-mono">{detectedModel}</p>
+              <p className="mt-1 text-emerald-400 font-mono">{internalModelLabel(detectedModel)}</p>
             )}
           </div>
         </div>
@@ -5218,12 +5232,13 @@ function TranscriptionConfigCard() {
               <button
                 key={m}
                 onClick={() => setModel(m)}
+                title={m}
                 className={`px-2 py-0.5 text-xs rounded border transition-colors font-mono
                   ${model === m
                     ? 'border-indigo-500 bg-indigo-900/40 text-indigo-300'
                     : 'border-gray-700 text-gray-500 hover:border-gray-600 hover:text-gray-400'}`}
               >
-                {m}
+                {internalModelLabel(m)}
               </button>
             ))}
           </div>
@@ -5306,6 +5321,76 @@ function TranscriptionConfigCard() {
               text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500
               transition-colors font-mono"
           />
+        </div>
+      )}
+
+      {/* ── Vocabulary: the expected words as the model's prompt ── */}
+      <div className="space-y-2">
+        <label className="flex items-center justify-between gap-3 cursor-pointer">
+          <div>
+            <span className="text-sm font-medium text-gray-200">{t('transcription.vocabularyLabel')}</span>
+            <p className="text-xs text-gray-500 mt-0.5">{t('transcription.vocabularyDesc')}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setVocabularyEnabled((v) => !v)}
+            className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors
+              ${vocabularyEnabled ? 'bg-indigo-600' : 'bg-gray-700'}`}
+          >
+            <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform mt-0.5
+              ${vocabularyEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+          </button>
+        </label>
+        {vocabularyEnabled && (
+          <div>
+            <label className="block text-xs font-medium text-gray-400 mb-1">{t('transcription.vocabularyWordsLabel')}</label>
+            <textarea
+              value={vocabulary}
+              onChange={(e) => setVocabulary(e.target.value)}
+              rows={3}
+              maxLength={4000}
+              placeholder={t('transcription.vocabularyWordsPlaceholder')}
+              className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm
+                text-gray-100 placeholder-gray-600 focus:outline-none focus:border-blue-500 transition-colors"
+            />
+            <p className="text-[11px] text-gray-600 mt-1">{t('transcription.vocabularyHint')}</p>
+          </div>
+        )}
+      </div>
+
+      {/* ── Local fallback (cloud providers only): a model the bundled service has downloaded ── */}
+      {!providerMeta.internal && (
+        <div>
+          <span className="text-sm font-medium text-gray-200">{t('transcription.fallbackLabel')}</span>
+          <p className="text-xs text-gray-500 mt-0.5 mb-2">{t('transcription.fallbackDesc')}</p>
+          {internalMissing ? (
+            <p className="text-[11px] text-gray-500">{t('transcription.fallbackInternalMissing')}</p>
+          ) : (
+            <>
+              <div className="flex flex-wrap gap-1.5">
+                {['', ...(data?.localModels ?? []).map((m) => m.id)].map((m) => (
+                  <button
+                    key={m || 'none'}
+                    onClick={() => setFallbackModel(m)}
+                    title={m || undefined}
+                    className={`px-2 py-0.5 text-xs rounded border transition-colors ${m ? 'font-mono' : ''}
+                      ${fallbackModel === m
+                        ? 'border-indigo-500 bg-indigo-900/40 text-indigo-300'
+                        : 'border-gray-700 text-gray-500 hover:border-gray-600 hover:text-gray-400'}`}
+                  >
+                    {m ? internalModelLabel(m) : t('transcription.fallbackNone')}
+                  </button>
+                ))}
+              </div>
+              {!data?.localModels?.length && (
+                <p className="text-[11px] text-gray-500 mt-1">{t('transcription.fallbackNoLocal')}</p>
+              )}
+              {fallbackModel && data?.localModels && !data.localModels.some((m) => m.id === fallbackModel) && (
+                <p className="text-[11px] text-amber-400 mt-1">{t('transcription.fallbackNotDownloaded')}</p>
+              )}
+              <p className="text-[11px] text-gray-600 mt-1">{t('transcription.fallbackHint')}</p>
+            </>
+          )}
         </div>
       )}
 

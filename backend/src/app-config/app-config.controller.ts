@@ -5,7 +5,7 @@ import {
   Controller, Get, Patch, Post, Body, Query, UseGuards, Inject, forwardRef, BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { IsString, IsOptional, IsIn, IsInt, Min, Max, IsPositive, IsBoolean, IsArray, IsUUID } from 'class-validator';
+import { IsString, IsOptional, IsIn, IsInt, Min, Max, IsPositive, IsBoolean, IsArray, IsUUID, MaxLength } from 'class-validator';
 import { Type } from 'class-transformer';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
@@ -132,6 +132,16 @@ class UpdateTranscriptionConfigDto {
 
   @IsOptional() @IsString()
   transcriptionBaseUrl?: string | null;
+
+  /** The three below: omitted = leave untouched. */
+  @IsOptional() @IsBoolean()
+  transcriptionVocabularyEnabled?: boolean;
+
+  @IsOptional() @IsString() @MaxLength(4000)
+  transcriptionVocabulary?: string | null;
+
+  @IsOptional() @IsString()
+  transcriptionFallbackModel?: string | null;
 }
 
 class UpdateTtsConfigDto {
@@ -467,11 +477,13 @@ export class AppConfigController {
   async getTranscriptionConfig() {
     // internalAvailable: whether the bundled whisper-service is deployed (the
     // admin UI disables the 'internal' provider when it is not).
-    const [cfg, internalAvailable] = await Promise.all([
+    // localModels: the bundled service's downloaded models, the only fallback choices.
+    const [cfg, internalAvailable, localModels] = await Promise.all([
       this.service.getTranscriptionConfig(),
       this.transcription.isInternalAvailable(),
+      this.transcription.listLocalModels(),
     ]);
-    return { ...cfg, internalAvailable };
+    return { ...cfg, internalAvailable, localModels };
   }
 
   /** PATCH /api/admin/config/transcription — updates the transcription configuration */
@@ -484,8 +496,13 @@ export class AppConfigController {
       transcriptionModel:    dto.transcriptionModel ?? null,
       transcriptionApiKey:   dto.transcriptionApiKey,   // undefined = leave the key untouched
       transcriptionBaseUrl:  dto.transcriptionBaseUrl ?? null,
+      transcriptionVocabularyEnabled: dto.transcriptionVocabularyEnabled,
+      transcriptionVocabulary:        dto.transcriptionVocabulary,
+      transcriptionFallbackModel:     dto.transcriptionFallbackModel,
     }, user?.id);
     this.transcription.invalidateCache();
+    // A fallback is useful only if it answers at once: load it in the bundled service now.
+    void this.transcription.warmFallback();
     return result;
   }
 

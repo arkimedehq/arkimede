@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright © 2026 Andrea Genovese
 
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AgentService } from './agent.service';
 import { AgentController } from './agent.controller';
@@ -18,7 +18,8 @@ import { FlowsModule } from '../flows/flows.module';
 import { AgentsModule } from '../agents/agents.module';
 import { SchedulingModule } from '../scheduling/scheduling.module';
 import { SandboxModule } from '../sandbox/sandbox.module';
-import { RecordareModule } from '../recordare/recordare.module';
+import { AgentMemoryModule } from '../agent-memory/agent-memory.module';
+import { TranscriptionModule } from '../transcription/transcription.module';
 import { User } from '../users/users.entity';
 import { Project } from '../projects/projects.entity';
 import { Chat } from '../chats/chats.entity';
@@ -37,7 +38,8 @@ import { Chat } from '../chats/chats.entity';
     AgentsModule,        // agenti/team esposti come tool (exposeAsTool)
     SchedulingModule,
     SandboxModule,
-    RecordareModule,     // Recordare recall tools (episodic memory, opt-in)
+    AgentMemoryModule,   // the agent's memory: Recordare, else A-MEM
+    forwardRef(() => TranscriptionModule), // transcripts of the audio files tools return
     TypeOrmModule.forFeature([User, Project, Chat]),
   ],
   providers: [AgentService, ToolSelectionService],

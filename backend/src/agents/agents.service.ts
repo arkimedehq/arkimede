@@ -73,7 +73,7 @@ export class AgentsService {
       toolFilter: data.toolFilter ?? { mode: 'all' },
       maxIterations: data.maxIterations ?? null,
       exposeAsTool: data.exposeAsTool ?? false,
-      memoryContext: data.memoryContext ?? false,
+      memoryContext: data.memoryContext ?? true,
       scope: data.scope ?? 'personal',
       teamId: data.scope === 'team' ? (data.teamId ?? null) : null,
     });

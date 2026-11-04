@@ -40,7 +40,16 @@ describe('daemon events — identity from the daemon token (M3)', () => {
       body({ event_type: 'daemon_exit', payload: { exit_code: 1 } }),
       { internalAuth: { sub: 'owner-A', did: 'daemon-A' } },
     );
-    expect(daemonsSvc.handleDaemonExit).toHaveBeenCalledWith('daemon-A', 1);
+    expect(daemonsSvc.handleDaemonExit).toHaveBeenCalledWith('daemon-A', 1, undefined);
+  });
+
+  it('passes the output tail of the exited daemon along', async () => {
+    const { controller, daemonsSvc } = makeController();
+    await controller.receiveEvent(
+      body({ event_type: 'daemon_exit', payload: { exit_code: 1, output_tail: 'Fatal: boom' } }),
+      { internalAuth: { sub: 'owner-A', did: 'daemon-A' } },
+    );
+    expect(daemonsSvc.handleDaemonExit).toHaveBeenCalledWith('daemon-A', 1, 'Fatal: boom');
   });
 
   it('fails closed when the token is not daemon-scoped (no did)', async () => {

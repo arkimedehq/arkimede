@@ -9,6 +9,8 @@
  *   - Stop:    asks the executor to terminate the process
  *   - List:    shows the user's daemons with live state from the executor
  *   - Recovery: at backend startup, restarts the daemons with status='running'
+ *   - Auto-restart: a daemon that dies unexpectedly is restarted with growing
+ *     delays (RESTART_DELAYS_S); after the last attempt it stays in 'error'
  *
  * Daemons receive the configuration via stdin JSON at startup (identical to tasks),
  * then run indefinitely and communicate with the backend via PUSH_URL.
@@ -18,23 +20,36 @@
  */
 import {
   Injectable, Logger, NotFoundException, BadRequestException,
-  ForbiddenException, OnModuleInit,
+  ForbiddenException, OnModuleInit, OnModuleDestroy,
 } from '@nestjs/common';
 import { I18nContext } from 'nestjs-i18n';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 
-import { SkillDaemon } from './skill-daemon.entity';
+import { SkillDaemon, DaemonStatus, ACTIVE_DAEMON_STATUSES } from './skill-daemon.entity';
 import { Skill } from '../skills/skill.entity';
 import { SkillScript } from '../skills/skill-script.entity';
 import { SkillsService } from '../skills/skills.service';
 import { SkillExecutorClient, DaemonStatusEntry } from '../skills/skill-executor.client';
 import { mintDaemonToken } from '../common/internal-token/internal-token';
 
+/** Delays before each automatic restart of a crashed daemon; then it stays in 'error'. */
+export const RESTART_DELAYS_S = [5, 30, 120, 600, 1800];
+/** A daemon that ran at least this long before dying starts again from the first delay. */
+export const STABLE_RUN_MS = 15 * 60_000;
+/** How often running daemons are checked against the executor (catches deaths never reported). */
+const SWEEP_INTERVAL_MS = 60_000;
+const LAST_ERROR_MAX = 2000;
+
 @Injectable()
-export class DaemonsService implements OnModuleInit {
+export class DaemonsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DaemonsService.name);
+  /** Pending automatic restarts and the attempts made so far, per daemon (in memory:
+   *  the 'restarting' status in the DB is what survives a backend restart). */
+  private readonly restartTimers = new Map<string, NodeJS.Timeout>();
+  private readonly restartAttempts = new Map<string, number>();
+  private sweepTimer: NodeJS.Timeout | null = null;
 
   constructor(
     @InjectRepository(SkillDaemon)
@@ -53,7 +68,7 @@ export class DaemonsService implements OnModuleInit {
    *
    * Strategy:
    *   1. Asks the executor for the list of processes actually alive
-   *   2. For each DB daemon with status 'starting'|'running':
+   *   2. For each DB daemon with status 'starting'|'running'|'restarting':
    *      - Already alive in the executor → confirm status='running' (no restart)
    *      - Not found in the executor → restart the process
    *   3. Logs zombie daemons in the executor without a DB record (no action —
@@ -63,8 +78,11 @@ export class DaemonsService implements OnModuleInit {
    * (e.g. backend restarted but skill-executor container still active).
    */
   async onModuleInit(): Promise<void> {
+    this.sweepTimer = setInterval(() => { this.reconcile().catch(() => { /* best-effort */ }); }, SWEEP_INTERVAL_MS);
+    this.sweepTimer.unref?.();
+
     const dbDaemons = await this.daemonRepo.find({
-      where: { status: In(['starting', 'running']) },
+      where: { status: In(ACTIVE_DAEMON_STATUSES) },
       relations: { skill: true },
     });
 
@@ -139,7 +157,7 @@ export class DaemonsService implements OnModuleInit {
    * even after a restart of the backend or the executor.
    */
   async findAll(userId: string): Promise<SkillDaemon[]> {
-    await this.reconcileUser(userId).catch(() => { /* best-effort */ });
+    await this.reconcile(userId).catch(() => { /* best-effort */ });
     return this.daemonRepo.find({
       where: { userId },
       relations: { skill: true },
@@ -201,7 +219,7 @@ export class DaemonsService implements OnModuleInit {
 
     // No active daemon for the same tuple (DB check)
     const existing = await this.daemonRepo.findOne({
-      where: { userId, skillId, scriptFilename, status: In(['starting', 'running']) },
+      where: { userId, skillId, scriptFilename, status: In(ACTIVE_DAEMON_STATUSES) },
     });
     if (existing) {
       throw new BadRequestException(
@@ -266,13 +284,14 @@ export class DaemonsService implements OnModuleInit {
   async stop(id: string, userId: string): Promise<SkillDaemon> {
     const daemon = await this.findOne(id, userId);
 
-    if (!['starting', 'running'].includes(daemon.status)) {
+    if (!ACTIVE_DAEMON_STATUSES.includes(daemon.status)) {
       throw new BadRequestException(
         I18nContext.current()?.t('daemons.alreadyStopped', { args: { status: daemon.status } }) ??
           `Daemon already in state "${daemon.status}"`,
       );
     }
 
+    this.cancelRestart(id);
     // Ask the executor to stop it (best-effort: it may already be dead)
     try {
       await this.executor.stopDaemon(daemon.id);
@@ -289,6 +308,7 @@ export class DaemonsService implements OnModuleInit {
    */
   async restart(id: string, userId: string): Promise<SkillDaemon> {
     const daemon = await this.findOne(id, userId);
+    this.cancelRestart(id);
 
     // Stop if still running
     if (['starting', 'running'].includes(daemon.status)) {
@@ -319,7 +339,7 @@ export class DaemonsService implements OnModuleInit {
   async remove(id: string, userId: string): Promise<void> {
     const daemon = await this.findOne(id, userId);
 
-    if (['starting', 'running'].includes(daemon.status)) {
+    if (ACTIVE_DAEMON_STATUSES.includes(daemon.status)) {
       throw new BadRequestException('daemons.stopBeforeDelete');
     }
 
@@ -337,20 +357,76 @@ export class DaemonsService implements OnModuleInit {
   }
 
   /**
-   * Update the state after an unexpected daemon exit.
+   * Handle an unexpected daemon exit reported by the executor: schedule an
+   * automatic restart (see crashed()). `outputTail` is the last output of the
+   * process, kept in lastError so the cause outlives the executor's log.
    */
-  async handleDaemonExit(daemonId: string, exitCode: number | null): Promise<void> {
+  async handleDaemonExit(daemonId: string, exitCode: number | null, outputTail?: string): Promise<void> {
     const daemon = await this.daemonRepo.findOne({ where: { id: daemonId } });
     if (!daemon) return;
+    const reason = exitCode !== null ? `Process terminated with exit code ${exitCode}` : 'Process terminated';
+    await this.crashed(daemon, outputTail?.trim() ? `${reason}\n${outputTail.trim()}` : reason, ['starting', 'running']);
+  }
 
-    // If it was explicitly stopped (stopped), don't change state
-    if (daemon.status === 'stopped') return;
+  /**
+   * A daemon died without being asked to. Unless it was stopped meanwhile (the
+   * conditional update on `from` makes concurrent reports count once), it goes
+   * to 'restarting' with the next delay of RESTART_DELAYS_S; when they are
+   * used up it stays in 'error'. A daemon that had run for STABLE_RUN_MS
+   * starts again from the first delay.
+   */
+  private async crashed(daemon: SkillDaemon, detail: string, from: DaemonStatus[]): Promise<void> {
+    const ranMs = daemon.startedAt ? Date.now() - new Date(daemon.startedAt).getTime() : 0;
+    if (ranMs >= STABLE_RUN_MS) this.restartAttempts.delete(daemon.id);
+    const attempt = this.restartAttempts.get(daemon.id) ?? 0;
+    const giveUp = attempt >= RESTART_DELAYS_S.length;
+    const delayS = RESTART_DELAYS_S[attempt];
+    const note = giveUp
+      ? `(automatic restart stopped after ${attempt} attempts)`
+      : `(restarting in ${delayS}s, attempt ${attempt + 1}/${RESTART_DELAYS_S.length})`;
 
-    await this.daemonRepo.update(daemonId, {
-      status:    'error',
-      lastError: exitCode !== null ? `Process terminated with exit code ${exitCode}` : 'Process terminated',
-    });
-    this.logger.warn(`Daemon ${daemonId.slice(0, 8)} exited unexpectedly (code=${exitCode})`);
+    const res = await this.daemonRepo.update(
+      { id: daemon.id, status: In(from) },
+      { status: giveUp ? 'error' : 'restarting', lastError: `${detail.slice(0, LAST_ERROR_MAX)}\n${note}` },
+    );
+    if (!res.affected) return;
+
+    this.logger.warn(`Daemon ${daemon.id.slice(0, 8)} died unexpectedly ${note}`);
+    if (giveUp) {
+      this.restartAttempts.delete(daemon.id);
+      return;
+    }
+    this.restartAttempts.set(daemon.id, attempt + 1);
+    this.cancelRestart(daemon.id, false);
+    const timer = setTimeout(() => { this.autoRestart(daemon.id).catch(() => { /* logged inside */ }); }, delayS * 1000);
+    timer.unref?.();
+    this.restartTimers.set(daemon.id, timer);
+  }
+
+  private async autoRestart(daemonId: string): Promise<void> {
+    this.restartTimers.delete(daemonId);
+    const daemon = await this.daemonRepo.findOne({ where: { id: daemonId } });
+    if (!daemon || daemon.status !== 'restarting') return; // stopped, restarted or removed meanwhile
+    try {
+      await this.doStart(daemon);
+      this.logger.log(`Daemon ${daemonId.slice(0, 8)} restarted automatically`);
+    } catch (err: any) {
+      await this.crashed(daemon, `Restart failed: ${err.message}`, ['restarting']);
+    }
+  }
+
+  /** Drops a pending automatic restart; `resetAttempts` also forgets the count. */
+  private cancelRestart(daemonId: string, resetAttempts = true): void {
+    const timer = this.restartTimers.get(daemonId);
+    if (timer) clearTimeout(timer);
+    this.restartTimers.delete(daemonId);
+    if (resetAttempts) this.restartAttempts.delete(daemonId);
+  }
+
+  onModuleDestroy(): void {
+    if (this.sweepTimer) clearInterval(this.sweepTimer);
+    for (const timer of this.restartTimers.values()) clearTimeout(timer);
+    this.restartTimers.clear();
   }
 
   // ── Private helpers ───────────────────────────────────────────────────────────
@@ -375,15 +451,17 @@ export class DaemonsService implements OnModuleInit {
   }
 
   /**
-   * Sync the DB state of a user's daemons with the executor's reality.
-   * Called by findAll() — best-effort, does not throw exceptions.
+   * Sync the DB state of the daemons (of one user, or all) with the executor's
+   * reality. Called by findAll() and periodically — best-effort. A 'running'
+   * daemon the executor no longer has died without a report (e.g. the executor
+   * restarted): it is handled as a crash.
    */
-  private async reconcileUser(userId: string): Promise<void> {
+  private async reconcile(userId?: string): Promise<void> {
     const { liveMap, executorOk } = await this.fetchLiveDaemons();
     if (!executorOk) return;
 
     const active = await this.daemonRepo.find({
-      where: { userId, status: In(['starting', 'running']) },
+      where: { ...(userId ? { userId } : {}), status: In(['starting', 'running']) },
     });
 
     for (const daemon of active) {
@@ -393,15 +471,9 @@ export class DaemonsService implements OnModuleInit {
         if (daemon.pid !== live.pid || daemon.status !== 'running') {
           await this.daemonRepo.update(daemon.id, { status: 'running', pid: live.pid });
         }
-      } else {
-        // Process dead — update the DB state
-        await this.daemonRepo.update(daemon.id, {
-          status:    'error',
-          lastError: 'Process not found in the executor (detected on sync)',
-        });
-        this.logger.warn(
-          `Daemon ${daemon.id.slice(0, 8)} marked 'error': not found in the executor`,
-        );
+      } else if (daemon.status === 'running') {
+        // Process dead without an exit report ('starting' is left alone: its start may be in flight)
+        await this.crashed(daemon, 'Process not found in the executor (detected on sync)', ['running']);
       }
     }
   }

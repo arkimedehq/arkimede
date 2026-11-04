@@ -56,8 +56,8 @@
     "toolPickerEmpty": "Nessun tool disponibile. Configura server MCP, skill, flow o altri agenti.",
     "toolPickerHint": "{{count}} selezionati. Spunta i singoli tool o un intero gruppo.",
     "toolPickerWholeGroup": "tutto il gruppo",
-    "memoryContext": "Contesto di memoria",
-    "memoryContextText": "Prima di ogni risposta, i ricordi pertinenti dalla memoria episodica",
-    "memoryContextTitle": "Se attivo, prima di ogni risposta Recordare fornisce i ricordi dell'utente pertinenti al messaggio (solo quelli pertinenti, al massimo ~300 token), aggiunti in fondo al prompt: l'agente può rispondere senza chiamare uno strumento di memoria. Utile dove conta la latenza (voce). Richiede la memoria episodica attiva per l'utente."
+    "memoryContext": "Memoria attiva",
+    "memoryContextText": "L'agente usa la sua memoria (consigliato)",
+    "memoryContextTitle": "Attiva: l'agente ragiona con la sua memoria — le istruzioni su come usarla, i ricordi pertinenti prima di ogni risposta e gli strumenti di memoria (Recordare se la memoria episodica è attiva e raggiungibile, altrimenti la memoria interna). Disattivala solo per un agente che deve rispondere senza ricordi."
   }
 }

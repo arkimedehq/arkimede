@@ -47,6 +47,21 @@ interface DaemonEntry {
   push_url:   string;
   pid:        number;
   started_at: string;
+  /** Set by stopDaemon(): the exit that follows is intended and is not reported. */
+  stopping:   boolean;
+  /** Last lines of output, sent with the exit report so the cause outlives log rotation. */
+  tail:       string[];
+}
+
+const TAIL_LINES     = 20;
+const TAIL_LINE_CHARS = 300;
+
+function pushTail(tail: string[], text: string): void {
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    tail.push(line.slice(0, TAIL_LINE_CHARS));
+    if (tail.length > TAIL_LINES) tail.shift();
+  }
 }
 
 const daemons = new Map<string, DaemonEntry>();
@@ -146,30 +161,7 @@ export function startDaemon(req: DaemonStartRequest): DaemonStartResult {
   const started_at = new Date().toISOString();
   const pid        = child.pid ?? -1;
 
-  // Log the daemon's stdout/stderr (we don't capture output as a result — it goes to the log)
-  child.stdout!.on('data', (chunk: Buffer) => {
-    const text = chunk.toString().trim();
-    if (text) log.info(`[${req.daemon_id.slice(0, 8)}] ${text.slice(0, 500)}`);
-  });
-  child.stderr!.on('data', (chunk: Buffer) => {
-    const text = chunk.toString().trim();
-    if (text) log.warn(`[${req.daemon_id.slice(0, 8)}] stderr: ${text.slice(0, 500)}`);
-  });
-
-  child.on('exit', (code, signal) => {
-    const reason = signal ? `signal=${signal}` : `code=${code}`;
-    log.warn(`Daemon ${req.daemon_id.slice(0, 8)} terminated (${reason})`);
-    daemons.delete(req.daemon_id);
-    // Notify the backend of the unexpected exit (auth with the daemon token)
-    notifyDaemonExit(req.daemon_id, req.user_id, req.skill_id, code, req.daemon_token ?? '').catch(() => {});
-  });
-
-  child.on('error', (err) => {
-    log.error(`Daemon ${req.daemon_id.slice(0, 8)} spawn error: ${err.message}`);
-    daemons.delete(req.daemon_id);
-  });
-
-  daemons.set(req.daemon_id, {
+  const entry: DaemonEntry = {
     process:    child,
     skill_id:   req.skill_id,
     filename:   req.filename,
@@ -177,7 +169,40 @@ export function startDaemon(req: DaemonStartRequest): DaemonStartResult {
     push_url:   req.push_url,
     pid,
     started_at,
+    stopping:   false,
+    tail:       [],
+  };
+  // A restart reuses the daemon id: only the current process owns the map entry,
+  // so the exit of the previous one does not remove (or report) the new one.
+  const release = () => { if (daemons.get(req.daemon_id) === entry) daemons.delete(req.daemon_id); };
+
+  // Log the daemon's stdout/stderr (we don't capture output as a result — it goes to the log)
+  child.stdout!.on('data', (chunk: Buffer) => {
+    const text = chunk.toString().trim();
+    if (text) log.info(`[${req.daemon_id.slice(0, 8)}] ${text.slice(0, 500)}`);
+    pushTail(entry.tail, text);
   });
+  child.stderr!.on('data', (chunk: Buffer) => {
+    const text = chunk.toString().trim();
+    if (text) log.warn(`[${req.daemon_id.slice(0, 8)}] stderr: ${text.slice(0, 500)}`);
+    pushTail(entry.tail, text);
+  });
+
+  child.on('exit', (code, signal) => {
+    const reason = signal ? `signal=${signal}` : `code=${code}`;
+    log.warn(`Daemon ${req.daemon_id.slice(0, 8)} terminated (${reason})`);
+    release();
+    if (entry.stopping) return;
+    // Notify the backend of the unexpected exit (auth with the daemon token)
+    notifyDaemonExit(req.daemon_id, req.user_id, req.skill_id, code, entry.tail.join('\n'), req.daemon_token ?? '').catch(() => {});
+  });
+
+  child.on('error', (err) => {
+    log.error(`Daemon ${req.daemon_id.slice(0, 8)} spawn error: ${err.message}`);
+    release();
+  });
+
+  daemons.set(req.daemon_id, entry);
 
   log.info(`Started daemon ${req.daemon_id.slice(0, 8)} (${req.filename}) PID=${pid}`);
   return { daemon_id: req.daemon_id, pid, started_at };
@@ -190,6 +215,7 @@ export function stopDaemon(daemonId: string): boolean {
   if (!entry) return false;
 
   log.info(`Stopping daemon ${daemonId.slice(0, 8)} (SIGTERM)...`);
+  entry.stopping = true;
 
   try {
     entry.process.kill('SIGTERM');
@@ -199,10 +225,9 @@ export function stopDaemon(daemonId: string): boolean {
 
   // Grace period: if it hasn't exited within 5s, SIGKILL
   const killTimer = setTimeout(() => {
-    if (daemons.has(daemonId)) {
+    if (entry.process.exitCode === null && entry.process.signalCode === null) {
       log.warn(`Daemon ${daemonId.slice(0, 8)} not responding to SIGTERM — SIGKILL`);
       try { entry.process.kill('SIGKILL'); } catch { /* already dead */ }
-      daemons.delete(daemonId);
     }
   }, 5_000);
 
@@ -248,6 +273,7 @@ async function notifyDaemonExit(
   userId:      string,
   skillId:     string,
   exitCode:    number | null,
+  outputTail:  string,
   daemonToken: string,
 ): Promise<void> {
   const backendUrl = process.env.BACKEND_INTERNAL_URL ?? 'http://localhost:3000';
@@ -263,7 +289,7 @@ async function notifyDaemonExit(
         user_id:    userId,
         daemon_id:  daemonId,
         event_type: 'daemon_exit',
-        payload:    { exit_code: exitCode },
+        payload:    { exit_code: exitCode, ...(outputTail ? { output_tail: outputTail } : {}) },
       }),
       signal: AbortSignal.timeout(5_000),
     });

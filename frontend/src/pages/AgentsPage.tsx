@@ -73,7 +73,7 @@ function AgentEditor({ agent, onClose, onSaved }: { agent?: Agent; onClose: () =
   );
   const [scope, setScope] = useState<AgentScope>(agent?.scope ?? 'personal');
   const [exposeAsTool, setExposeAsTool] = useState(agent?.exposeAsTool ?? false);
-  const [memoryContext, setMemoryContext] = useState(agent?.memoryContext ?? false);
+  const [memoryContext, setMemoryContext] = useState(agent?.memoryContext ?? true);
   const [err, setErr] = useState<string | null>(null);
 
   const llmConfigs = useQuery({ queryKey: ['llm-configs'], queryFn: llmConfigsApi.list, staleTime: 30_000 });

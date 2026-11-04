@@ -242,7 +242,7 @@ curl -s localhost:3000/api/health                     # verifica
 
 > **Rilanciare `install.sh`** funziona anch'esso come aggiornamento (è idempotente e ricostruisce le immagini del broker), ma **solo dopo** un `git pull` — da solo ricostruisce la versione già su disco. Per un deployment attivo preferisci `update.sh`.
 
-**Rollback.** Ogni esecuzione lascia uno snapshot in `backups/arkimede-backup-<timestamp>/`. Per ripristinare il database: `gunzip -c backups/<snapshot>/db.sql.gz | ./scripts/compose.sh exec -T postgres psql -U <DB_USER> -d <DB_NAME>`. I tarball dei volumi (`uploads`/`skills_data`/`qdrant_data`) si ripristinano nei rispettivi volumi col pattern `docker run --rm -v <project>_<volume>:/dst …` mostrato in cima a `scripts/backup.sh`.
+**Rollback.** Ogni esecuzione lascia uno snapshot `arkimede-backup-<timestamp>/` nella destinazione dei backup (`backups/` se non configurata). Come ripristinarlo, backup programmati su NAS o condivisione di rete e ripristino a un istante: **[BACKUP_it.md](BACKUP_it.md)**.
 
 ---
 
@@ -584,6 +584,34 @@ Transport: remote
 
 Il naming segue il pattern `mcp_{server_name}_{tool_name}`:
 - Server "filesystem" + tool "read_file" → `mcp_filesystem_read_file`
+
+### File restituiti dai tool (immagini, audio, documenti)
+
+Un tool MCP può restituire file: blocchi `image` e `audio`, una `resource`
+incorporata con un `blob` binario, un `resource_link` a un file. Ognuno diventa
+un **file dell'utente** (tabella `files`, in `UPLOAD_DIR/tool-files/<userId>/`,
+al massimo `TOOL_FILE_MAX_MB`, default 50) e il modello ne legge una riga:
+
+```
+[file] image-1793443533335.jpg (image/jpeg, 84 KB) — file_id: <uuid> — download: /api/files/<uuid>/download
+```
+
+- **Passarlo ad altri**: il modello dà il `file_id` a qualsiasi parametro
+  `file-ref` — "scatta un'istantanea e mandala su Telegram" è il tool della
+  telecamera, poi `send_message(file=<file_id>)`. Un file grande (un video) non
+  passa mai dal modello: costa una riga.
+- **Guardarlo**: prima di ogni chiamata al modello il contenuto va in un
+  messaggio utente subito dopo i risultati dei tool (l'unico posto in cui ogni
+  provider accetta immagini): le immagini come immagini se il modello
+  dell'agente è il modello **vision** designato (Impostazioni → Sistema AI,
+  *vision*), altrimenti descritte a parole dal modello vision; l'audio come
+  trascrizione (il servizio di speech-to-text); i file di testo piccoli come
+  testo. Senza un modello vision designato le immagini restano note solo per la
+  loro riga.
+- **In chat** il file è allegato alla risposta (chip di download).
+- Un `resource_link` viene scaricato se il suo URI è http(s) (con gli header del
+  server se è sulla stessa origine del server) o leggibile con
+  `resources/read`; altrimenti il modello riceve il link.
 
 ---
 
@@ -1145,6 +1173,17 @@ Il backend sfrutta automaticamente il prompt caching del provider:
 | **OpenAI** | Automatico sul prefisso stabile | Prefisso ≥1024 tok cachato automaticamente; 50% sconto. No marcatori necessari. |
 | **Gemini** | Automatico | `cachedContentTokenCount` mappato in LangChain → loggato come `cache_read`. |
 | **DeepSeek** | Automatico | `prompt_cache_hit_tokens` intercettato dall'SSE interceptor in `LlmProviderService`. Logga hit/miss nel debug. |
+
+**Ciò che cambia a ogni richiesta va dopo la parte stabile.** Una cache automatica riusa i token
+di una richiesta solo fino al primo che differisce dalla richiesta precedente, e una richiesta si
+legge messaggio di sistema → definizioni degli strumenti → conversazione. Per questo il messaggio di
+sistema contiene solo il prompt stabile, gli strumenti sono ordinati per nome (le loro sorgenti si
+caricano in parallelo) e i blocchi per richiesta — data e ora correnti, riassunto della
+conversazione, correzioni dai feedback, note di memoria recuperate, contesto Recordare — aprono il
+messaggio utente del turno, ciascuno col suo titolo e prima di `## The user's message`
+(`agent/turn-context.ts`). Così prompt di sistema ed elenco degli strumenti restano in cache da una
+richiesta all'altra. Anthropic tiene quei blocchi nel messaggio di sistema, dopo il suo marcatore di
+cache esplicito.
 
 **Come leggere i log cache:**
 ```

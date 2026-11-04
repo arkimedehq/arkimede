@@ -46,6 +46,7 @@ ridistribuzione, e concede un grant brevettuale esplicito:
 - `ssh2-sftp-client` — https://github.com/theophilusx/ssh2-sftp-client
 - `oracledb` — `Apache-2.0 OR UPL-1.0`, usato sotto Apache-2.0 — https://github.com/oracle/node-oracledb
 - `@opentelemetry/*` (`api`, `sdk-trace-base`, `sdk-trace-node`, `resources`, `exporter-trace-otlp-proto`, `exporter-trace-otlp-http`) — https://github.com/open-telemetry/opentelemetry-js
+- `sherpa-onnx` (Python, whisper-service) — https://github.com/k2-fsa/sherpa-onnx
 - `pymupdf` (ocr-service) — `AGPL-3.0 OR commerciale Artifex` → usata sotto **AGPL-3.0**,
   compatibile con la licenza AGPL-3.0 di Arkimede: il sorgente corrispondente completo del
   servizio è questo repository (`ocr-service/`). https://github.com/pymupdf/PyMuPDF
@@ -79,6 +80,7 @@ Copia integrale della licenza: https://www.apache.org/licenses/LICENSE-2.0
 | uvicorn | BSD-3-Clause |
 | faster-whisper | MIT |
 | python-multipart | Apache-2.0 |
+| sherpa-onnx | **Apache-2.0** — https://github.com/k2-fsa/sherpa-onnx (include onnxruntime, MIT) |
 
 (CTranslate2, backend di `faster-whisper`, è distribuito sotto MIT.)
 
@@ -126,6 +128,7 @@ software. Gli unici modelli utilizzati sono:
 | `BAAI/bge-m3` | Embedding testo (embedding-service, default) | **MIT** |
 | `mixedbread-ai/mxbai-embed-large-v1` | Embedding testo (embedding-service) | **Apache-2.0** |
 | OpenAI **Whisper** (via faster-whisper / CTranslate2) | Trascrizione audio (whisper-service) | **MIT** |
+| NVIDIA **Parakeet TDT 0.6B v3** (export ONNX int8 di sherpa-onnx) | Trascrizione audio (whisper-service, `STT_ENGINE=parakeet`; scaricato al primo avvio) | **CC-BY-4.0** |
 | Voce Piper `it_IT-serena-medium` | Voce text-to-speech di default (piper-service; inclusa nell'immagine in fase di build) | **CC-BY-4.0** |
 | `docling-project/docling-layout-heron` | Analisi layout pagina (ocr-service, livello strutturato) | **Apache-2.0** |
 | `docling-project/docling-models` (TableFormer) | Struttura tabelle (ocr-service, livello strutturato) | **CDLA-Permissive-2.0 / Apache-2.0** |
@@ -135,6 +138,9 @@ software. Gli unici modelli utilizzati sono:
 - bge-m3: https://huggingface.co/BAAI/bge-m3 — MIT
 - mxbai-embed-large-v1: https://huggingface.co/mixedbread-ai/mxbai-embed-large-v1 — Apache-2.0
 - Whisper: https://github.com/openai/whisper — MIT (pesi e codice rilasciati da OpenAI sotto MIT)
+- Parakeet TDT 0.6B v3: https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3 — **CC-BY-4.0** (© NVIDIA; attribuzione
+  richiesta: questa nota). Usato tramite l'export ONNX pubblicato dal progetto sherpa-onnx
+  (https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models), scaricato a runtime, non ridistribuito.
 - Voce Piper `it_IT-serena-medium`: https://huggingface.co/rhasspy/piper-voices/tree/main/it/it_IT/serena/medium
   (model card `MODEL_CARD`), addestrata sul dataset https://huggingface.co/datasets/committa/serena-synthetic-it-27h —
   **CC-BY-4.0** (attribuzione richiesta: questa nota). Usata come voce di default del piper-service incluso

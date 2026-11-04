@@ -35,7 +35,7 @@ function makeStt(opts: { fail?: boolean } = {}) {
   const appConfig = {
     getTranscriptionConfig: async () => ({ transcriptionEnabled: true, transcriptionProvider: 'internal', transcriptionModel: 'small' }),
   } as any;
-  const svc = new TranscriptionService(appConfig, env);
+  const svc = new TranscriptionService(appConfig, env, {} as any);
   const client = {
     audio: {
       transcriptions: {

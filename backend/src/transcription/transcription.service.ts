@@ -18,14 +18,26 @@
  *
  * Tracing: every transcription runs in a `transcription {model}` OTel span
  * (opt-in, metadata only — never the audio nor the transcript).
+ *
+ * Vocabulary (opt-in, admin): the expected words — the admin's own (places,
+ * rooms, devices) and the names the user's memory knows (Recordare contacts) —
+ * go to the model as its `prompt`, so proper names come out right.
+ *
+ * Fallback (opt-in, admin): when a cloud provider fails (down, rate-limited,
+ * slow), the turn is transcribed by a model of the bundled whisper-service —
+ * only while that model is downloaded there.
  */
 import { Injectable, Logger, BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import OpenAI, { toFile } from 'openai';
 import { AppConfigService } from '../app-config/app-config.service';
 import { TranscriptionProvider } from '../app-config/app-config.entity';
 import { isInternalServiceAvailable } from '../common/internal-service-probe.util';
 import { wavDurationSeconds, withVoiceSpan } from '../observability/genai-tracing';
+import { User } from '../users/users.entity';
+import { recordareClient } from '../recordare/recordare.config';
 
 interface TranscriptionRuntimeConfig {
   enabled:  boolean;
@@ -33,6 +45,43 @@ interface TranscriptionRuntimeConfig {
   model:    string;
   apiKey:   string | null;
   baseUrl:  string | null;
+  vocabularyEnabled: boolean;
+  vocabulary:        string | null;
+  /** Model of the bundled service used when a cloud provider fails; null = none. */
+  fallbackModel:     string | null;
+}
+
+/** A model the bundled whisper-service has downloaded. */
+export interface LocalModel { id: string; engine: string }
+
+/** Whisper reads at most 224 prompt tokens: keep the vocabulary well within it. */
+const MAX_VOCABULARY_CHARS = 500;
+/** With a fallback, a cloud provider gets this long (and no retry) before the local model takes the turn. */
+const PRIMARY_TIMEOUT_MS = 8_000;
+/** How long the names from the user's memory and the list of local models are reused. */
+const NAMES_TTL_MS = 10 * 60_000;
+const LOCAL_MODELS_TTL_MS = 60_000;
+/** Bound on fetching the names (the turn never waits longer for them). */
+const NAMES_TIMEOUT_MS = 1_000;
+
+/**
+ * The model prompt for a vocabulary: the admin's words first, then the names, de-duplicated
+ * (case-insensitive), cut at MAX_VOCABULARY_CHARS on a whole word; null when empty.
+ */
+export function buildVocabularyPrompt(words: string | null | undefined, names: string[] = []): string | null {
+  const seen = new Set<string>();
+  const kept: string[] = [];
+  let length = 0;
+  for (const raw of [...(words ?? '').split(/[\n,;]+/), ...names]) {
+    const word = raw.trim().replace(/\s+/g, ' ');
+    const key = word.toLowerCase();
+    if (!word || seen.has(key)) continue;
+    if (length + word.length + 2 > MAX_VOCABULARY_CHARS) break;
+    seen.add(key);
+    kept.push(word);
+    length += word.length + 2;
+  }
+  return kept.length ? `${kept.join(', ')}.` : null;
 }
 
 /** Default model when not specified in the DB. */
@@ -62,27 +111,41 @@ export class TranscriptionService {
 
   /** Cached OpenAI client + associated model. Reset by invalidateCache(). */
   private cached: { client: OpenAI; model: string; provider: TranscriptionProvider } | null = null;
+  private localClient: OpenAI | null = null;
+  private localModels: { at: number; list: LocalModel[] } | null = null;
+  private names = new Map<string, { at: number; list: string[] }>();
 
   constructor(
     private readonly appConfig: AppConfigService,
     private readonly env: ConfigService,
+    @InjectRepository(User) private readonly userRepo: Repository<User>,
   ) {}
 
   /** Invalidates the client cache (called after every config change). */
   invalidateCache(): void {
     this.cached = null;
+    this.localModels = null;
+  }
+
+  private get internalBaseUrl(): string {
+    return this.env.get<string>('TRANSCRIPTION_BASE_URL', DEFAULT_BASE_URLS.internal!);
   }
 
   /** Reads the runtime configuration (DB + env fallback), with the key decrypted. */
   private async loadConfig(): Promise<TranscriptionRuntimeConfig> {
     const cfg = await this.appConfig.getTranscriptionConfig();
     const provider = cfg.transcriptionProvider;
+    const extras = {
+      vocabularyEnabled: cfg.transcriptionVocabularyEnabled,
+      vocabulary:        cfg.transcriptionVocabulary,
+      fallbackModel:     provider === 'internal' ? null : cfg.transcriptionFallbackModel,
+    };
 
     // ── Provider 'internal': whisper-service bundled with the app ─────────────────
     // URL from the deployment (env). Model: the size chosen by the admin (the service
     // switches at runtime, downloading on first use), else the one currently loaded.
     if (provider === 'internal') {
-      const baseUrl = this.env.get<string>('TRANSCRIPTION_BASE_URL', DEFAULT_BASE_URLS.internal!);
+      const baseUrl = this.internalBaseUrl;
       const chosen = cfg.transcriptionModel?.trim() || null;
       const probed = chosen ? null : await this.probeInternal(baseUrl);
       return {
@@ -91,6 +154,7 @@ export class TranscriptionService {
         model:    chosen ?? probed ?? MODEL_DEFAULTS.internal,
         apiKey:   null,
         baseUrl,
+        ...extras,
       };
     }
 
@@ -105,6 +169,7 @@ export class TranscriptionService {
       model:    cfg.transcriptionModel || MODEL_DEFAULTS[provider],
       apiKey,
       baseUrl:  cfg.transcriptionBaseUrl || DEFAULT_BASE_URLS[provider] || null,
+      ...extras,
     };
   }
 
@@ -127,17 +192,101 @@ export class TranscriptionService {
   }
 
   /** Builds (or reuses) the OpenAI client for transcription. */
-  private async getClient(): Promise<{ client: OpenAI; model: string; provider: TranscriptionProvider; enabled: boolean }> {
+  private async getClient(): Promise<{ client: OpenAI; model: string; provider: TranscriptionProvider; enabled: boolean; config: TranscriptionRuntimeConfig }> {
     const config = await this.loadConfig();
-    if (this.cached) return { ...this.cached, enabled: config.enabled };
+    if (this.cached) return { ...this.cached, enabled: config.enabled, config };
 
     const client = new OpenAI({
       // Self-hosted providers may not require a key: placeholder for the SDK.
       apiKey: config.apiKey ?? 'not-needed',
       ...(config.baseUrl ? { baseURL: config.baseUrl } : {}),
+      // With a fallback, a failing provider gives way at once instead of retrying.
+      ...(config.fallbackModel ? { timeout: PRIMARY_TIMEOUT_MS, maxRetries: 0 } : {}),
     });
     this.cached = { client, model: config.model, provider: config.provider };
-    return { ...this.cached, enabled: config.enabled };
+    return { ...this.cached, enabled: config.enabled, config };
+  }
+
+  /**
+   * The models the bundled whisper-service has downloaded (cached briefly); [] when it
+   * is not deployed or does not answer.
+   */
+  async listLocalModels(): Promise<LocalModel[]> {
+    if (this.localModels && Date.now() - this.localModels.at < LOCAL_MODELS_TTL_MS) return this.localModels.list;
+    let list: LocalModel[] = [];
+    try {
+      const res = await fetch(`${this.internalBaseUrl.replace(/\/$/, '')}/models`, { signal: AbortSignal.timeout(3_000) });
+      if (res.ok) {
+        const json: any = await res.json();
+        list = (json?.data ?? [])
+          .filter((m: any) => m?.downloaded && typeof m.id === 'string')
+          .map((m: any) => ({ id: m.id, engine: String(m.engine ?? 'whisper') }));
+      }
+    } catch { /* not deployed or not answering: no local models */ }
+    this.localModels = { at: Date.now(), list };
+    return list;
+  }
+
+  /** The fallback model when one is configured and downloaded in the bundled service; else null. */
+  private async usableFallback(config: TranscriptionRuntimeConfig): Promise<string | null> {
+    if (!config.fallbackModel) return null;
+    return (await this.listLocalModels()).some((m) => m.id === config.fallbackModel) ? config.fallbackModel : null;
+  }
+
+  private local(): OpenAI {
+    this.localClient ??= new OpenAI({ apiKey: 'not-needed', baseURL: this.internalBaseUrl });
+    return this.localClient;
+  }
+
+  /**
+   * Loads the fallback model in the bundled service (one model in RAM there), so a fallback
+   * answers at once. Best-effort, after the admin saves the configuration.
+   */
+  async warmFallback(): Promise<void> {
+    try {
+      const model = await this.usableFallback(await this.loadConfig());
+      if (!model) return;
+      await this.local().audio.transcriptions.create({ file: await toFile(buildSilentWav(), 'warm.wav'), model });
+      this.logger.log(`Transcription fallback ${model} loaded in the bundled service`);
+    } catch (err: any) {
+      this.logger.warn(`Loading the transcription fallback failed: ${err?.message ?? err}`);
+    }
+  }
+
+  /** The vocabulary prompt for a turn of `userId`, when the vocabulary is on. */
+  private async vocabularyPrompt(config: TranscriptionRuntimeConfig, userId?: string): Promise<string | null> {
+    if (!config.vocabularyEnabled) return null;
+    return buildVocabularyPrompt(config.vocabulary, userId ? await this.memoryNames(userId) : []);
+  }
+
+  /**
+   * Names of the people the user's memory knows (Recordare: who I am + contacts, most
+   * recently mentioned first, with their aliases). Cached per user; [] when Recordare is
+   * off for the user, slow or down.
+   */
+  private async memoryNames(userId: string): Promise<string[]> {
+    const cached = this.names.get(userId);
+    if (cached && Date.now() - cached.at < NAMES_TTL_MS) return cached.list;
+    const client = recordareClient();
+    let list: string[] = [];
+    if (client) {
+      try {
+        const user = await this.userRepo.findOne({ where: { id: userId }, select: { id: true, episodicMemoryEnabled: true } });
+        if (user?.episodicMemoryEnabled) {
+          const cards = await Promise.race([
+            client.cards(userId),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), NAMES_TIMEOUT_MS)),
+          ]);
+          const contacts = [...cards.contacts].sort((a, b) => (b.lastMentioned ?? '').localeCompare(a.lastMentioned ?? ''));
+          list = [cards.self, ...contacts].flatMap((c) => [c.name, ...(c.aliases ?? [])]).filter(Boolean);
+        }
+      } catch (err: any) {
+        this.logger.debug(`Vocabulary: names from memory unavailable (user ${userId}): ${err?.message ?? err}`);
+        if (cached) return cached.list;
+      }
+    }
+    this.names.set(userId, { at: Date.now(), list });
+    return list;
   }
 
   /**
@@ -164,9 +313,7 @@ export class TranscriptionService {
 
   /** True if the bundled whisper-service is deployed (reachable). */
   isInternalAvailable(): Promise<boolean> {
-    return isInternalServiceAvailable(
-      this.env.get<string>('TRANSCRIPTION_BASE_URL', DEFAULT_BASE_URLS.internal!),
-    );
+    return isInternalServiceAvailable(this.internalBaseUrl);
   }
 
   private async isUsable(enabled: boolean, provider: TranscriptionProvider): Promise<boolean> {
@@ -179,9 +326,10 @@ export class TranscriptionService {
    * @param buffer    audio file content (webm/ogg/mp3/wav/m4a)
    * @param filename  name with the correct extension (the SDK uses it for the mime)
    * @param language  ISO-639-1 language hint (e.g. 'it'); improves accuracy
+   * @param opts.userId whose voice it is: the names their memory knows join the vocabulary
    */
-  async transcribe(buffer: Buffer, filename: string, language?: string): Promise<string> {
-    const { client, model, provider, enabled } = await this.getClient();
+  async transcribe(buffer: Buffer, filename: string, language?: string, opts: { userId?: string } = {}): Promise<string> {
+    const { client, model, provider, enabled, config } = await this.getClient();
     if (!enabled) {
       throw new ServiceUnavailableException('transcription.disabled');
     }
@@ -195,18 +343,32 @@ export class TranscriptionService {
         audioSeconds: wavDurationSeconds(buffer),
       }),
       async () => {
-        try {
-          const file = await toFile(buffer, filename);
-          const res = await client.audio.transcriptions.create({
-            file,
-            model,
+        const prompt = await this.vocabularyPrompt(config, opts.userId);
+        const run = async (c: OpenAI, m: string) => {
+          const res = await c.audio.transcriptions.create({
+            file: await toFile(buffer, filename),
+            model: m,
             ...(language ? { language } : {}),
+            ...(prompt ? { prompt } : {}),
           });
           return (res.text ?? '').trim();
+        };
+        try {
+          return await run(client, model);
         } catch (err: any) {
           const detail = err?.response?.data?.error?.message ?? err?.message ?? 'unknown error';
-          this.logger.error(`Transcription failed: ${detail}`);
-          throw new ServiceUnavailableException('transcription.failed');
+          const fallback = await this.usableFallback(config);
+          if (!fallback) {
+            this.logger.error(`Transcription failed: ${detail}`);
+            throw new ServiceUnavailableException('transcription.failed');
+          }
+          this.logger.warn(`Transcription failed on ${provider} (${detail}): local fallback ${fallback}`);
+          try {
+            return await run(this.local(), fallback);
+          } catch (fbErr: any) {
+            this.logger.error(`Transcription fallback ${fallback} failed: ${fbErr?.message ?? fbErr}`);
+            throw new ServiceUnavailableException('transcription.failed');
+          }
         }
       },
     );

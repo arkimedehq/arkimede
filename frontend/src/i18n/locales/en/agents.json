@@ -56,8 +56,8 @@
     "toolPickerEmpty": "No tools available. Configure MCP servers, skills, flows or other agents.",
     "toolPickerHint": "{{count}} selected. Tick individual tools or a whole group.",
     "toolPickerWholeGroup": "whole group",
-    "memoryContext": "Memory context",
-    "memoryContextText": "Before each answer, the relevant memories from the episodic memory",
-    "memoryContextTitle": "If enabled, before each answer Recordare provides the user's memories relevant to the message (only relevant ones, at most ~300 tokens), appended at the end of the prompt: the agent can answer without calling a memory tool. Useful where latency matters (voice). Requires the user's episodic memory to be on."
+    "memoryContext": "Active memory",
+    "memoryContextText": "The agent uses its memory (recommended)",
+    "memoryContextTitle": "On: the agent reasons with its memory — how to use it, the relevant memories before each answer and the memory tools (Recordare when the episodic memory is on and reachable, otherwise the built-in memory). Turn it off only for an agent that must answer without memories."
   }
 }

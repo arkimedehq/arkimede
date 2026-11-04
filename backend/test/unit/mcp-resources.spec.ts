@@ -55,7 +55,7 @@ describe('MCP resources exposed as a read_resource tool', () => {
     expect(desc).toContain('mon://stats/{plugin} — plugin_stats');
   });
 
-  it('reads a resource: text contents returned, binary omitted', async () => {
+  it('reads a resource: text contents returned, binary stored as a file', async () => {
     const svc = makeService({
       capabilities: { resources: {} },
       rpc: {
@@ -67,11 +67,15 @@ describe('MCP resources exposed as a read_resource tool', () => {
         ] }),
       },
     });
+    svc.files = { saveToolFile: vi.fn(async (_u: string, name: string, mimeType: string, data: Buffer) => ({
+      id: '11111111-2222-3333-4444-555555555555', originalName: name, mimeType, size: data.length, storagePath: `/up/${name}`,
+    })) };
     const tools = await svc.loadToolsForUser('u');
     const read = tools.find((t: any) => t.name.endsWith('_read_resource'));
     const out = await read.invoke({ uri: 'mon://stats/cpu' });
     expect(out).toContain('{"cpu": 12}');
-    expect(out).toContain('[binary resource omitted (image/png)]');
+    expect(out).toContain('[file] img.png (image/png, 3 B) — file_id: 11111111-2222-3333-4444-555555555555');
+    expect(svc.files.saveToolFile).toHaveBeenCalledWith('u', 'img.png', 'image/png', Buffer.from('AAAA', 'base64'));
     expect(svc.httpRpc).toHaveBeenLastCalledWith(server, {}, 'resources/read', { uri: 'mon://stats/cpu' }, { timeoutMs: 30_000 });
   });
 

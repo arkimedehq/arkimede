@@ -196,6 +196,7 @@
   "daemon": {
     "statusStarting": "Avvio…",
     "statusRunning": "Attivo",
+    "statusRestarting": "Riavvio automatico…",
     "statusStopped": "Fermato",
     "statusError": "Errore",
     "stopTitle": "Ferma daemon",

@@ -5,7 +5,7 @@ import api from './client';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-export type DaemonStatus = 'starting' | 'running' | 'stopped' | 'error';
+export type DaemonStatus = 'starting' | 'running' | 'restarting' | 'stopped' | 'error';
 
 export interface SkillDaemon {
   id:             string;

@@ -76,7 +76,7 @@ The two things an organization actually needs — **multi-tenant governance** an
 
 > Requires Docker + Docker Compose. This spins up the full stack (Postgres, Qdrant, Redis, embedding & whisper services, skill executor, backend, frontend).
 >
-> **Footprint:** the full stack idles at **~2.5 GB RAM** — the two ML services dominate (embedding `bge-m3` ~1.4 GB, Whisper `small`/`int8` ~0.4 GB); everything else combined is under 550 MB. **4 GB RAM is a comfortable minimum**; 8 GB is recommended for real use (concurrent users, active RAG). CPU-only by default — no GPU needed. Plan ~10 GB disk for images, models and the persistent Nix store. Drop the embedding service (−1 GB) if you don't need RAG, or Whisper (−0.4 GB) if you don't need voice input.
+> **Footprint:** the full stack idles at **~2.5 GB RAM** — the two ML services dominate (embedding `bge-m3` ~1.4 GB, Whisper `small`/`int8` ~0.4 GB); everything else combined is under 550 MB. **4 GB RAM is a comfortable minimum**; 8 GB is recommended for real use (concurrent users, active RAG). CPU-only by default — no GPU needed. Plan ~10 GB disk for images, models and the persistent Nix store. Drop the embedding service (−1 GB) if you don't need RAG, or Whisper (−0.4 GB) if you don't need voice input. The transcription service can also run NVIDIA Parakeet instead of Whisper (`STT_ENGINE=parakeet`: much faster short voice turns on a small CPU, ~+150 MB RAM) — see `docs/VOICE_AUDIO_SERVICES.md`.
 
 ```bash
 git clone https://github.com/arkimedehq/arkimede.git
@@ -258,6 +258,7 @@ Arkimede uses a **capability model**: every power (network, filesystem, SQL oper
 | [CLI.md](docs/CLI.md) | Terminal client (TUI, plain REPL, settings panel) |
 | [SKILLS.md](docs/SKILLS.md) | How to build Skills (schema, templates, conventions) |
 | [MEMORY.md](docs/MEMORY.md) | Agentic memory (A-MEM) design |
+| [BACKUP.md](docs/BACKUP.md) | Scheduled backups (NAS / network share), point-in-time recovery, restore |
 | [LICENSING.md](docs/LICENSING.md) | License (AGPL-3.0) & contribution terms |
 | [THIRD_PARTY_NOTICES.md](docs/THIRD_PARTY_NOTICES.md) | Third-party attributions |
 

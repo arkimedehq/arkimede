@@ -4,9 +4,11 @@
 import { Module } from '@nestjs/common';
 import { BackupController } from './backup.controller';
 import { BackupService } from './backup.service';
+import { HostBackupController } from './host-backup.controller';
+import { HostBackupService } from './host-backup.service';
 
 @Module({
-  controllers: [BackupController],
-  providers: [BackupService],
+  controllers: [BackupController, HostBackupController],
+  providers: [BackupService, HostBackupService],
 })
 export class BackupModule {}

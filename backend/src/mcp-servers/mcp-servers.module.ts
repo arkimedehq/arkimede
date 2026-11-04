@@ -13,11 +13,13 @@ import { McpServersController } from './mcp-servers.controller';
 import { McpBridgeGateway } from './mcp-bridge.gateway';
 import { AuditModule } from '../audit/audit.module';
 import { TeamsModule } from '../teams/teams.module';
+import { FilesModule } from '../files/files.module';
 
 @Module({
   imports: [
     AuditModule,
     TeamsModule,
+    FilesModule,         // files returned by MCP tools (images, audio, resources) become Files
     TypeOrmModule.forFeature([McpServer, McpServerSecret, AppConfigEntity]),
     JwtModule.registerAsync({
       imports: [ConfigModule],

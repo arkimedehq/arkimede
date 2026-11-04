@@ -19,10 +19,16 @@
  * `search_memory` / `save_memory` (A-MEM) or `search_conversations`.
  * `log_episode` is deliberately NOT offered: the ingest already captures the
  * conversation, logging on top of it would duplicate episodes.
+ *
+ * Also the memory-first contract (Recordare D54): the memory charter for the
+ * system prompt (cached until its version changes) and the memory context of
+ * each turn. A failed context call marks Recordare down for a short while, so
+ * the following turns fall back to Arkimede's own memory at once
+ * (agent-memory.service.ts).
  */
 import { Injectable, Logger } from '@nestjs/common';
 import { DynamicStructuredTool } from '@langchain/core/tools';
-import { type Tool } from '@arkimedehq/recordare-client';
+import { type Charter, type Tool } from '@arkimedehq/recordare-client';
 import { recordareClient } from './recordare.config';
 import { RecordareOutboxService } from './recordare-outbox.service';
 
@@ -32,11 +38,26 @@ const NOT_OFFERED = new Set(['log_episode']);
 const TOOLS_TTL_MS = 10 * 60 * 1_000;
 /** Bound on the pre-answer memory context (the answer never waits longer for it). */
 const CONTEXT_TIMEOUT_MS = 2_500;
+/** How often the cached charter is checked for a new version. */
+const CHARTER_TTL_MS = 10 * 60 * 1_000;
+/** After a failed context call, Recordare is skipped for this long (no 2.5 s wait on every turn of an outage). */
+const DOWN_MS = 30 * 1_000;
+/** Consecutive context timeouts that count as an outage (one is a busy moment, e.g. while it ingests a turn). */
+const TIMEOUTS_DOWN = 3;
+
+/** The memory context of one turn: `reachable` false when Recordare is down (an error, or timeouts in a row). */
+export interface RecordareTurnContext {
+  reachable: boolean;
+  block: string | null;
+}
 
 @Injectable()
 export class RecordareMcpService {
   private readonly logger = new Logger(RecordareMcpService.name);
   private tools: { at: number; list: Tool[] } | null = null;
+  private charters = new Map<'tools' | 'context-only', { at: number; charter: Charter }>();
+  private downUntil = 0;
+  private timeouts = 0;
 
   constructor(private readonly outbox: RecordareOutboxService) {}
 
@@ -53,29 +74,71 @@ export class RecordareMcpService {
     return res.isError ? `Recordare error: ${res.text || 'unknown'}` : res.text;
   }
 
+  /** False while Recordare is marked down after a failed context call. */
+  get available(): boolean {
+    return this.enabled && Date.now() >= this.downUntil;
+  }
+
   /**
-   * The user's memories relevant to `message` (Recordare's `<memory-context>` block) for an agent with
-   * memoryContext on — or null: nothing relevant, Recordare slow or down. The current turn is
-   * sent first (bounded), so Recordare knows the conversation (its viewer rule needs it).
+   * The memory charter (D54): how the agent uses its memory, for the stable part of the system prompt.
+   * `withTools` false: the form for an agent without the memory tools. Cached and re-checked every
+   * CHARTER_TTL_MS; the text changes only with its version. Null when Recordare never answered (or
+   * predates the charter): the turn goes on without it.
    */
-  async contextBlock(userId: string, chatId: string, message: string): Promise<string | null> {
+  async charter(withTools: boolean): Promise<string | null> {
     const client = recordareClient();
     if (!client) return null;
+    const key = withTools ? 'tools' : 'context-only';
+    const cached = this.charters.get(key);
+    if (cached && Date.now() - cached.at < CHARTER_TTL_MS) return cached.charter.charter;
+    try {
+      const charter = await client.charter({ tools: withTools });
+      if (cached?.charter.version !== charter.version) this.logger.log(`Recordare charter ${charter.version} (${key})`);
+      this.charters.set(key, { at: Date.now(), charter });
+      return charter.charter;
+    } catch (err: any) {
+      if (cached) {
+        this.charters.set(key, { at: Date.now(), charter: cached.charter }); // keep it; check again later
+        return cached.charter.charter;
+      }
+      this.logger.warn(`Recordare charter unavailable: ${err?.message ?? err}`);
+      return null;
+    }
+  }
+
+  /**
+   * What came to mind for `message` (Recordare's `<memory-context>` block, opened by the self card) in
+   * `conversationId`. The current turn is sent first (bounded), so Recordare leaves it out of the excerpts.
+   * Never fails nor holds the answer longer than CONTEXT_TIMEOUT_MS. A timeout is a busy Recordare: no
+   * block this turn, still reachable (its tools stay). An error, or TIMEOUTS_DOWN timeouts in a row, is
+   * `reachable: false` and marks Recordare down for DOWN_MS.
+   */
+  async context(userId: string, conversationId: string, message: string): Promise<RecordareTurnContext> {
+    const client = recordareClient();
+    if (!client) return { reachable: false, block: null };
     let timer: NodeJS.Timeout | undefined;
     try {
-      return await Promise.race([
+      const res = await Promise.race([
         (async () => {
-          await this.outbox.flushChat(chatId, 1_500);
-          return (await client.context(userId, chatId, message)).block;
+          await this.outbox.flushChat(conversationId, 1_500);
+          return { reachable: true, block: (await client.context(userId, conversationId, message, { card: true })).block };
         })(),
         new Promise<null>((r) => { timer = setTimeout(() => r(null), CONTEXT_TIMEOUT_MS); }),
       ]);
+      if (res) {
+        this.timeouts = 0;
+        return res;
+      }
+      this.logger.warn(`Recordare memory context timed out (user ${userId})`);
+      if (++this.timeouts < TIMEOUTS_DOWN) return { reachable: true, block: null };
     } catch (err: any) {
       this.logger.warn(`Recordare memory context failed (user ${userId}): ${err?.message ?? err}`);
-      return null;
     } finally {
       if (timer) clearTimeout(timer);
     }
+    this.timeouts = 0;
+    this.downUntil = Date.now() + DOWN_MS;
+    return { reachable: false, block: null };
   }
 
   /** Recordare's tool list (cached); listing also opens the session of this user and chat. */

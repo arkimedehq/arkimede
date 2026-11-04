@@ -1,0 +1,11 @@
+{
+  "notFound": "Backup non trovato.",
+  "invalidId": "Identificativo di backup non valido.",
+  "host": {
+    "invalidSchedule": "Pianificazione non valida: espressione cron di 5 campi (minuto ora giorno mese giorno-settimana), con un minuto preciso (non * ).",
+    "invalidDestination": "Tipo di destinazione non valido: locale, smb, sftp o webdav.",
+    "destinationIncomplete": "Indica almeno host e utente della destinazione di rete.",
+    "shareRequired": "Per SMB indica il nome della condivisione.",
+    "passwordRequired": "Indica la password della destinazione di rete."
+  }
+}

@@ -24,6 +24,7 @@
  * (parkedAt) with a warning in the log. Nothing here runs on the request path: a
  * Recordare outage never fails or slows a chat.
  */
+import { isUUID } from 'class-validator';
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -82,10 +83,11 @@ export class RecordareOutboxService implements OnModuleInit, OnModuleDestroy {
   /**
    * Best-effort: sends what is pending for one chat right now, bounded by a
    * timeout (used before a Recordare read, so the conversation is known there).
-   * Never throws.
+   * A conversation that is not a chat (an external entry point's own id) has
+   * nothing queued. Never throws.
    */
   async flushChat(chatId: string, timeoutMs = 3_000): Promise<void> {
-    if (!recordareClient()) return;
+    if (!recordareClient() || !isUUID(chatId)) return;
     let t: NodeJS.Timeout | undefined;
     await Promise.race([
       this.drain({ chatId }).catch(() => undefined),
