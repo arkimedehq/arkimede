@@ -1407,7 +1407,31 @@ di traccia W3C; le richieste passano da `safeFetch`.
 RECORDARE_URL=http://recordare:8080   # spento finché non sono impostati entrambi
 RECORDARE_API_KEY=rk_...              # chiave client Recordare (scope ingest + mcp + read + write + erase), segreta
 RECORDARE_OUTBOX_POLL_MS=3000         # opzionale
+RECORDARE_WEBHOOK_SECRET=whsec_...    # opzionale: le iniziative della memoria spinte da Recordare (sotto)
+RECORDARE_INITIATIVES_POLL_MS=900000  # opzionale: il feed delle iniziative (recupero)
 ```
+
+Indirizzo, chiave e segreto del webhook possono invece essere impostati da un admin in **Impostazioni → Memoria** (card
+«Recordare — collegamento» e «Iniziative di Recordare (webhook)»; `GET/PATCH /api/admin/config/recordare`, `POST
+…/recordare/test`): salvati in `app_config` (segreti cifrati), prevalgono sull'ambiente campo per campo e valgono
+subito, senza riavvio (`setRecordareSettings` in `recordare.config.ts`; il worker dell'outbox, la cache delle identità e
+le iniziative partono quando Recordare risulta configurato). Un campo vuoto ricade sulla variabile.
+
+- **Le iniziative della memoria** (Recordare D55, `backend/src/recordare/recordare-initiatives.service.ts`): Recordare
+  decide cosa l'agente dice di sua iniziativa — un promemoria che l'utente ha chiesto, "com'è andata?", "hai steso i
+  panni?" — e quando; Arkimede lo consegna come messaggio dell'assistente nella chat dedicata dell'utente (`💭
+  <APP_NAME>`, `externalSource 'recordare'`), con una notifica e il push Socket.IO, e riporta l'esito. Tre vie d'ingresso,
+  tutte tramite `InitiativeInbox` della libreria client (ogni iniziativa consegnata una volta — la riga della notifica
+  ne è il registro —, l'esito riportato): il webhook `POST /api/recordare/webhook` (pubblico, firma Standard Webhooks verificata
+  con `RECORDARE_WEBHOOK_SECRET` sul body grezzo; 404 senza), un impulso di presenza quando l'utente apre l'app (primo
+  socket, al massimo ogni 10 min: Recordare può rispondere con qualcosa da dire adesso), il feed ogni 15 min e all'avvio
+  (recupero, spinte dell'ultimo giorno). Un promemoria che l'utente ha già programmato in Arkimede (un task singolo attivo
+  della stessa chat con una parola in comune, o entro due ore con due) viene riportato `done`, non consegnato due volte.
+  Nel turno, ogni agente riceve già l'iniziativa dovuta per chi parla dentro il contesto di memoria (niente da fare qui).
+  Configurazione (admin di Recordare, una volta): `POST api/v1/admin/clients/{id}/webhooks {url:
+  "http://backend:3000/api/recordare/webhook", events: ["initiative.deliver"]}` → il segreto `whsec_` in
+  `RECORDARE_WEBHOOK_SECRET`; `PATCH api/v1/admin/clients/{id} {channels: [{kind: "chat", reach: "always"}]}`;
+  `WEBHOOK_ALLOW_PRIVATE=true` su un Recordare co-hosted.
 
 - **Interruttore per utente** `users.episodicMemoryEnabled` (default spento; Impostazioni → Memoria, visibile solo
   se Recordare è configurato; `PATCH /api/users/me {episodicMemoryEnabled}`). È l'**unico interruttore**: Recordare

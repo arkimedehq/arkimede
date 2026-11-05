@@ -17,6 +17,7 @@ import { TranscriptionService } from '../transcription/transcription.service';
 import { TtsService } from '../tts/tts.service';
 import { WyomingService } from '../wyoming/wyoming.service';
 import { SkillExecutorClient } from '../skills/skill-executor.client';
+import { recordareClient } from '../recordare/recordare.config';
 
 class UpdateSystemPromptDto {
   @IsString() systemPrompt: string;
@@ -87,6 +88,18 @@ class UpdateMcpSecurityConfigDto {
 
   @IsOptional() @IsArray() @IsString({ each: true })
   mcpHostAllowlist?: string[];
+}
+
+/** Recordare settings: a string sets, null clears (the environment applies again), absent keeps. */
+class UpdateRecordareConfigDto {
+  @IsOptional() @IsString() @MaxLength(500)
+  recordareUrl?: string | null;
+
+  @IsOptional() @IsString() @MaxLength(500)
+  recordareApiKey?: string | null;
+
+  @IsOptional() @IsString() @MaxLength(500)
+  recordareWebhookSecret?: string | null;
 }
 
 class UpdateEmbeddingConfigDto {
@@ -421,6 +434,48 @@ export class AppConfigController {
       mcpAllowPrivateHosts: dto.mcpAllowPrivateHosts,
       mcpHostAllowlist:     dto.mcpHostAllowlist ?? [],
     }, user?.id);
+  }
+
+  // ── Recordare ─────────────────────────────────────────────────────────────
+
+  /** GET /api/admin/config/recordare — the connection to Recordare and the initiatives webhook (secrets masked) */
+  @Get('recordare')
+  @ApiOperation({ summary: 'Recordare connection and initiatives webhook settings' })
+  async getRecordareConfig() {
+    return this.service.getRecordareConfig();
+  }
+
+  /** PATCH /api/admin/config/recordare — applied at once, no restart */
+  @Patch('recordare')
+  @ApiOperation({ summary: 'Update the Recordare settings' })
+  async updateRecordareConfig(@Body() dto: UpdateRecordareConfigDto, @CurrentUser() user: any) {
+    if (dto.recordareUrl) {
+      try {
+        const u = new URL(dto.recordareUrl);
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('protocol');
+      } catch {
+        throw new BadRequestException('recordare.invalidUrl');
+      }
+    }
+    if (dto.recordareWebhookSecret && !dto.recordareWebhookSecret.trim().startsWith('whsec_')) {
+      throw new BadRequestException('recordare.invalidWebhookSecret');
+    }
+    return this.service.updateRecordareConfig(dto, user?.id);
+  }
+
+  /** POST /api/admin/config/recordare/test — checks the URL and the key with an authenticated read (the charter) */
+  @Post('recordare/test')
+  @ApiOperation({ summary: 'Test the connection to Recordare' })
+  async testRecordareConnection(): Promise<{ ok: boolean; error?: string; latencyMs?: number }> {
+    const client = recordareClient();
+    if (!client) return { ok: false, error: 'not configured' };
+    const started = Date.now();
+    try {
+      await client.charter();
+      return { ok: true, latencyMs: Date.now() - started };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
   }
 
   // ── Embedding Config ────────────────────────────────────────────────────────

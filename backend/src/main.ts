@@ -60,7 +60,11 @@ async function bootstrap() {
 
   // Increase the body limit for the internal endpoints that receive batches of vectors/items.
   // Express's default (100KB) is too low for batches of 200+ items with a JSON payload.
-  app.use(bodyParser.json({ limit: '20mb' }));
+  // The Recordare webhook (initiatives) is authenticated by a signature over the exact bytes: keep the raw body there.
+  app.use(bodyParser.json({
+    limit: '20mb',
+    verify: (req: any, _res, buf) => { if (String(req.originalUrl ?? req.url ?? '').startsWith('/api/recordare/webhook')) req.rawBody = Buffer.from(buf); },
+  }));
   app.use(bodyParser.urlencoded({ extended: true, limit: '20mb' }));
 
   // Enable Socket.IO for the MCP bridge (raised frame-size limit, see AppIoAdapter)

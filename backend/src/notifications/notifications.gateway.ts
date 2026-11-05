@@ -47,6 +47,14 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
 
   /** userId → Set<socketId> — a user can have multiple open connections */
   private readonly userSockets = new Map<string, Set<string>>();
+  /** Called when a user's first socket connects (they opened the app): e.g. a presence impulse to their memory. */
+  private readonly connectListeners = new Set<(userId: string) => void>();
+
+  /** Listens for users opening the app (their first socket); returns the function that stops listening. */
+  onUserConnected(listener: (userId: string) => void): () => void {
+    this.connectListeners.add(listener);
+    return () => this.connectListeners.delete(listener);
+  }
   /** socketId → userId — for reverse lookup on disconnection */
   private readonly socketUser  = new Map<string, string>();
   /** kind → may this user watch this id (registered by the module that owns the kind) */
@@ -76,11 +84,17 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
       const userId = payload.sub as string;
 
       // Register userId → socket
-      if (!this.userSockets.has(userId)) {
+      const first = !this.userSockets.has(userId);
+      if (first) {
         this.userSockets.set(userId, new Set());
       }
       this.userSockets.get(userId)!.add(socket.id);
       this.socketUser.set(socket.id, userId);
+      if (first) {
+        for (const listener of this.connectListeners) {
+          try { listener(userId); } catch (err) { this.logger.warn(`[notifications] connect listener failed: ${(err as Error).message}`); }
+        }
+      }
 
       this.logger.log(`[notifications] User ${userId} connected (socket ${socket.id})`);
     } catch {

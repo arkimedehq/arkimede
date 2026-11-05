@@ -43,6 +43,7 @@ import { AuditSection } from './AuditPage';
 import { DiarySection } from './DiaryPage';
 import { BackupSection } from './BackupPage';
 import { copyText } from '../utils/clipboard';
+import { RecordareConnectionCard, RecordareInitiativesCard } from '../components/settings/RecordareSettingsCards';
 
 // ── Settings sections ──────────────────────────────────────────────────────────
 // `id` also acts as the i18n key: t(`settings:nav.${id}`)
@@ -657,6 +658,7 @@ function NoteGraph({ notes }: { notes: UserMemoryItem[] }) {
 // settings section instead of living inside Profile.
 function MemorySection() {
   const profileQuery = useQuery({ queryKey: ['profile'], queryFn: profileApi.get, staleTime: 60_000 });
+  const isAdmin = useStore((s) => s.user?.role === 'admin');
   return (
     <div className="space-y-6">
       <UserMemoryCard
@@ -674,6 +676,8 @@ function MemorySection() {
           atlasUrl={profileQuery.data.recordareAtlasUrl ?? null}
         />
       )}
+      {isAdmin && <RecordareConnectionCard />}
+      {isAdmin && <RecordareInitiativesCard />}
     </div>
   );
 }

@@ -468,6 +468,20 @@ export class AppConfigEntity {
   @Column({ type: 'jsonb', default: () => "'[]'" })
   mcpHostAllowlist: string[];
 
+  // ── Recordare (episodic memory service) ────────────────────────────────────
+
+  /** Recordare's base URL; null → RECORDARE_URL. */
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  recordareUrl: string | null;
+
+  /** Recordare client API key, encrypted ("<iv_hex>:<ciphertext_hex>"); null → RECORDARE_API_KEY. */
+  @Column({ type: 'text', nullable: true })
+  recordareApiKey: string | null;
+
+  /** The initiatives webhook's whsec_ secret, encrypted; null → RECORDARE_WEBHOOK_SECRET. */
+  @Column({ type: 'text', nullable: true })
+  recordareWebhookSecret: string | null;
+
   @UpdateDateColumn()
   updatedAt: Date;
 }

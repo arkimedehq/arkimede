@@ -96,7 +96,52 @@
     "gender_neutral": "Neutral",
     "genderHint": "How the memory speaks of itself in gendered languages (e.g. Italian \"sono andato\" / \"sono andata\"). Default: masculine.",
     "episodicAtlas": "Open Recordare Atlas",
-    "episodicAtlasHint": "The live view of the memory (admins only: it shows every person's activity)."
+    "episodicAtlasHint": "The live view of the memory (admins only: it shows every person's activity).",
+    "recordare": {
+      "title": "Recordare — connection",
+      "configured": "connected",
+      "notConfigured": "not configured",
+      "intro": "Recordare is the episodic memory service: it remembers every user's conversations, facts and plans. Here you say where it is and which key Arkimede presents. Changes apply at once, no restart.",
+      "url": "Recordare address",
+      "urlHelp": "The service's base address as Arkimede's backend reaches it (e.g. http://recordare:8080 on the same Docker network, or https://memory.example.com). Empty = the server's RECORDARE_URL.",
+      "apiKey": "Client key",
+      "apiKeyHelp": "The rk_… key of the «Arkimede» client, created in Recordare's console (Clients → New client). Used for every call. Leave empty to keep the stored one.",
+      "secretStored": "•••••••• stored — type to replace it",
+      "show": "Show",
+      "hide": "Hide",
+      "remove": "Remove",
+      "save": "Save",
+      "test": "Test connection",
+      "testOk": "Connected ({{ms}} ms)",
+      "testFail": "Connection failed: {{error}}",
+      "source": {
+        "settings": "from these settings",
+        "env": "from the server's .env",
+        "none": "missing"
+      },
+      "sourceLegend": "Each value comes from these settings or, when empty here, from the server's environment (RECORDARE_URL, RECORDARE_API_KEY, RECORDARE_WEBHOOK_SECRET). Keys are stored encrypted.",
+      "errors": {
+        "recordare.invalidUrl": "Invalid address: http:// or https:// needed",
+        "recordare.invalidWebhookSecret": "The secret must start with whsec_"
+      },
+      "initiativesTitle": "Recordare initiatives (webhook)",
+      "webhookOn": "on",
+      "webhookOff": "off",
+      "initiativesIntro": "Initiatives are what the memory decides to say on its own: a reminder you asked for, a question about how something went, something left unfinished. Recordare decides who, when and on which channel and pushes it to Arkimede with a signed webhook; Arkimede writes it in the user's «Recordare» chat with a notification. Without the webhook initiatives still arrive, but only when the user opens Arkimede or at the periodic check (every 15 minutes).",
+      "step1": "Copy the address below.",
+      "step2": "In Recordare's console: Clients → Arkimede → Webhooks → Add; paste the address and choose the initiative.deliver event. In the client's channels set «chat» with reach «always».",
+      "step3": "Recordare shows the whsec_… secret once: paste it here and save.",
+      "webhookUrl": "Address to register in Recordare",
+      "webhookUrlHelp": "Where Recordare delivers initiatives. It is this page's address: if Recordare runs on the same server in Docker you may need the backend's internal address (e.g. http://backend:3000/api/recordare/webhook). Recordare must be able to reach it.",
+      "copy": "Copy",
+      "events": "Event to choose",
+      "eventsHelp": "initiative.deliver is enough (deliver now). The other events are information only and Arkimede ignores them.",
+      "webhookSecret": "Webhook secret",
+      "webhookSecretHelp": "The whsec_… secret Recordare gives at registration: Arkimede checks every delivery's signature with it and refuses the others. Without a secret the webhook is off (answers 404).",
+      "lastWebhook": "Last delivery received",
+      "lastWebhookNone": "none since the last start",
+      "lastWebhookHelp": "The last delivery with a valid signature since the backend started: if it stays empty after an initiative, check the address and the secret."
+    }
   },
   "usage": {
     "title": "Usage",

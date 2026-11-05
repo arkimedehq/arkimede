@@ -96,7 +96,52 @@
     "gender_neutral": "Neutro",
     "genderHint": "Come la memoria parla di sé nelle lingue con il genere (es. \"sono andato\" / \"sono andata\"). Predefinito: maschile.",
     "episodicAtlas": "Apri Recordare Atlas",
-    "episodicAtlasHint": "La vista dal vivo della memoria (solo amministratori: mostra l'attività di tutte le persone)."
+    "episodicAtlasHint": "La vista dal vivo della memoria (solo amministratori: mostra l'attività di tutte le persone).",
+    "recordare": {
+      "title": "Recordare — collegamento",
+      "configured": "collegato",
+      "notConfigured": "non configurato",
+      "intro": "Recordare è il servizio di memoria episodica: ricorda le conversazioni, i fatti e i piani di ogni utente. Qui indichi dove si trova e con quale chiave Arkimede si presenta. Le modifiche valgono subito, senza riavvio.",
+      "url": "Indirizzo di Recordare",
+      "urlHelp": "L'indirizzo base del servizio, così come lo raggiunge il backend di Arkimede (es. http://recordare:8080 sulla stessa rete Docker, o https://memoria.esempio.it). Vuoto = si usa RECORDARE_URL del server.",
+      "apiKey": "Chiave del client",
+      "apiKeyHelp": "La chiave rk_… del client «Arkimede», creata nella console di Recordare (Client → Nuovo client). Serve per tutte le chiamate. Lascia vuoto per tenere quella salvata.",
+      "secretStored": "•••••••• salvata — scrivi per sostituirla",
+      "show": "Mostra",
+      "hide": "Nascondi",
+      "remove": "Rimuovi",
+      "save": "Salva",
+      "test": "Prova collegamento",
+      "testOk": "Collegamento riuscito ({{ms}} ms)",
+      "testFail": "Collegamento fallito: {{error}}",
+      "source": {
+        "settings": "da queste impostazioni",
+        "env": "dal file .env del server",
+        "none": "mancante"
+      },
+      "sourceLegend": "Ogni valore viene da queste impostazioni o, se qui è vuoto, dalle variabili d'ambiente del server (RECORDARE_URL, RECORDARE_API_KEY, RECORDARE_WEBHOOK_SECRET). Le chiavi sono salvate cifrate.",
+      "errors": {
+        "recordare.invalidUrl": "Indirizzo non valido: serve http:// o https://",
+        "recordare.invalidWebhookSecret": "Il segreto deve iniziare con whsec_"
+      },
+      "initiativesTitle": "Iniziative di Recordare (webhook)",
+      "webhookOn": "attivo",
+      "webhookOff": "non attivo",
+      "initiativesIntro": "Le iniziative sono ciò che la memoria decide di dire da sola: un promemoria che hai chiesto, una domanda su com'è andata, qualcosa rimasto in sospeso. Recordare decide chi, quando e su quale canale e lo spinge ad Arkimede con un webhook firmato; Arkimede lo scrive nella chat «Recordare» dell'utente con una notifica. Senza webhook le iniziative arrivano lo stesso, ma solo quando l'utente apre Arkimede o al controllo periodico (ogni 15 minuti).",
+      "step1": "Copia l'indirizzo qui sotto.",
+      "step2": "Nella console di Recordare: Client → Arkimede → Webhook → Aggiungi; incolla l'indirizzo e scegli l'evento initiative.deliver. Nei canali del client indica «chat» con raggiungibilità «sempre».",
+      "step3": "Recordare mostra una sola volta il segreto whsec_…: incollalo qui e salva.",
+      "webhookUrl": "Indirizzo da registrare in Recordare",
+      "webhookUrlHelp": "Dove Recordare consegna le iniziative. È l'indirizzo di questa pagina: se Recordare gira sullo stesso server in Docker può servire l'indirizzo interno del backend (es. http://backend:3000/api/recordare/webhook). Deve essere raggiungibile da Recordare.",
+      "copy": "Copia",
+      "events": "Evento da scegliere",
+      "eventsHelp": "Basta initiative.deliver (consegna ora). Gli altri eventi sono solo informativi e Arkimede li ignora.",
+      "webhookSecret": "Segreto del webhook",
+      "webhookSecretHelp": "Il segreto whsec_… che Recordare dà alla registrazione: Arkimede verifica con esso la firma di ogni consegna e rifiuta le altre. Senza segreto il webhook è spento (risponde 404).",
+      "lastWebhook": "Ultima consegna ricevuta",
+      "lastWebhookNone": "nessuna dall'ultimo avvio",
+      "lastWebhookHelp": "L'ultima consegna con firma valida dall'avvio del backend: se dopo un'iniziativa resta vuota, controlla indirizzo e segreto."
+    }
   },
   "usage": {
     "title": "Consumi",

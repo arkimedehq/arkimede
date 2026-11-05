@@ -325,3 +325,34 @@ export interface ToolLoadingConfig {
   /** Global default threshold for user memory extraction (number of new messages). */
   autoMemoryThreshold: number;
 }
+
+// ── Recordare (episodic memory service) ───────────────────────────────────────
+
+export type RecordareSource = 'settings' | 'env' | null;
+
+export interface RecordareConfig {
+  recordareUrl: string | null;
+  hasRecordareApiKey: boolean;
+  hasRecordareWebhookSecret: boolean;
+  /** Where each value in use comes from: these settings, the server's environment, or missing. */
+  sources: { url: RecordareSource; apiKey: RecordareSource; webhookSecret: RecordareSource };
+  effectiveUrl: string | null;
+  configured: boolean;
+  /** The last verified webhook delivery since the backend started. */
+  lastWebhook: { at: string; type: string } | null;
+}
+
+/** A string sets, null clears (the environment applies again), absent keeps. */
+export interface UpdateRecordareConfigPayload {
+  recordareUrl?: string | null;
+  recordareApiKey?: string | null;
+  recordareWebhookSecret?: string | null;
+}
+
+export const recordareConfigApi = {
+  get: (): Promise<RecordareConfig> => api.get('/admin/config/recordare').then((r) => r.data),
+  update: (payload: UpdateRecordareConfigPayload): Promise<RecordareConfig> =>
+    api.patch('/admin/config/recordare', payload).then((r) => r.data),
+  test: (): Promise<{ ok: boolean; error?: string; latencyMs?: number }> =>
+    api.post('/admin/config/recordare/test').then((r) => r.data),
+};

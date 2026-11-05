@@ -1399,7 +1399,30 @@ Recordare's **client library** (the npm package `@arkimedehq/recordare-client`, 
 RECORDARE_URL=http://recordare:8080   # off unless both are set
 RECORDARE_API_KEY=rk_...              # Recordare client key (scopes ingest + mcp + read + write + erase), secret
 RECORDARE_OUTBOX_POLL_MS=3000         # optional
+RECORDARE_WEBHOOK_SECRET=whsec_...    # optional: the memory's initiatives pushed by Recordare (below)
+RECORDARE_INITIATIVES_POLL_MS=900000  # optional: the initiatives feed (catch-up)
 ```
+
+The URL, the key and the webhook secret can instead be set by an admin in **Settings → Memory** (cards «Recordare —
+connection» and «Recordare initiatives (webhook)»; `GET/PATCH /api/admin/config/recordare`, `POST …/recordare/test`):
+stored in `app_config` (secrets encrypted), they win over the environment field by field and apply at once, no restart
+(`setRecordareSettings` in `recordare.config.ts`; the outbox worker, the identity cache and the initiatives start when
+Recordare becomes configured). An empty setting falls back to the variable.
+
+- **The memory's initiatives** (Recordare D55, `backend/src/recordare/recordare-initiatives.service.ts`): Recordare
+  decides what the agent says on its own — a reminder the user asked for, "how did it go?", "did you hang the laundry?" —
+  and when; Arkimede delivers it as an assistant message in the user's dedicated chat (`💭 <APP_NAME>`, `externalSource
+  'recordare'`), with a notification and the Socket.IO push, and reports the outcome. Three ways in, all through the
+  client library's `InitiativeInbox` (each initiative handed over once — the notification row is the record —, the
+  outcome reported): the webhook `POST /api/recordare/webhook` (public, Standard Webhooks signature checked with
+  `RECORDARE_WEBHOOK_SECRET` over the raw body; 404 without it), a presence impulse when the user opens the app (first
+  socket, at most every 10 min: Recordare may answer with something to say now), the feed every 15 min and at start-up
+  (catch-up, pushes of the last day). A reminder the user already scheduled in Arkimede (an active one-shot task from the
+  same chat sharing a word, or within two hours sharing two) is reported `done`, not delivered twice. In a turn, every
+  agent already gets the initiative due for the speaker inside the memory context (nothing to do here). Set-up (Recordare
+  admin, once): `POST api/v1/admin/clients/{id}/webhooks {url: "http://backend:3000/api/recordare/webhook", events:
+  ["initiative.deliver"]}` → put the `whsec_` secret in `RECORDARE_WEBHOOK_SECRET`; `PATCH api/v1/admin/clients/{id}
+  {channels: [{kind: "chat", reach: "always"}]}`; `WEBHOOK_ALLOW_PRIVATE=true` on a co-hosted Recordare.
 
 - **Per-user switch** `users.episodicMemoryEnabled` (default off; Settings → Memory, shown only when Recordare is
   configured; `PATCH /api/users/me {episodicMemoryEnabled}`). It is the **only on/off**: Recordare has no consent

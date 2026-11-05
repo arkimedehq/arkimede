@@ -30,7 +30,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { APP_NAME } from '../config/app.config';
 import { afterFailure, RecordareHttpError, type RecordareClient } from '@arkimedehq/recordare-client';
-import { recordareClient } from './recordare.config';
+import { onRecordareSettingsChange, recordareClient } from './recordare.config';
 import { IngestChat, IngestMessage, buildIngestBody } from './recordare-ingest.mapper';
 import type { OutboxOp } from './recordare-outbox';
 import { RecordareIdentityService } from './recordare-identity.service';
@@ -60,20 +60,29 @@ export class RecordareOutboxService implements OnModuleInit, OnModuleDestroy {
     private readonly identity: RecordareIdentityService,
   ) {}
 
+  private stopListening: (() => void) | null = null;
+
+  /** Starts the worker when Recordare is configured — at start-up or later, from the admin's settings. */
   onModuleInit(): void {
-    if (!recordareClient()) return;
+    this.start();
+    this.stopListening = onRecordareSettingsChange(() => this.start());
+  }
+
+  private start(): void {
+    if (this.timer || !recordareClient()) return;
     this.timer = setInterval(() => void this.tick(), POLL_MS);
     this.timer.unref();
     this.logger.log('Recordare outbox worker started');
   }
 
   onModuleDestroy(): void {
+    this.stopListening?.();
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
   }
 
   private async tick(): Promise<void> {
-    if (this.running) return;
+    if (this.running || !recordareClient()) return;
     this.running = true;
     try { await this.drain(); } catch (err: any) {
       this.logger.warn(`outbox drain failed: ${err?.message ?? err}`);

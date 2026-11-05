@@ -9,6 +9,7 @@ import { SYSTEM_PROMPT } from '../prompts/prompts';
 import { encrypt, decrypt } from '../custom-tools/crypto.utils';
 import { LlmConfigsService } from '../llm-configs/llm-configs.service';
 import { AuditService } from '../audit/audit.service';
+import { lastRecordareWebhook, recordareConfig, recordareSources, setRecordareSettings } from '../recordare/recordare.config';
 
 const CONFIG_ID = 1;
 
@@ -51,6 +52,25 @@ export interface McpSecurityConfigDto {
   mcpAllowPrivateHosts: boolean;
   /** Host/IP/CIDR allowed even when private hosts are disallowed. */
   mcpHostAllowlist: string[];
+}
+
+/** Recordare settings: a string sets (secrets encrypted), null clears (back to the environment), undefined keeps. */
+export interface RecordareConfigDto {
+  recordareUrl?: string | null;
+  recordareApiKey?: string | null;
+  recordareWebhookSecret?: string | null;
+}
+
+export interface RecordareConfigView {
+  recordareUrl: string | null;
+  hasRecordareApiKey: boolean;
+  hasRecordareWebhookSecret: boolean;
+  /** Where each value in use comes from: 'settings', 'env' or null (missing). */
+  sources: ReturnType<typeof recordareSources>;
+  /** The URL in use (settings or environment), or null. */
+  effectiveUrl: string | null;
+  configured: boolean;
+  lastWebhook: { at: string; type: string } | null;
 }
 
 export interface EmbeddingConfigDto {
@@ -120,6 +140,7 @@ export class AppConfigService implements OnModuleInit {
    */
   async onModuleInit(): Promise<void> {
     const existing = await this.repo.findOne({ where: { id: CONFIG_ID } });
+    if (existing) this.applyRecordare(existing);
     if (!existing) {
       await this.repo.save({ id: CONFIG_ID, systemPrompt: SYSTEM_PROMPT });
       this.logger.log('AppConfig: singleton row created with default SYSTEM_PROMPT');
@@ -263,6 +284,64 @@ export class AppConfigService implements OnModuleInit {
       },
     });
     return this.getEmbeddingConfig();
+  }
+
+  // ── Recordare ──────────────────────────────────────────────────────────────
+
+  /** Hands the stored Recordare settings (decrypted) to the Recordare module; a key that does not decrypt is ignored. */
+  private applyRecordare(config: Pick<AppConfigEntity, 'recordareUrl' | 'recordareApiKey' | 'recordareWebhookSecret'>): void {
+    const open = (v: string | null | undefined) => {
+      if (!v) return null;
+      try { return decrypt(v); } catch { this.logger.warn('Recordare: a stored secret could not be decrypted (ignored)'); return null; }
+    };
+    setRecordareSettings({
+      url: config.recordareUrl ?? null,
+      apiKey: open(config.recordareApiKey),
+      webhookSecret: open(config.recordareWebhookSecret),
+    });
+  }
+
+  /** The Recordare settings for the admin page; secrets masked (only whether they are set). */
+  async getRecordareConfig(): Promise<RecordareConfigView> {
+    const config = await this.repo.findOne({ where: { id: CONFIG_ID } });
+    const cfg = recordareConfig();
+    return {
+      recordareUrl: config?.recordareUrl ?? null,
+      hasRecordareApiKey: !!config?.recordareApiKey,
+      hasRecordareWebhookSecret: !!config?.recordareWebhookSecret,
+      sources: recordareSources(),
+      effectiveUrl: cfg?.url ?? null,
+      configured: cfg !== null,
+      lastWebhook: lastRecordareWebhook(),
+    };
+  }
+
+  /** Updates the Recordare settings; applied at once (no restart). */
+  async updateRecordareConfig(dto: RecordareConfigDto, actorId?: string): Promise<RecordareConfigView> {
+    const current = await this.repo.findOne({ where: { id: CONFIG_ID } });
+    const secret = (value: string | null | undefined, old: string | null) =>
+      value === undefined ? old : value === null || !value.trim() ? null : encrypt(value.trim());
+    const next = {
+      recordareUrl: dto.recordareUrl === undefined ? current?.recordareUrl ?? null : dto.recordareUrl?.trim().replace(/\/+$/, '') || null,
+      recordareApiKey: secret(dto.recordareApiKey, current?.recordareApiKey ?? null),
+      recordareWebhookSecret: secret(dto.recordareWebhookSecret, current?.recordareWebhookSecret ?? null),
+    };
+    await this.repo.save({ id: CONFIG_ID, systemPrompt: current?.systemPrompt ?? SYSTEM_PROMPT, ...next });
+    this.applyRecordare(next);
+    this.logger.log('RecordareConfig: updated');
+    await this.audit?.record({
+      actorId: actorId ?? null,
+      action: 'appconfig.update',
+      resource: 'recordare',
+      outcome: 'ok',
+      ctx: {
+        section: 'recordare',
+        urlChanged: dto.recordareUrl !== undefined,
+        apiKeyChanged: dto.recordareApiKey !== undefined,
+        webhookSecretChanged: dto.recordareWebhookSecret !== undefined,
+      },
+    });
+    return this.getRecordareConfig();
   }
 
   // ── Transcription Configuration (Whisper) ───────────────────────────────────

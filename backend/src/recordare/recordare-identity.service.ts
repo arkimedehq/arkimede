@@ -34,7 +34,7 @@ import { IsNull, Not, Repository } from 'typeorm';
 import { User } from '../users/users.entity';
 import { setRecordareMemoryResolver } from '../observability/genai-tracing';
 import { MemoryNotEmptyError, type MemoryMode, PersonDirectory, type RecordareClient, RecordareHttpError } from '@arkimedehq/recordare-client';
-import { recordareClient, recordareConfig } from './recordare.config';
+import { onRecordareSettingsChange, recordareClient, recordareConfig } from './recordare.config';
 
 /** Bound on the profile read's re-check (Settings must not hang on Recordare). */
 const PROFILE_CHECK_TIMEOUT_MS = 3_000;
@@ -60,7 +60,13 @@ export class RecordareIdentityService implements OnModuleInit {
 
   constructor(@InjectRepository(User) private readonly users: Repository<User>) {}
 
+  /** Ready when Recordare is configured — at start-up or later, from the admin's settings. */
   async onModuleInit(): Promise<void> {
+    onRecordareSettingsChange(() => void this.ready());
+    await this.ready();
+  }
+
+  private async ready(): Promise<void> {
     if (!recordareConfig()) return;
     setRecordareMemoryResolver((userId) => this.cachedMemoryId(userId));
     await this.warm();
