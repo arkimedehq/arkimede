@@ -19,6 +19,7 @@ import { AgentsModule } from '../agents/agents.module';
 import { SchedulingModule } from '../scheduling/scheduling.module';
 import { SandboxModule } from '../sandbox/sandbox.module';
 import { AgentMemoryModule } from '../agent-memory/agent-memory.module';
+import { ToolSourcesModule } from '../tool-sources/tool-sources.module';
 import { TranscriptionModule } from '../transcription/transcription.module';
 import { User } from '../users/users.entity';
 import { Project } from '../projects/projects.entity';
@@ -39,6 +40,7 @@ import { Chat } from '../chats/chats.entity';
     SchedulingModule,
     SandboxModule,
     AgentMemoryModule,   // the agent's memory: Recordare, else A-MEM
+    ToolSourcesModule,   // native integrations' tools (Home Assistant)
     forwardRef(() => TranscriptionModule), // transcripts of the audio files tools return
     TypeOrmModule.forFeature([User, Project, Chat]),
   ],

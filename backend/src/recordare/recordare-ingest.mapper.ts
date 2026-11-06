@@ -41,6 +41,8 @@ export interface IngestMessage {
   authorId: string | null;
   createdAt: Date;
   isPrivate?: boolean;
+  /** A guest's message: their identity on a channel (they have no Arkimede account). */
+  speaker?: { channel: string; externalId: string; displayName?: string } | null;
 }
 
 /** Recordare's ingest request (the client library's contract). */
@@ -62,6 +64,7 @@ export function buildIngestBody(
   assistantName: string,
 ): IngestBody {
   const others = new Set<string>();
+  const guests = new Map<string, NonNullable<IngestMessage['speaker']>>();
   const out: IngestBody['messages'] = [];
   const sorted = [...messages].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id));
 
@@ -77,6 +80,13 @@ export function buildIngestBody(
       continue;
     }
     if (!m.content?.trim()) continue;
+    if (m.speaker?.channel && m.speaker.externalId) {
+      // A contact writing from a channel (no Arkimede account): Recordare resolves the identity to that person.
+      const ref = `${m.speaker.channel}:${m.speaker.externalId}`.slice(0, 200);
+      if (!guests.get(ref)?.displayName) guests.set(ref, m.speaker); // keep a name once known
+      out.push({ externalId: m.id, role: 'other', authorRef: ref, content: clipUtf8(m.content), sentAt, ...(m.isPrivate ? { private: true } : {}) });
+      continue;
+    }
     const byOwner = !m.authorId || m.authorId === chat.userId;
     if (!byOwner) others.add(m.authorId!);
     out.push({
@@ -103,6 +113,11 @@ export function buildIngestBody(
           ref: `user:${id}`, role: 'other' as const,
           ...(names.get(id) ? { displayName: names.get(id)!.slice(0, 200) } : {}),
           identity: { externalUserId: id },
+        })),
+        ...[...guests].map(([ref, s]) => ({
+          ref, role: 'other' as const,
+          ...(s.displayName?.trim() ? { displayName: s.displayName.trim().slice(0, 200) } : {}),
+          identity: { channel: s.channel, externalId: s.externalId },
         })),
       ],
     },

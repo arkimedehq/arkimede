@@ -71,6 +71,39 @@ export interface TtsConfig {
   internalAvailable?: boolean;
 }
 
+/** Home Assistant as a native integration: settings + live status (the token only as set or not). */
+export interface HomeAssistantConfig {
+  haUrl: string | null;
+  hasHaToken: boolean;
+  haPresenceEnabled: boolean;
+  haVoiceEnabled:    boolean;
+  haToolsEnabled:    boolean;
+  haToolsUserIds:    string[] | null;
+  users:   Array<{ id: string; name: string; haPerson: string | null }>;
+  servers: Array<{ id: string; name: string }>;
+  status: {
+    state: 'off' | 'connecting' | 'connected' | 'error';
+    error: string | null;
+    version: string | null;
+    url: string | null;
+    memoryUserId: string | null;
+    voicePoints: Array<{ entityId: string; area: string; listens: boolean }>;
+    home: string[];
+    rooms: Array<{ area: string; people: string[]; someone: number }>;
+    persons: Array<{ entityId: string; name: string }>;
+    exposed: number;
+  };
+}
+
+export interface UpdateHomeAssistantPayload {
+  haUrl?: string | null;
+  haToken?: string | null;
+  haPresenceEnabled?: boolean;
+  haVoiceEnabled?:    boolean;
+  haToolsEnabled?:    boolean;
+  haToolsUserIds?:    string[] | null;
+}
+
 /** Wyoming voice server (Home Assistant & co.): config + live status. */
 export interface WyomingConfig {
   wyomingEnabled:       boolean;
@@ -189,6 +222,24 @@ export const appConfigApi = {
   /** POST /api/admin/config/tts/test — test the TTS endpoint (micro-synthesis) */
   testTtsConnection: (): Promise<{ ok: boolean; error?: string; model?: string }> =>
     api.post('/admin/config/tts/test').then((r) => r.data),
+
+  // ── Home Assistant (presence and voice) ───────────────────────────────────────
+
+  /** GET /api/admin/config/home-assistant — settings, live status, MCP servers to pick from */
+  getHomeAssistantConfig: (): Promise<HomeAssistantConfig> =>
+    api.get('/admin/config/home-assistant').then((r) => r.data),
+
+  /** PATCH /api/admin/config/home-assistant — update the settings (reconnects at once) */
+  updateHomeAssistantConfig: (payload: UpdateHomeAssistantPayload): Promise<HomeAssistantConfig> =>
+    api.patch('/admin/config/home-assistant', payload).then((r) => r.data),
+
+  /** POST /api/admin/config/home-assistant/import-mcp — URL and token from its MCP server (turned off after) */
+  importHomeAssistantFromMcp: (serverId: string, disable: boolean): Promise<HomeAssistantConfig> =>
+    api.post('/admin/config/home-assistant/import-mcp', { serverId, disable }).then((r) => r.data),
+
+  /** PATCH /api/admin/config/home-assistant/people — a user's Home Assistant person */
+  linkHomeAssistantPerson: (userId: string, haPerson: string | null): Promise<HomeAssistantConfig> =>
+    api.patch('/admin/config/home-assistant/people', { userId, haPerson }).then((r) => r.data),
 
   // ── Wyoming voice server ────────────────────────────────────────────────────
 

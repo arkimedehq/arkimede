@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import { ExecuteRequest, ExecuteResult } from '../types';
 import { buildSkillPath } from '../utils';
 import { proxyEnv } from './proxy-env';
+import { skillStateDir } from '../skill-state';
 import { userOutputDir, snapshotOutputs, newOutputs } from './outputs';
 
 const SKILLS_BASE       = process.env.SKILLS_BASE_PATH    ?? '/app/skills';
@@ -88,6 +89,8 @@ export async function runPython(req: ExecuteRequest): Promise<ExecuteResult> {
     // endpoints (save-config, datasources, vector, files). Auth via signed run
     // token (x-internal-token header) — non-forgeable identity, enforced scope.
     SKILL_ID:             req.skill_id,
+    // The skill's persistent state, shared with its daemons (skill-state.ts).
+    ...(skillStateDir(req.skill_id) ? { SKILL_STATE_DIR: skillStateDir(req.skill_id) } : {}),
     // Identity the skill runs as (C2): enables the access-scoped calls
     // to the backend's internal API (e.g. /internal/files/search).
     USER_ID:              req.user_id ?? '',

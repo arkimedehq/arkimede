@@ -130,6 +130,19 @@ export class FlowsService {
     }
   }
 
+  /** The enabled flows a Home Assistant state change can start (trigger type 'home-assistant'). */
+  async homeAssistantFlows(): Promise<Flow[]> {
+    return this.flowRepo.createQueryBuilder('f')
+      .where("f.trigger ->> 'type' = 'home-assistant'")
+      .andWhere('f.enabled = true')
+      .getMany();
+  }
+
+  /** Runs a flow started by Home Assistant (home-assistant/ha-triggers.service.ts), as its owner. */
+  async runByHomeAssistant(flow: Flow, input: Record<string, unknown>): Promise<FlowRun> {
+    return this.engine.run(flow, flow.userId, input, { triggeredBy: 'home-assistant' });
+  }
+
   /** Runs a flow from the webhook token (public endpoint, no JWT). */
   async runByWebhookToken(token: string, input: Record<string, unknown>): Promise<FlowRun> {
     const flow = await this.flowRepo

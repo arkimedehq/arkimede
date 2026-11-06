@@ -101,6 +101,10 @@ runtime:
   # subject to the allowlist). NB: declare ONLY real HTTP endpoint domains, not OAuth scopes.
   # Honored transparently by BOTH Python and Node skills/daemons — the platform routes their
   #   HTTP(S) through the proxy, so you need NO proxy code in your script.
+  # A protocol that reaches its servers BY ADDRESS, not by name (Telegram's MTProto: its data
+  #   centres by IP), declares IP ranges in CIDR notation instead (e.g. `149.154.160.0/20`; IPv4
+  #   /8–/32, IPv6 /16–/128, nothing wider). Its client must use the proxy the platform passes
+  #   (HTTPS_PROXY, an HTTP CONNECT proxy): a raw socket has no route out.
   # ⚠ A redirect that crosses to an UNDECLARED domain is blocked → declare every domain a
   #   flow touches (e.g. api.x.com that 302-redirects to cdn.x.com needs BOTH).
   # The declared domains are shown in the UI (open the skill → "Network access").
@@ -186,6 +190,21 @@ Instructions for the LLM: when to use it, `download_url` rule, examples…
 > It never appears among the tools available to the LLM.
 > It is started and stopped from **Settings → Skills → Background**.
 > See [section 12](#12-daemon-scripts-background--watch) for the full protocol.
+
+> **`user-channel`** (top level, optional) — the skill is a messaging channel the host can deliver on with no model in
+> between: Arkimede uses it for what the memory (Recordare) decided to say — a timed reminder, a request, a promise.
+> ```yaml
+> user-channel:
+>   kind: messaging              # the only kind for now
+>   channel: telegram            # the address channel: the person's identity on their card in Recordare
+>   script: scripts/send_message.js
+>   reaches: [self, contacts]    # self: the invoking user's own account; contacts: other people by address (default [self])
+> ```
+> The host runs `script` with `{text}`; to reach a contact it puts the person's address in
+> `_config.DELIVERY_ADDRESS` — the executor writes `_config` over any input field of that name, so a model can never
+> set it. The script answers `{success, error?, arkimede_chat?}` (`arkimede_chat`: the Arkimede chat it uses with that
+> user, where the host records the message so the reply continues there). Example: `telegram` 1.0.0 (self through its
+> bot, contacts through the account; its listener daemon brings their replies back — section 10h).
 
 ---
 
@@ -652,7 +671,7 @@ Injected directly into the subprocess by the executor — accessible via `proces
 | `SKILLS_OUTPUT_DIR` | ✅ | ✅ | Directory for generated files (download via `?rel=`). With the broker overlay it points to the job's work dir (automatic copy-out). |
 | `SKILL_ID` | ✅ | ✅ | UUID of the running skill |
 | `USER_ID` | ✅ | ✅ | Identity the run executes for (C2). Empty only if the run has no identity (fail-closed: no file access). |
-| `SKILL_STATE_DIR` | ✅ | ✅ | _(broker overlay only)_ **Per-skill persistent** directory (survives across runs): use it for durable state/cache. In in-process execution it is not set. |
+| `SKILL_STATE_DIR` | ✅ | ✅ | **Per-skill persistent** directory (survives across runs): use it for durable state/cache. The same directory for the skill's task scripts (`/skill-state` in a broker job) and its daemons, so they can share state (a login, a spool of requests); without the broker overlay it is `<skill>/.state`. |
 | `BACKEND_INTERNAL_URL` | ✅ | ✅ | Backend base URL (e.g. `http://localhost:3000`) |
 | `INTERNAL_TOKEN` | ✅ | ✅ | Key for the `/internal/*` endpoints — see [section 10](#10-internal-apis-from-scripts) |
 | `PATH` | ✅ | ✅ | Real host PATH (finds node, python3, system binaries) |
@@ -1379,6 +1398,36 @@ else:
 ```
 
 ---
+
+## 10h. A guest's message (daemons of a user channel)
+
+A daemon of a skill that declares a `user-channel` reaching `contacts` (section 2) hands over a
+message from a **contact of the account** — someone with no Arkimede account writing on that
+channel — and gets the agent's answer to send back:
+
+```
+POST {BACKEND_INTERNAL_URL}/internal/guests/message
+x-internal-token: {INTERNAL_TOKEN}          # the daemon's own token (owner + daemon id)
+{"channel": "telegram", "externalId": "4242", "displayName": "Chloé", "text": "sì, lo so!", "authorized": false}
+→ 200 {"answer": "…", "chatId": "…"}
+```
+
+- **What the agent may do for a guest.** By default — `authorized` absent or false — **words only**: the turn has no
+  tool at all (the memory's own included) and no live home context, and the agent is told it must not promise or claim
+  any action and must keep the owner's memories private. `authorized: true` — the skill's word that this is an
+  authorized contact (e.g. `telegram` in dedicated mode, `AUTHORIZED_CONTACTS`) — gives the agent its tools, as for the
+  owner. Either way the agent is told who is speaking (a contact, never the owner) and addresses them by name. On a
+  *personal* account the skill hands over only what is meant for the agent (`telegram`: a reply to its message, or an
+  authorized contact's message starting with its name, `AGENT_NAME`): the rest stays the owner's conversation.
+
+- The turn runs as the **daemon's owner** (never a field of the request), in one chat per guest
+  (`externalSource` = the channel, `externalKey` = their id), their messages answered in order.
+- The guest's message is saved first, with its `speaker` (`{channel, externalId, displayName}`),
+  so the memory (Recordare) knows who is speaking: their identity on the channel resolves to the
+  person whose card has that address. A reminder delivered to them by message is written in the
+  same chat, so their reply continues it.
+- A run token (task scripts) or a daemon of a skill without such a channel: 403.
+- Example: the `telegram` skill's listener (`listen.py`).
 
 ## 11. System dependencies (Nix)
 

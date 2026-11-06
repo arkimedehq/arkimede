@@ -314,6 +314,35 @@ export class AppConfigEntity {
   @Column({ type: 'boolean', default: false })
   wyomingPersistConversations: boolean;
 
+  // ── Home Assistant (presence and voice, home-assistant.service.ts) ──────────
+
+  /** Home Assistant's base URL (e.g. http://homeassistant.local:8123); null = not configured. */
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  haUrl: string | null;
+
+  /** A long-lived access token of Home Assistant, encrypted (custom-tools/crypto.utils). */
+  @Column({ type: 'text', nullable: true })
+  haToken: string | null;
+
+  /**
+   * Read who is home and in which room from Home Assistant (over its WebSocket API) and tell the memory (Recordare
+   * presence impulses, for the Wyoming user's memory). Default off.
+   */
+  @Column({ type: 'boolean', default: false })
+  haPresenceEnabled: boolean;
+
+  /** Speak the memory's initiatives on Home Assistant's voice satellites (the one in the person's room). Default off. */
+  @Column({ type: 'boolean', default: false })
+  haVoiceEnabled: boolean;
+
+  /** The agent's `ha_*` tools over the entities Home Assistant exposes to Assist. Default off. */
+  @Column({ type: 'boolean', default: false })
+  haToolsEnabled: boolean;
+
+  /** Who may use the `ha_*` tools; null = every user. */
+  @Column({ type: 'uuid', array: true, nullable: true })
+  haToolsUserIds: string[] | null;
+
   // ── Tool loading configuration ──────────────────────────────────────────────
 
   /**

@@ -33,7 +33,8 @@ const MAX_TOOL_VALUE = 8 * 1024;
 /** Title length derived from the first user message (same as the in-app flow). */
 const TITLE_MAX = 60;
 
-export type ExternalChatSource = 'wyoming' | 'api';
+/** The entry point: Wyoming, the OpenAI-compatible API, or a messaging channel of guests (e.g. 'telegram'). */
+export type ExternalChatSource = 'wyoming' | 'api' | (string & {});
 
 export interface ExternalTurn {
   userId: string;
@@ -66,6 +67,14 @@ export interface ExternalTurn {
 
 /** What finds the chat a turn continues. */
 export type OpenChatQuery = Pick<ExternalTurn, 'userId' | 'source' | 'key' | 'idleMs' | 'chatId' | 'notBefore' | 'priorUserTexts'>;
+
+/** A message of an external chat as the agent's history: the assistant's tool calls with it (replayed to the model). */
+export interface ExternalHistoryMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  toolCalls?: ToolCallRecord[] | null;
+}
 
 @Injectable()
 export class ExternalChatsService {
@@ -105,6 +114,16 @@ export class ExternalChatsService {
   }
 
   /**
+   * The chat a conversation with that key continues (within `idleMs`), else a new one titled `title`: for an entry point
+   * that writes its messages itself (a guest's messages, guest-messages.service.ts).
+   */
+  async openChat(q: { userId: string; source: ExternalChatSource; key: string; idleMs: number; title: string }): Promise<string> {
+    const key = q.key.slice(0, 200);
+    return (await this.findOpenChat({ userId: q.userId, source: q.source, key, idleMs: q.idleMs }))
+      ?? (await this.createChat({ userId: q.userId, source: q.source, key, idleMs: q.idleMs, userText: q.title, answer: '' }));
+  }
+
+  /**
    * The conversation a turn runs under for the agent's memory, before it is recorded:
    * the chat it will be appended to when that chat exists (its memory is the same
    * conversation), else a stable id of the source's own conversation.
@@ -118,15 +137,20 @@ export class ExternalChatsService {
    * The last `max` user/assistant messages of a chat of the user, oldest first, as
    * agent history; null when the chat does not exist or is not the user's.
    */
-  async historyOf(chatId: string, userId: string, max: number): Promise<{ role: 'user' | 'assistant'; content: string }[] | null> {
+  async historyOf(chatId: string, userId: string, max: number): Promise<ExternalHistoryMessage[] | null> {
     const chat = await this.chatRepo.findOne({ where: { id: chatId, userId }, select: { id: true } });
     if (!chat) return null;
     const rows = await this.messageRepo.find({
-      where: { chatId }, order: { createdAt: 'DESC' }, take: max, select: { role: true, content: true },
+      where: { chatId }, order: { createdAt: 'DESC' }, take: max, select: { id: true, role: true, content: true, toolCalls: true },
     });
+    // The tool calls go back with their answer (the agent replays them): what a tool returned — the id of a task waiting
+    // for confirmation — is still known on the next turn, so a "yes" confirms it instead of preparing it again.
     return rows.reverse()
       .filter((m) => m.role === 'user' || m.role === 'assistant')
-      .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content ?? '' }));
+      .map((m) => ({
+        id: m.id, role: m.role as 'user' | 'assistant', content: m.content ?? '',
+        ...(m.role === 'assistant' && m.toolCalls?.length ? { toolCalls: m.toolCalls } : {}),
+      }));
   }
 
   /** The focused chat, if it still exists and is the user's; an empty one takes its title from the turn. */

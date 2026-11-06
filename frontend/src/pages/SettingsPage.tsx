@@ -11,9 +11,9 @@ import {
   FolderOpen, Brain, Download, Trash2, Search, Wrench, Plug, UserCircle,
   Save, Eye, EyeOff, KeyRound, Cpu, Wifi, WifiOff, Boxes, Pencil, Plus,
   Star, Server, FileStack, X, Sparkles, Eraser, Zap, Filter, Package, ThumbsUp, BarChart3,
-  Users, UsersRound, Workflow, Network, CalendarClock, Activity, ShieldAlert, Mic, Terminal, Check, Copy, DatabaseBackup, Volume2, Radio, AlertTriangle, ScanText, ExternalLink, BookOpen,
+  Users, UsersRound, Workflow, Network, CalendarClock, Activity, ShieldAlert, Mic, Terminal, Check, Copy, DatabaseBackup, Volume2, Radio, Home, AlertTriangle, ScanText, ExternalLink, BookOpen,
 } from 'lucide-react';
-import type { LlmProvider, EmbeddingProvider, EmbeddingConfig, ToolLoadingConfig, ToolLoadingStrategy, ToolSchemaFormat, TranscriptionProvider, TtsProvider, SandboxNetwork, SandboxExecMode } from '../api/appConfig';
+import type { LlmProvider, EmbeddingProvider, EmbeddingConfig, ToolLoadingConfig, ToolLoadingStrategy, ToolSchemaFormat, TranscriptionProvider, TtsProvider, SandboxNetwork, SandboxExecMode, HomeAssistantConfig } from '../api/appConfig';
 import { apiKeysApi } from '../api/apiKeys';
 import ApiKeyPersistToggle from '../components/ApiKeyPersistToggle';
 import { adminUsersApi } from '../api/adminUsers';
@@ -65,6 +65,7 @@ const SECTIONS: { id: string; icon: React.ElementType; adminOnly?: boolean; disa
   { id: 'usage',    icon: BarChart3 },
   { id: 'vectordb', icon: Boxes, adminOnly: true },
   { id: 'voice',    icon: Mic, adminOnly: true },
+  { id: 'integrations', icon: Home, adminOnly: true },
   { id: 'feedback', icon: ThumbsUp, adminOnly: true },
   { id: 'users',    icon: Users, adminOnly: true },
   { id: 'teams',    icon: UsersRound, adminOnly: true },
@@ -72,7 +73,7 @@ const SECTIONS: { id: string; icon: React.ElementType; adminOnly?: boolean; disa
   { id: 'backup',   icon: DatabaseBackup, adminOnly: true },
 ];
 
-type SectionId = 'profile' | 'memory' | 'diary' | 'ai' | 'tools' | 'mcp' | 'skills' | 'flows' | 'agents' | 'agentteams' | 'automations' | 'activity' | 'files' | 'database' | 'usage' | 'vectordb' | 'voice' | 'feedback' | 'users' | 'teams' | 'audit' | 'backup';
+type SectionId = 'profile' | 'memory' | 'diary' | 'ai' | 'tools' | 'mcp' | 'skills' | 'flows' | 'agents' | 'agentteams' | 'automations' | 'activity' | 'files' | 'database' | 'usage' | 'vectordb' | 'voice' | 'integrations' | 'feedback' | 'users' | 'teams' | 'audit' | 'backup';
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function SettingsPage() {
@@ -133,6 +134,7 @@ export default function SettingsPage() {
         {activeSection === 'usage'    && <UsageSection isAdmin={isAdmin} />}
         {activeSection === 'vectordb' && isAdmin && <VectorDbSection />}
         {activeSection === 'voice'    && isAdmin && <VoiceSection />}
+        {activeSection === 'integrations' && isAdmin && <IntegrationsSection />}
         {activeSection === 'feedback' && isAdmin && <FeedbackSection />}
         {activeSection === 'users'    && isAdmin && <UsersSection />}
         {activeSection === 'teams'    && isAdmin && <TeamsSection />}
@@ -5787,6 +5789,222 @@ function TtsConfigCard() {
             {t('common:actions.save')}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Integrations: Home Assistant ─────────────────────────────────────────────
+/** Native integrations (admin): Home Assistant. */
+function IntegrationsSection() {
+  const { t } = useTranslation('settings');
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-lg font-semibold text-white">{t('integrations.title')}</h2>
+        <p className="text-sm text-gray-500 mt-1">{t('integrations.subtitle')}</p>
+      </div>
+      <HomeAssistantCard />
+    </div>
+  );
+}
+
+/**
+ * Home Assistant as a native integration: one connection (URL + long-lived token, or imported from its MCP server)
+ * shared by the agent's `ha_*` tools, the memory's presence and the voice on the satellites; who may use the tools;
+ * each user's Home Assistant person.
+ */
+function HomeAssistantCard() {
+  const { t } = useTranslation('settings');
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({
+    queryKey: ['home-assistant-config'],
+    queryFn:  appConfigApi.getHomeAssistantConfig,
+    refetchInterval: 15_000,
+  });
+  const [url, setUrl]           = useState('');
+  const [token, setToken]       = useState('');
+  const [presence, setPresence] = useState(false);
+  const [voice, setVoice]       = useState(false);
+  const [tools, setTools]       = useState(false);
+  const [toolUsers, setToolUsers] = useState<string[]>([]);
+  const [importId, setImportId] = useState('');
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    if (!data) return;
+    setUrl(data.haUrl ?? '');
+    setPresence(data.haPresenceEnabled);
+    setVoice(data.haVoiceEnabled);
+    setTools(data.haToolsEnabled);
+    setToolUsers(data.haToolsUserIds ?? []);
+  }, [data?.haUrl, data?.haPresenceEnabled, data?.haVoiceEnabled, data?.haToolsEnabled, (data?.haToolsUserIds ?? []).join(',')]);
+
+  const done = (res: HomeAssistantConfig) => {
+    qc.setQueryData(['home-assistant-config'], res);
+    setToken('');
+    setMsg(res.status.state === 'error'
+      ? { ok: false, text: res.status.error ?? t('homeAssistant.failed') }
+      : { ok: true, text: t('homeAssistant.savedOk') });
+  };
+  const fail = () => setMsg({ ok: false, text: t('homeAssistant.failed') });
+  const save = useMutation({
+    mutationFn: () => appConfigApi.updateHomeAssistantConfig({
+      haUrl: url.trim() || null, ...(token.trim() ? { haToken: token.trim() } : {}),
+      haPresenceEnabled: presence, haVoiceEnabled: voice, haToolsEnabled: tools, haToolsUserIds: toolUsers.length ? toolUsers : null,
+    }),
+    onSuccess: done, onError: fail,
+  });
+  const importMcp = useMutation({
+    mutationFn: () => appConfigApi.importHomeAssistantFromMcp(importId, true),
+    onSuccess: done, onError: fail,
+  });
+  const link = useMutation({
+    mutationFn: (v: { userId: string; haPerson: string | null }) => appConfigApi.linkHomeAssistantPerson(v.userId, v.haPerson),
+    onSuccess: (res) => qc.setQueryData(['home-assistant-config'], res),
+  });
+
+  const dirty = !!data && (url.trim() !== (data.haUrl ?? '') || !!token.trim() || presence !== data.haPresenceEnabled
+    || voice !== data.haVoiceEnabled || tools !== data.haToolsEnabled || toolUsers.join(',') !== (data.haToolsUserIds ?? []).join(','));
+  const s = data?.status;
+  const badge = s?.state === 'connected' ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10'
+    : s?.state === 'error' ? 'text-red-400 border-red-500/30 bg-red-500/10' : 'text-gray-400 border-gray-700 bg-gray-800';
+  const input = 'w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-200';
+  const toggle = (on: boolean, set: (f: (v: boolean) => boolean) => void) => (
+    <button
+      role="switch" aria-checked={on} disabled={isLoading} onClick={() => set((v) => !v)}
+      className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors
+        disabled:opacity-50 focus:outline-none ${on ? 'bg-blue-600' : 'bg-gray-700'}`}
+    >
+      <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${on ? 'translate-x-6' : 'translate-x-1'}`} />
+    </button>
+  );
+  const row = (label: string, hint: string, control: JSX.Element) => (
+    <div className="flex items-center justify-between py-2 border-t border-gray-800">
+      <div className="pr-4">
+        <p className="text-sm text-gray-200">{label}</p>
+        <p className="text-xs text-gray-500 mt-0.5">{hint}</p>
+      </div>
+      {control}
+    </div>
+  );
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-5">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Home size={15} className="text-indigo-400" />
+          <h3 className="text-sm font-semibold text-gray-100">{t('homeAssistant.title')}</h3>
+        </div>
+        {s && <span className={`text-[11px] px-2 py-0.5 rounded-full border ${badge}`}>{t(`homeAssistant.state_${s.state}`, { version: s.version ?? '' })}</span>}
+      </div>
+      <p className="text-sm text-gray-500">{t('homeAssistant.subtitle')}</p>
+
+      {/* ── Connection ── */}
+      <div className="space-y-3 border-t border-gray-800 pt-3">
+        <div>
+          <label className="block text-xs font-medium text-gray-400 mb-1">{t('homeAssistant.urlLabel')}</label>
+          <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="http://homeassistant.local:8123" className={input} />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-400 mb-1">{t('homeAssistant.tokenLabel')}</label>
+          <input type="password" value={token} onChange={(e) => setToken(e.target.value)} autoComplete="new-password"
+            placeholder={data?.hasHaToken ? t('homeAssistant.tokenSet') : t('homeAssistant.tokenPlaceholder')} className={input} />
+          <p className="text-[11px] text-gray-600 mt-1">{t('homeAssistant.tokenHint')}</p>
+        </div>
+        {!!data?.servers?.length && (
+          <div className="flex items-end gap-2">
+            <div className="flex-1">
+              <label className="block text-xs font-medium text-gray-400 mb-1">{t('homeAssistant.importLabel')}</label>
+              <select value={importId} onChange={(e) => setImportId(e.target.value)} className={input}>
+                <option value="">—</option>
+                {data.servers.map((sv) => <option key={sv.id} value={sv.id}>{sv.name}</option>)}
+              </select>
+            </div>
+            <button
+              onClick={() => importMcp.mutate()} disabled={!importId || importMcp.isPending}
+              className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-white text-sm rounded-lg"
+            >{t('homeAssistant.importBtn')}</button>
+          </div>
+        )}
+        {!!data?.servers?.length && <p className="text-[11px] text-gray-600">{t('homeAssistant.importHint')}</p>}
+      </div>
+
+      {/* ── What it does ── */}
+      {row(t('homeAssistant.toolsLabel'), t('homeAssistant.toolsHint'), toggle(tools, setTools))}
+      {tools && (
+        <div className="pl-1">
+          <label className="block text-xs font-medium text-gray-400 mb-1">{t('homeAssistant.toolsUsersLabel')}</label>
+          <div className="flex flex-wrap gap-2">
+            {(data?.users ?? []).map((u) => (
+              <label key={u.id} className="flex items-center gap-1.5 text-xs text-gray-300 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1">
+                <input type="checkbox" checked={toolUsers.includes(u.id)}
+                  onChange={(e) => setToolUsers((v) => (e.target.checked ? [...v, u.id] : v.filter((x) => x !== u.id)))} />
+                {u.name}
+              </label>
+            ))}
+          </div>
+          <p className="text-[11px] text-gray-600 mt-1">{t('homeAssistant.toolsUsersHint')}</p>
+        </div>
+      )}
+      {row(t('homeAssistant.presenceLabel'), t('homeAssistant.presenceHint'), toggle(presence, setPresence))}
+      {row(t('homeAssistant.voiceLabel'), t('homeAssistant.voiceHint'), toggle(voice, setVoice))}
+
+      {/* ── Users ↔ persons ── */}
+      {s?.state === 'connected' && (
+        <div className="border-t border-gray-800 pt-3 space-y-2">
+          <p className="text-sm text-gray-200">{t('homeAssistant.peopleLabel')}</p>
+          <p className="text-xs text-gray-500">{t('homeAssistant.peopleHint')}</p>
+          {(data?.users ?? []).map((u) => (
+            <div key={u.id} className="flex items-center gap-2">
+              <span className="text-xs text-gray-300 w-40 truncate">{u.name}</span>
+              <select
+                value={u.haPerson ?? ''} onChange={(e) => link.mutate({ userId: u.id, haPerson: e.target.value || null })}
+                className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-xs text-gray-200"
+              >
+                <option value="">—</option>
+                {s.persons.map((p) => <option key={p.entityId} value={p.entityId}>{p.name} ({p.entityId})</option>)}
+              </select>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {s?.state === 'connected' && (
+        <div className="bg-gray-800/50 border border-gray-700/50 rounded-lg p-3 text-xs text-gray-400 space-y-2">
+          <p><span className="text-gray-300 font-medium">{t('homeAssistant.exposed')}: </span>{s.exposed}</p>
+          <p>
+            <span className="text-gray-300 font-medium">{t('homeAssistant.voicePoints')}: </span>
+            {s.voicePoints.length
+              ? s.voicePoints.map((p) => `${p.area} (${p.entityId}${p.listens ? '' : `, ${t('homeAssistant.announceOnly')}`})`).join(' · ')
+              : t('homeAssistant.none')}
+          </p>
+          <p><span className="text-gray-300 font-medium">{t('homeAssistant.home')}: </span>{s.home.length ? s.home.join(', ') : t('homeAssistant.none')}</p>
+          <p>
+            <span className="text-gray-300 font-medium">{t('homeAssistant.rooms')}: </span>
+            {s.rooms.length
+              ? s.rooms.map((r) => `${r.area}: ${[...r.people, ...(r.someone ? [t('homeAssistant.someone')] : [])].join(', ')}`).join(' · ')
+              : t('homeAssistant.noRooms')}
+          </p>
+          {(presence || voice) && !s.memoryUserId && <p className="text-amber-400">{t('homeAssistant.noWyomingUser')}</p>}
+        </div>
+      )}
+      {s?.state === 'error' && s.error && <p className="text-xs text-red-400">{s.error}</p>}
+
+      <div className="bg-gray-800/50 border border-gray-700/50 rounded-lg p-3 text-xs text-gray-400 space-y-1">
+        <p className="text-gray-300 font-medium mb-0.5">{t('homeAssistant.howToTitle')}</p>
+        <p>{t('homeAssistant.howToDesc')}</p>
+      </div>
+
+      <div className="flex items-center justify-between pt-1">
+        <div>{msg && <span className={`text-xs ${msg.ok ? 'text-emerald-400' : 'text-red-400'}`}>{msg.text}</span>}</div>
+        <button
+          onClick={() => save.mutate()} disabled={save.isPending || isLoading || !dirty}
+          className="flex items-center gap-1.5 px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
+        >
+          {save.isPending ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+          {t('homeAssistant.saveBtn')}
+        </button>
       </div>
     </div>
   );

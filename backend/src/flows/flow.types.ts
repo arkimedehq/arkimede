@@ -244,7 +244,8 @@ export type FlowTriggerType =
   | 'scheduled'     // one-shot at a precise date/time (day X at Y)
   | 'chat-as-tool'  // invoked by the agent as a tool
   | 'webhook'       // external POST with token
-  | 'flow-call';    // invoked by another flow (flow node)
+  | 'flow-call'     // invoked by another flow (flow node)
+  | 'home-assistant'; // a Home Assistant entity changed state (home-assistant/ha-triggers.service.ts)
 
 export interface FlowTrigger {
   type: FlowTriggerType;
@@ -258,6 +259,12 @@ export interface FlowTrigger {
   firedAt?: string;
   /** Webhook token (only type='webhook'). */
   webhookToken?: string;
+  /**
+   * Only type='home-assistant': the entity (an exposed one; `*` matches any characters, e.g. `binary_sensor.*_door`)
+   * and, optionally, the state it leaves (`from`) and the one it reaches (`to`). The run's input: entity_id, name,
+   * area, from, to, at. At most one run every `cooldownSeconds` (default 30).
+   */
+  ha?: { entityId: string; from?: string; to?: string; cooldownSeconds?: number };
 }
 
 /** Start variable of the flow (tool signature / manual-execution form). */
@@ -296,7 +303,7 @@ export interface FlowRunState {
 export type FlowRunStatus = 'running' | 'completed' | 'error' | 'cancelled';
 
 /** Who started the run (for history/observability). 'node' = test run of a single node + predecessors. */
-export type FlowTriggeredBy = 'manual' | 'cron' | 'scheduled' | 'agent' | 'webhook' | 'flow' | 'node';
+export type FlowTriggeredBy = 'manual' | 'cron' | 'scheduled' | 'agent' | 'webhook' | 'flow' | 'node' | 'home-assistant';
 
 /** Per-node timeline saved on flow_runs.nodeRuns (debug). */
 export interface NodeRunRecord {

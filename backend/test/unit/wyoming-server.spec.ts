@@ -260,6 +260,9 @@ describe('WyomingService — conversation (handle program)', () => {
     const [other]  = await exchange(port, [{ type: 'transcript', data: { text: 'altro', context: { conversation_id: 'B' } } }]);
     expect(second.data.text).toContain('history=2');
     expect(other.data.text).toContain('history=0');
+    // The first answer's tool calls come back with it (replayed: a "yes" can confirm what a tool prepared).
+    const replayed = ctx.agentService.streamResponse.mock.calls[1][4];
+    expect(replayed[1]).toMatchObject({ role: 'assistant', id: expect.any(String), toolCalls: [expect.objectContaining({ name: 'mcp_home_assistant_GetLiveContext' })] });
     // Standard pipeline (no agent): the origin, and the conversation for the memory
     expect(ctx.agentService.streamResponse.mock.calls[0][12]).toEqual({ origin: 'voice', conversationId: 'wyoming:A' });
     await ctx.svc.onModuleDestroy();
@@ -270,7 +273,11 @@ describe('WyomingService — conversation (handle program)', () => {
     await ctx.svc.applyConfig();
     const port = ctx.svc.getStatus().port;
     const living = { conversation_id: 'A', satellite_id: 'assist_satellite.living' };
+    const heard: unknown[] = [];
+    ctx.focus.setVoiceTurnListener((turn) => heard.push(turn));
     await exchange(port, [{ type: 'transcript', data: { text: 'primo', context: living } }]);
+    // The satellite spoken to is told after the answer (Home Assistant places it: its room's presence).
+    expect(heard).toEqual([{ userId: VOICE_USER, satelliteId: 'assist_satellite.living', deviceId: null }]);
     ctx.focus.set(VOICE_USER, 'assist_satellite.living', 'chat-1');
     const [focused] = await exchange(port, [{ type: 'transcript', data: { text: 'continua', context: living } }]);
     expect(focused.data.text).toContain('history=4');   // the chat's history, not the window's

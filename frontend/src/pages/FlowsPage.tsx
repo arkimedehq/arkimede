@@ -380,6 +380,7 @@ function FlowEditor({ flow, isNew = false, onClose }: { flow: Flow; isNew?: bool
           <option value="cron">{t('trigger.cron')}</option>
           <option value="scheduled">{t('trigger.scheduled')}</option>
           <option value="webhook">{t('trigger.webhook')}</option>
+          <option value="home-assistant">{t('trigger.homeAssistant')}</option>
         </select>
         {trigger.type === 'cron' && (
           <CronBuilder value={trigger.cron ?? ''} onChange={(cron) => setTrigger({ ...trigger, cron })} />
@@ -388,6 +389,22 @@ function FlowEditor({ flow, isNew = false, onClose }: { flow: Flow; isNew?: bool
           <input type="datetime-local" value={toDatetimeLocal(trigger.runAt)}
             onChange={(e) => setTrigger({ ...trigger, runAt: e.target.value ? new Date(e.target.value).toISOString() : undefined })}
             className="bg-gray-900 border border-gray-800 rounded-lg px-2.5 py-1.5 text-gray-200" />
+        )}
+        {trigger.type === 'home-assistant' && (
+          <>
+            <input value={trigger.ha?.entityId ?? ''} placeholder={t('trigger.haEntity')} title={t('trigger.haEntityHint')}
+              onChange={(e) => setTrigger({ ...trigger, ha: { ...(trigger.ha ?? { entityId: '' }), entityId: e.target.value } })}
+              className="bg-gray-900 border border-gray-800 rounded-lg px-2.5 py-1.5 text-gray-200 w-56" />
+            <input value={trigger.ha?.from ?? ''} placeholder={t('trigger.haFrom')}
+              onChange={(e) => setTrigger({ ...trigger, ha: { ...(trigger.ha ?? { entityId: '' }), from: e.target.value || undefined } })}
+              className="bg-gray-900 border border-gray-800 rounded-lg px-2.5 py-1.5 text-gray-200 w-24" />
+            <input value={trigger.ha?.to ?? ''} placeholder={t('trigger.haTo')}
+              onChange={(e) => setTrigger({ ...trigger, ha: { ...(trigger.ha ?? { entityId: '' }), to: e.target.value || undefined } })}
+              className="bg-gray-900 border border-gray-800 rounded-lg px-2.5 py-1.5 text-gray-200 w-24" />
+            <input type="number" min={0} value={trigger.ha?.cooldownSeconds ?? ''} placeholder={t('trigger.haCooldown')} title={t('trigger.haCooldownHint')}
+              onChange={(e) => setTrigger({ ...trigger, ha: { ...(trigger.ha ?? { entityId: '' }), cooldownSeconds: e.target.value === '' ? undefined : Number(e.target.value) } })}
+              className="bg-gray-900 border border-gray-800 rounded-lg px-2.5 py-1.5 text-gray-200 w-20" />
+          </>
         )}
         {trigger.type === 'webhook' && (
           trigger.webhookToken

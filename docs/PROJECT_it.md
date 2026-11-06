@@ -1419,19 +1419,66 @@ le iniziative partono quando Recordare risulta configurato). Un campo vuoto rica
 
 - **Le iniziative della memoria** (Recordare D55, `backend/src/recordare/recordare-initiatives.service.ts`): Recordare
   decide cosa l'agente dice di sua iniziativa — un promemoria che l'utente ha chiesto, "com'è andata?", "hai steso i
-  panni?" — e quando; Arkimede lo consegna come messaggio dell'assistente nella chat dedicata dell'utente (`💭
-  <APP_NAME>`, `externalSource 'recordare'`), con una notifica e il push Socket.IO, e riporta l'esito. Tre vie d'ingresso,
+  panni?" — e quando; Arkimede lo consegna sul primo dei canali accettabili dell'iniziativa (`channels`, in ordine) che
+  raggiunge la persona adesso, e riporta l'esito con quel canale: **messaggistica** tramite una skill che dichiara un
+  `user-channel` (docs/SKILLS_it.md §2: `telegram`), il suo script eseguito direttamente senza
+  modello — all'account dell'utente stesso, o alla persona a cui è destinata al suo indirizzo (`for.addresses`, da
+  Recordare) —, il messaggio scritto anche dove la risposta proseguirà — la chat ospite di un contatto su quel canale, la
+  chat che la skill usa con l'utente — (altrimenti quella dedicata) senza push; la risposta di un contatto torna dal
+  daemon della skill come turno ospite (`POST /internal/guests/message`, docs/SKILLS_it.md §10h: eseguito come
+  l'account, chi parla mandato a Recordare come sua identità sul canale, `messages.speaker`); altrimenti **chat**, un messaggio dell'assistente nella chat dedicata dell'utente (`💭 <APP_NAME>`, `externalSource
+  'recordare'`), con una notifica e il push Socket.IO; prima la **voce**, sul satellite della stanza della persona, quando Home Assistant è attivo (sotto). Tre vie d'ingresso,
   tutte tramite `InitiativeInbox` della libreria client (ogni iniziativa consegnata una volta — la riga della notifica
   ne è il registro —, l'esito riportato): il webhook `POST /api/recordare/webhook` (pubblico, firma Standard Webhooks verificata
   con `RECORDARE_WEBHOOK_SECRET` sul body grezzo; 404 senza), un impulso di presenza quando l'utente apre l'app (primo
   socket, al massimo ogni 10 min: Recordare può rispondere con qualcosa da dire adesso), il feed ogni 15 min e all'avvio
-  (recupero, spinte dell'ultimo giorno). Un promemoria che l'utente ha già programmato in Arkimede (un task singolo attivo
-  della stessa chat con una parola in comune, o entro due ore con due) viene riportato `done`, non consegnato due volte.
+  (recupero, spinte dell'ultimo giorno). Un promemoria che l'utente ha già programmato in Arkimede (un task singolo
+  della stessa chat con una parola in comune, o entro due ore con due; ancora da eseguire, o eseguito entro due ore da
+  esso) viene riportato `done`, non consegnato due volte: il task esplicito e confermato è la fonte di verità (vale il
+  suo orario). Copre solo la stessa persona — un'iniziativa per un contatto richiede un task che la nomini o porti uno
+  dei suoi indirizzi — e un task fallito o cancellato non copre niente: l'iniziativa della memoria è la rete di sicurezza.
   Nel turno, ogni agente riceve già l'iniziativa dovuta per chi parla dentro il contesto di memoria (niente da fare qui).
   Configurazione (admin di Recordare, una volta): `POST api/v1/admin/clients/{id}/webhooks {url:
   "http://backend:3000/api/recordare/webhook", events: ["initiative.deliver"]}` → il segreto `whsec_` in
-  `RECORDARE_WEBHOOK_SECRET`; `PATCH api/v1/admin/clients/{id} {channels: [{kind: "chat", reach: "always"}]}`;
+  `RECORDARE_WEBHOOK_SECRET`; `PATCH api/v1/admin/clients/{id} {channels: [{kind: "chat", reach: "always"}, {kind: "messaging", reach: "always"}]}` (messaging quando è installata una skill con user-channel; l'indirizzo di una persona collegato dalla console di Recordare);
   `WEBHOOK_ALLOW_PRIVATE=true` su un Recordare co-hosted.
+
+- **Home Assistant, integrazione nativa** (`backend/src/home-assistant/`; Impostazioni → Integrazioni → Home Assistant,
+  admin; ogni parte spenta di default): una connessione alla sua WebSocket API (`ws`) con URL e token a lunga durata
+  dell'admin (cifrato; o importati dal server MCP di Home Assistant, che viene poi spento), condivisa da:
+  - **i tool dell'agente** (`ha-tools.service.ts`, una sorgente nativa di tool — `tool-sources/`, caricata accanto a tool
+    custom, MCP, skill e flow, filtrabile per agente come `ha_*`): `ha_find_entities`, `ha_get_state`,
+    `ha_call_service`, `ha_history`, `ha_logbook`, `ha_calendar_events` / `ha_calendar_add`, `ha_todo_items` /
+    `ha_todo_add` / `ha_todo_complete` (chiamate di servizio con `return_response`), `ha_camera_snapshot` (l'immagine come
+    file di un tool, mostrata al modello), `ha_notify` (un push sul telefono di una persona), solo sulle entità che Home Assistant espone ad Assist
+    (`homeassistant/expose_entity/list`); serrature, allarmi, porte del garage e cancelli chiedono conferma all'utente
+    (`confirmed: true`); i servizi del server stesso (`homeassistant`, `hassio`, `shell_command`…) mai; per tutti gli
+    utenti o una lista (`haToolsUserIds`); la persona di ogni utente (`users.haPerson`) nominata nelle descrizioni ("io");
+  - **flow avviati da Home Assistant** (`ha-triggers.service.ts`): il trigger `home-assistant` — un'entità esposta
+    (pattern con `*`), stati `from` / `to` facoltativi, `cooldownSeconds` (30) — esegue il flow come il suo proprietario
+    (abilitato ai tool) con `{entity_id, name, area, from, to, at}` come input ("quando suona il campanello", "quando
+    Chloé arriva a casa");
+  - **la casa nel turno**: una breve riga `<home>` nei blocchi per-richiesta (chi è in casa e in quale stanza — le
+    persone esposte ad Assist e quella dell'utente —, chi è l'utente), dal `contextFor` delle sorgenti native;
+  - **un canale push per le iniziative della memoria**: quando nessuna skill di messaggistica raggiunge la persona, una
+    notifica sul suo telefono (`notify.mobile_app_<telefono>`, trovato dal dispositivo dei suoi `device_trackers` —
+    l'indirizzo `homeassistant` della persona, o l'`haPerson` dell'utente);
+  - **presenza e voce per la memoria** (Recordare D55 §5c). Dai suoi registri e stati (`ha-model.ts`): **punti voce** (ogni
+  `assist_satellite` con la sua area; uno mobile — la papera quacksat — da un sensore sul suo dispositivo che nomina
+  un'area) e **presenza** (`person.*` in casa; una persona in una stanza da un sensore sul dispositivo del suo tracker
+  che nomina un'area — Bermuda / ESPresense; occupazione senza identità = qualcuno). Ogni cambio va alla memoria
+  dell'**utente Wyoming** come impulsi di presenza (`channel home | voice`, `place` = l'area, le persone con la loro
+  identità `homeassistant` `person.x` — da collegare sulla loro scheda nella console di Recordare), rinnovati ogni 5
+  min; ciò che Recordare risponde viene detto in quella stanza. **Un satellite a cui si parla** è anch'esso una presenza
+  nella sua stanza (Wyoming lo dice a `ConversationFocusService.voiceTurn`, 10 s dopo la risposta, così ciò che segue
+  non le parla sopra): chi parla per esclusione — l'unica persona che i sensori della stanza mettono lì (0,9), altrimenti
+  l'unica persona in casa (0,6, media), altrimenti qualcuno; Recordare distingue un primo turno (un arrivo: può seguire
+  ciò che è dovuto) dai successivi (un rinnovo: solo una richiesta o promessa con orario). Il **canale voce** delle iniziative:
+  `assist_satellite.start_conversation` quando il satellite ascolta, altrimenti `announce`, sul satellite della stanza
+  della persona; il messaggio è scritto nella chat dedicata e il satellite legato a essa (`ConversationFocusService`, 15
+  min) così la risposta parlata arriva lì; con altri nella stanza solo l'apertura. `GET/PATCH
+  /api/admin/config/home-assistant` (impostazioni, stato dal vivo: entità esposte, punti voce, chi è in casa e dove,
+  persone), `POST …/import-mcp`, `PATCH …/people` (la persona di un utente).
 
 - **Interruttore per utente** `users.episodicMemoryEnabled` (default spento; Impostazioni → Memoria, visibile solo
   se Recordare è configurato; `PATCH /api/users/me {episodicMemoryEnabled}`). È l'**unico interruttore**: Recordare

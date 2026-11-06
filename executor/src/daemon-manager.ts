@@ -25,6 +25,7 @@
  *   INTERNAL_TOKEN       — signed daemon token for the internal API (x-internal-token header)
  *   PYTHONPATH / NODE_PATH — path to the dependencies installed by the skill
  */
+import { skillStateDir } from './skill-state';
 import { spawn, ChildProcess } from 'child_process';
 
 // Absolute path to global-agent's bootstrap (installed in the executor image at /app).
@@ -108,6 +109,8 @@ export function startDaemon(req: DaemonStartRequest): DaemonStartResult {
     PUSH_URL:             req.push_url,
     BACKEND_INTERNAL_URL: process.env.BACKEND_INTERNAL_URL ?? 'http://localhost:3000',
     INTERNAL_TOKEN:       req.daemon_token ?? '',
+    // The skill's persistent state, shared with its task scripts (skill-state.ts).
+    ...(skillStateDir(req.skill_id) ? { SKILL_STATE_DIR: skillStateDir(req.skill_id) } : {}),
   };
 
   const langEnv: NodeJS.ProcessEnv = req.language === 'python'

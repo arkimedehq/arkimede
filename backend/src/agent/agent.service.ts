@@ -20,6 +20,7 @@
  *   - streamResponse()  → SSE/streaming for the chat interface (progressive response)
  *   - invoke()          → Synchronous response (used internally or for tests)
  */
+import { ToolSourcesRegistry } from '../tool-sources/tool-sources.registry';
 import {forwardRef, Inject, Injectable, Logger, OnModuleInit, Optional} from '@nestjs/common';
 import {InjectRepository} from '@nestjs/typeorm';
 import {Repository} from 'typeorm';
@@ -87,6 +88,11 @@ export interface StreamResponseOptions {
    * the model starts writing text. Fires before the step ends, unlike onToolCall.
    */
   onProgress?: (event: AgentProgressEvent) => void;
+  /**
+   * A turn that may only answer in words (a guest who is not authorized — guests/guest-messages.service.ts): no tool at
+   * all, the memory's own included, and no live context of the home (who is in); the memory's context stays.
+   */
+  textOnly?: boolean;
 }
 
 export type AgentProgressEvent =
@@ -148,6 +154,7 @@ export class AgentService implements OnModuleInit {
     @Inject(MultiAgentService)          private readonly multiAgentService:  MultiAgentService,
     @Inject(SchedulingService)          private readonly schedulingService:  SchedulingService,
     @Inject(SandboxService)             private readonly sandboxService:     SandboxService,
+    @Inject(ToolSourcesRegistry)        private readonly nativeTools:        ToolSourcesRegistry,
     @Optional() @Inject(forwardRef(() => TranscriptionService)) private readonly transcription: TranscriptionService | null = null,
   ) {}
 
@@ -228,7 +235,10 @@ export class AgentService implements OnModuleInit {
     const isReasoning = opts?.llmConfigId
       ? (await this.llmProviderService.getModelBundleForConfigId(opts.llmConfigId)).isReasoning
       : await this.llmProviderService.isReasoningModel();
-    const { agent, contextBreakdown, effectiveMaxHistoryTokens, model, effectiveHistory, provider, modelName } = await this.resolveAgent(userId, projectId, userInput, history, chatId, opts?.toolOverride, opts?.agentPromptOverride, opts?.llmConfigId, opts?.memoryContext, conversationId);
+    // Words only: the history's tool calls are not replayed (no tool is defined for this turn, and some providers refuse
+    // a tool call in the history without one — Anthropic).
+    if (opts?.textOnly) history = history.map(({ toolCalls: _omit, ...m }) => m as Message);
+    const { agent, contextBreakdown, effectiveMaxHistoryTokens, model, effectiveHistory, provider, modelName } = await this.resolveAgent(userId, projectId, userInput, history, chatId, opts?.toolOverride, opts?.agentPromptOverride, opts?.llmConfigId, opts?.memoryContext, conversationId, opts?.textOnly);
     const messages = await this.buildMessages(userInput, effectiveHistory, attachments, inlineContents, attachmentBlocks, isReasoning, effectiveMaxHistoryTokens, model, provider);
 
     // ── Context breakdown log ─────────────────────────────────────────────────
@@ -985,6 +995,8 @@ export class AgentService implements OnModuleInit {
     memoryContext?: boolean,
     /** The conversation of the turn for the memory (chatId, or an external entry point's); none → A-MEM only. */
     conversationId?: string,
+    /** Words only: no tool, no live home context (StreamResponseOptions.textOnly). */
+    textOnly?: boolean,
   ): Promise<{ agent: any; contextBreakdown: ContextBreakdown; effectiveMaxHistoryTokens: number; model: any; effectiveHistory: Message[]; provider: string; modelName: string | null }> {
     // Per-agent model override: resolved once (cached per config id), BEFORE the
     // parallel loads so the bundle is not built twice concurrently.
@@ -993,7 +1005,7 @@ export class AgentService implements OnModuleInit {
       : null;
 
     // ── Phase 1: parallel loads ──────────────────────────────────────────────
-    const [basePrompt, model, customTools, mcpTools, skillTools, flowTools, agentTools, user, project, globalToolConfig, providerModel, feedbackEnabled] = await Promise.all([
+    const [basePrompt, model, customTools, mcpTools, skillTools, flowTools, agentTools, user, project, globalToolConfig, providerModel, feedbackEnabled, integrationTools, integrationContext] = await Promise.all([
       this.appConfigService.getSystemPrompt(),
       overrideBundle ? Promise.resolve(overrideBundle.model) : this.llmProviderService.getModel(),
       userId ? this.customToolsService.loadToolsForUser(userId, projectId, { flatOnly: true }) : Promise.resolve([]),
@@ -1015,6 +1027,8 @@ export class AgentService implements OnModuleInit {
         ? Promise.resolve({ provider: overrideBundle.provider, model: overrideBundle.modelName })
         : this.llmProviderService.getProviderAndModel(),
       this.appConfigService.getFeedbackMemoryEnabled(),
+      userId ? this.nativeTools.loadForUser(userId) : Promise.resolve([]),
+      userId ? this.nativeTools.contextFor(userId) : Promise.resolve(null),
     ]);
     const provider  = providerModel.provider;
     const modelName = providerModel.model;
@@ -1057,6 +1071,7 @@ export class AgentService implements OnModuleInit {
       ...skillTools.map(t  => ({ name: t.name, description: t.description ?? '', tool: t })),
       ...flowTools.map(t   => ({ name: t.name, description: t.description ?? '', tool: t })),
       ...agentTools.map(t  => ({ name: t.name, description: t.description ?? '', tool: t })),
+      ...integrationTools.map(t => ({ name: t.name, description: t.description ?? '', tool: t as any })),
     ];
 
     // Override of the tool set (e.g. headless run of an automation with a fixed
@@ -1067,7 +1082,7 @@ export class AgentService implements OnModuleInit {
     // survive tools being added to the selected source.
     const matchesToolName = (name: string, entry: string): boolean =>
       entry.endsWith('*') ? name.startsWith(entry.slice(0, -1)) : name === entry;
-    const allExtraManifests: ToolManifest[] = !toolOverride || toolOverride.mode === 'all'
+    const allExtraManifests: ToolManifest[] = textOnly ? [] : !toolOverride || toolOverride.mode === 'all'
       ? fullManifests
       : toolOverride.mode === 'none'
         ? []
@@ -1153,6 +1168,8 @@ export class AgentService implements OnModuleInit {
     if (excludedListText) {
       skillsPrompt = skillsPrompt ? `${skillsPrompt}\n\n${excludedListText}` : excludedListText;
     }
+    // Words only: no skill or tool is described, none can be called.
+    if (textOnly) skillsPrompt = '';
 
     const userPrompt    = user?.systemPrompt;
     const projectPrompt = project?.systemPrompt;
@@ -1194,7 +1211,8 @@ export class AgentService implements OnModuleInit {
     const nowTextBlock = nowBlock(isoWithOffset(new Date(), DEFAULT_TIMEZONE), DEFAULT_TIMEZONE);
 
     // Extra non-cached blocks (change per request): date/time + summary + feedback + what came to mind (memory).
-    const extraBlocks = [nowTextBlock, summaryTextBlock, feedbackTextBlock, ...(memory?.turnBlocks ?? [])]
+    // Native integrations' live context (who is home…) changes per request too.
+    const extraBlocks = [nowTextBlock, textOnly ? null : integrationContext, summaryTextBlock, feedbackTextBlock, ...(memory?.turnBlocks ?? [])]
       .filter((b): b is string => !!b);
 
     // ── Prompt caching: build the messageModifier based on the provider ───────
@@ -1246,7 +1264,7 @@ export class AgentService implements OnModuleInit {
     // tools), the rest sorted by name: the sources load concurrently or without
     // an ORDER BY, and a different order between requests would defeat the prompt cache.
     const memoryTools = memory?.tools ?? [];
-    const allTools = [
+    const allTools = textOnly ? [] : [
       ...memoryTools,
       ...[
         ...this.builtInTools,

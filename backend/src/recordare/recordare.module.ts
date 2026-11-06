@@ -12,6 +12,7 @@ import { RecordareDiaryController } from './recordare-diary.controller';
 import { RecordareNotesSyncService } from './recordare-notes-sync.service';
 import { UserMemoryModule } from '../user-memory/user-memory.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { SkillsModule } from '../skills/skills.module';
 import { RecordareInitiativesService } from './recordare-initiatives.service';
 import { RecordareWebhookController } from './recordare-webhook.controller';
 
@@ -20,13 +21,14 @@ import { RecordareWebhookController } from './recordare-webhook.controller';
  * then per user `episodicMemoryEnabled`). Identity mapping, ingest outbox (subscriber
  * + worker), the recall tools, the user's Diary (read API proxy), the copies of its
  * notes in A-MEM (D34) and the memory's own initiatives (Recordare D55: webhook, feed,
- * presence, delivered in a dedicated chat). Everything is a no-op when not configured.
+ * presence; delivered on the first acceptable channel that reaches the person: a skill's user channel for messaging,
+ * else the dedicated chat). Everything is a no-op when not configured.
  */
 @Module({
-  imports: [TypeOrmModule.forFeature([User]), UserMemoryModule, NotificationsModule],
+  imports: [TypeOrmModule.forFeature([User]), UserMemoryModule, NotificationsModule, SkillsModule],
   controllers: [RecordareDiaryController, RecordareWebhookController],
   providers: [RecordareIdentityService, RecordareOutboxService, RecordareMessageSubscriber, RecordareMcpService, RecordareNotesSyncService,
     RecordareInitiativesService],
-  exports: [RecordareIdentityService, RecordareMcpService],
+  exports: [RecordareIdentityService, RecordareMcpService, RecordareInitiativesService],
 })
 export class RecordareModule {}

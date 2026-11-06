@@ -101,6 +101,11 @@ runtime:
   # soggetto all'allowlist). NB: dichiara SOLO domini reali di endpoint HTTP, non scope OAuth.
   # Onorato in modo trasparente da skill/demoni SIA Python SIA Node — la piattaforma instrada
   #   il loro HTTP(S) dal proxy, quindi NON serve codice proxy nello script.
+  # Un protocollo che raggiunge i suoi server PER INDIRIZZO, non per nome (MTProto di Telegram:
+  #   i suoi data center per IP), dichiara invece intervalli IP in notazione CIDR (es.
+  #   `149.154.160.0/20`; IPv4 /8–/32, IPv6 /16–/128, niente di più ampio). Il suo client deve
+  #   usare il proxy passato dalla piattaforma (HTTPS_PROXY, un proxy HTTP CONNECT): un socket
+  #   diretto non ha strada verso l'esterno.
   # ⚠ Un redirect che passa a un dominio NON dichiarato viene bloccato → dichiara ogni dominio
   #   toccato dal flusso (es. api.x.com che fa 302 verso cdn.x.com richiede ENTRAMBI).
   # I domini dichiarati sono mostrati in UI (apri la skill → "Accesso di rete").
@@ -186,6 +191,22 @@ Istruzioni per il LLM: quando usarla, regola `download_url`, esempi…
 > Non compare mai tra gli strumenti disponibili al LLM.
 > Si avvia e si ferma dall'interfaccia **Impostazioni → Skills → Background**.
 > Vedi la [sezione 12](#12-script-daemon-background--watch) per il protocollo completo.
+
+> **`user-channel`** (al primo livello, facoltativo) — la skill è un canale di messaggistica su cui l'host può
+> consegnare senza un modello in mezzo: Arkimede lo usa per ciò che la memoria (Recordare) ha deciso di dire — un
+> promemoria a orario, una richiesta, una promessa.
+> ```yaml
+> user-channel:
+>   kind: messaging              # per ora l'unico tipo
+>   channel: telegram            # il canale dell'indirizzo: l'identità della persona sulla sua scheda in Recordare
+>   script: scripts/send_message.js
+>   reaches: [self, contacts]    # self: l'account dell'utente stesso; contacts: altre persone per indirizzo (default [self])
+> ```
+> L'host esegue `script` con `{text}`; per raggiungere un contatto mette l'indirizzo della persona in
+> `_config.DELIVERY_ADDRESS` — l'executor scrive `_config` sopra qualunque campo d'input con quel nome, quindi un modello
+> non può mai impostarlo. Lo script risponde `{success, error?, arkimede_chat?}` (`arkimede_chat`: la chat di Arkimede
+> che usa con quell'utente, dove l'host registra il messaggio così la risposta prosegue lì). Esempio: `telegram` 1.0.0
+> (self tramite il suo bot, i contatti tramite l'account; il suo daemon listener riporta le loro risposte — sezione 10h).
 
 ---
 
@@ -652,7 +673,7 @@ Iniettate direttamente nel subprocess dall'executor — accessibili via `process
 | `SKILLS_OUTPUT_DIR` | ✅ | ✅ | Directory per i file generati (download via `?rel=`). Con l'overlay broker punta alla work dir del job (copy-out automatico). |
 | `SKILL_ID` | ✅ | ✅ | UUID della skill in esecuzione |
 | `USER_ID` | ✅ | ✅ | Identità per cui gira il run (C2). Vuoto solo se il run è senza identità (fail-closed: nessun accesso ai file). |
-| `SKILL_STATE_DIR` | ✅ | ✅ | _(solo overlay broker)_ Directory **persistente per-skill** (sopravvive tra i run): usala per stato/cache durevoli. In esecuzione in-process non è impostata. |
+| `SKILL_STATE_DIR` | ✅ | ✅ | Directory **persistente per-skill** (sopravvive tra i run): usala per stato/cache durevoli. La stessa per gli script task della skill (`/skill-state` in un job del broker) e per i suoi daemon, che possono così condividere stato (un login, una coda di richieste); senza overlay broker è `<skill>/.state`. |
 | `BACKEND_INTERNAL_URL` | ✅ | ✅ | URL base del backend (es. `http://localhost:3000`) |
 | `INTERNAL_TOKEN` | ✅ | ✅ | Chiave per gli endpoint `/internal/*` — vedi [sezione 10](#10-salvare-config-vars-da-uno-script-sicuro) |
 | `PATH` | ✅ | ✅ | PATH reale dell'host (trova node, python3, binari di sistema) |
@@ -1379,6 +1400,37 @@ else:
 ```
 
 ---
+
+## 10h. Il messaggio di un ospite (daemon di un user channel)
+
+Un daemon di una skill che dichiara uno `user-channel` che raggiunge i `contacts` (sezione 2)
+consegna il messaggio di un **contatto dell'account** — qualcuno senza account Arkimede che scrive
+su quel canale — e riceve la risposta dell'agente da rimandare:
+
+```
+POST {BACKEND_INTERNAL_URL}/internal/guests/message
+x-internal-token: {INTERNAL_TOKEN}          # il token del daemon (proprietario + id del daemon)
+{"channel": "telegram", "externalId": "4242", "displayName": "Chloé", "text": "sì, lo so!", "authorized": false}
+→ 200 {"answer": "…", "chatId": "…"}
+```
+
+- **Cosa può fare l'agente per un ospite.** Di default — `authorized` assente o false — **solo parole**: il turno non ha
+  nessuno strumento (nemmeno quelli della memoria) né il contesto dal vivo della casa, e all'agente si dice che non deve
+  promettere né dichiarare alcuna azione e deve tenere private le memorie del proprietario. `authorized: true` — la
+  parola della skill che si tratta di un contatto autorizzato (es. `telegram` in modalità dedicata,
+  `AUTHORIZED_CONTACTS`) — dà all'agente i suoi strumenti, come per il proprietario. In entrambi i casi all'agente si
+  dice chi sta parlando (un contatto, mai il proprietario) e lo chiama per nome. Su un account *personale* la skill
+  consegna solo ciò che è rivolto all'agente (`telegram`: una risposta a un suo messaggio, o il messaggio di un contatto
+  autorizzato che comincia con il suo nome, `AGENT_NAME`): il resto resta una conversazione del proprietario.
+
+- Il turno gira come il **proprietario del daemon** (mai un campo della richiesta), in una chat per
+  ospite (`externalSource` = il canale, `externalKey` = il suo id), i suoi messaggi risposti in ordine.
+- Il messaggio dell'ospite viene salvato per primo, con il suo `speaker` (`{channel, externalId,
+  displayName}`), così la memoria (Recordare) sa chi parla: la sua identità sul canale si risolve
+  nella persona che ha quell'indirizzo sulla scheda. Un promemoria consegnato per messaggio viene
+  scritto nella stessa chat, così la sua risposta lo continua.
+- Un run token (script task) o un daemon di una skill senza un canale del genere: 403.
+- Esempio: il listener della skill `telegram` (`listen.py`).
 
 ## 11. Dipendenze di sistema (Nix)
 

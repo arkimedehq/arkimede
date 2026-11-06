@@ -86,7 +86,7 @@ export interface FlowDefinition {
   edges: FlowEdge[];
 }
 
-export type FlowTriggerType = 'manual' | 'cron' | 'scheduled' | 'chat-as-tool' | 'webhook' | 'flow-call';
+export type FlowTriggerType = 'manual' | 'cron' | 'scheduled' | 'chat-as-tool' | 'webhook' | 'flow-call' | 'home-assistant';
 export interface FlowTrigger {
   type: FlowTriggerType;
   cron?: string;
@@ -94,6 +94,8 @@ export interface FlowTrigger {
   timezone?: string;
   firedAt?: string;
   webhookToken?: string;
+  /** type='home-assistant': the entity (`*` allowed), optional from / to states, the cooldown in seconds. */
+  ha?: { entityId: string; from?: string; to?: string; cooldownSeconds?: number };
 }
 
 export interface FlowInputVar {

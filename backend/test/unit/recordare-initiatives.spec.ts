@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createHmac } from 'crypto';
 import type { Initiative } from '@arkimedehq/recordare-client';
-import { RecordareInitiativesService, sharedWords, CHAT_SOURCE, EVENT_TYPE } from '../../src/recordare/recordare-initiatives.service';
+import { RecordareInitiativesService, sharedWords, names, CHAT_SOURCE, EVENT_TYPE } from '../../src/recordare/recordare-initiatives.service';
 import { RecordareWebhookController } from '../../src/recordare/recordare-webhook.controller';
 import { Chat } from '../../src/chats/chats.entity';
 import { Message } from '../../src/messages/messages.entity';
@@ -22,7 +22,7 @@ function initiative(over: Partial<Initiative> = {}): Initiative {
     id: '11111111-1111-4111-8111-111111111111', seq: 1, kind: 'say', for: null, text: 'Mi avevi chiesto di ricordarti di chiamare il commercialista: è oggi.',
     reason: 'a request they made to me', worth: 0.9, episodeIds: [], dueAt: '2026-11-05T08:00:00Z', expiresAt: '2026-11-06T08:00:00Z',
     status: 'offered', outcomeAt: null, reply: null, createdAt: '2026-11-05T08:00:00Z', timing: 'timed',
-    window: { notBefore: '2026-11-05T08:00:00Z', notAfter: '2026-11-06T08:00:00Z' }, channel: 'chat', identity: { required: 'medium' },
+    window: { notBefore: '2026-11-05T08:00:00Z', notAfter: '2026-11-06T08:00:00Z' }, channel: 'chat', channels: ['voice', 'messaging', 'chat'], identity: { required: 'medium' },
     source: { conversation: 'chat-origin', messageIds: ['m1'] }, offeredAt: '2026-11-05T08:00:00Z', pushedAt: '2026-11-05T08:00:00Z', ...over,
   };
 }
@@ -32,7 +32,7 @@ function fakeDb() {
   const state = {
     users: [{ id: 'u1', episodicMemoryEnabled: true, recordareMemoryId: 'mem-1' }, { id: 'u2', episodicMemoryEnabled: false, recordareMemoryId: 'mem-2' }],
     notifications: [] as Array<{ userId: string; source: string; sourceId: string }>,
-    tasks: [] as Array<{ userId: string; chatId: string | null; runAt: Date | null; title: string | null; instruction: string }>,
+    tasks: [] as Array<{ userId: string; chatId: string | null; runAt: Date | null; title: string | null; instruction: string; status?: string; lastRunAt?: Date | null }>,
     chats: [] as any[],
     messages: [] as any[],
   };
@@ -66,11 +66,17 @@ function setup() {
     presence: vi.fn(async () => ({ person: null, initiative: null, askWho: null })),
     initiatives: vi.fn(async () => ({ items: [] as Initiative[], next: 0, more: false })),
   };
-  const svc = new RecordareInitiativesService(db.ds, notifications as any, gateway as any);
+  // The skills a user may use with a user channel (none by default), and what running one answers.
+  const skills = {
+    channels: [] as Array<{ kind: 'messaging'; channel: string; script: string; reaches: Array<'self' | 'contacts'>; skillId: string; skillName: string }>,
+    userChannels: vi.fn(async () => skills.channels),
+    invoke: vi.fn(async (..._a: unknown[]): Promise<any> => ({ success: true, output: { success: true }, raw: '', duration_ms: 1, exit_code: 0 })),
+  };
+  const svc = new RecordareInitiativesService(db.ds, notifications as any, gateway as any, skills as any);
   svc.client = () => client as any;
   /** What a webhook `initiative.deliver` does: true when a message was written. */
   const deliver = (user: string, i: Initiative) => svc.handleEvent({ type: 'initiative.deliver', timestamp: '', data: { ...i, user, memoryId: 'm' } });
-  return { svc, db, client, pushed, notifications, listeners, deliver };
+  return { svc, db, client, pushed, notifications, listeners, deliver, skills };
 }
 
 describe('RecordareInitiativesService', () => {
@@ -88,6 +94,83 @@ describe('RecordareInitiativesService', () => {
     await t.deliver('u1', initiative({ id: '22222222-2222-4222-8222-222222222222', kind: 'ask', text: 'Com\'è andata dal dentista?' }));
     expect(t.db.state.chats).toHaveLength(1);
     expect(t.client.reportInitiative).toHaveBeenLastCalledWith('u1', '22222222-2222-4222-8222-222222222222', 'asked', { channel: 'chat' });
+  });
+
+  it('messaging first when a skill offers a user channel: to the user\'s own account, recorded in the chat the skill uses, no push', async () => {
+    const bot = { kind: 'messaging' as const, channel: 'telegram', script: 'scripts/send_message.js', reaches: ['self' as const, 'contacts' as const], skillId: 'sk-bot', skillName: 'telegram-bot' };
+    t.skills.channels.push(bot);
+    t.db.state.chats.push({ id: '33333333-3333-4333-8333-333333333333', userId: 'u1', title: 'Telegram' });
+    t.skills.invoke.mockResolvedValueOnce({ success: true, output: { success: true, arkimede_chat: '33333333-3333-4333-8333-333333333333' } });
+    expect(await t.deliver('u1', initiative())).toBe(true);
+    expect(t.skills.invoke).toHaveBeenCalledWith('sk-bot', 'scripts/send_message.js', { text: initiative().text }, 30_000, 'u1', undefined);
+    expect(t.db.state.messages).toEqual([expect.objectContaining({ chatId: '33333333-3333-4333-8333-333333333333', role: 'assistant' })]);
+    expect(t.notifications.create).toHaveBeenCalledTimes(1); // the delivery record
+    expect(t.pushed).toHaveLength(0); // it already rang on the phone
+    expect(t.client.reportInitiative).toHaveBeenCalledWith('u1', initiative().id, 'said', { channel: 'messaging' });
+  });
+
+  it('to a contact at their address (the first channel that works), else the chat; an ask never goes by message', async () => {
+    const forChloe = { personId: 'p-chloe', name: 'Chloé', addresses: [{ channel: 'telegram', id: '4242' }] };
+    t.skills.channels.push(
+      { kind: 'messaging', channel: 'telegram', script: 'scripts/send_message.js', reaches: ['self'], skillId: 'sk-self-only', skillName: 'self-only' },
+      { kind: 'messaging', channel: 'telegram', script: 'scripts/send_message.js', reaches: ['self', 'contacts'], skillId: 'sk-bot', skillName: 'telegram-bot' },
+      { kind: 'messaging', channel: 'telegram', script: 'scripts/send_message.py', reaches: ['contacts'], skillId: 'sk-account', skillName: 'telegram-account' },
+    );
+    t.skills.invoke.mockResolvedValueOnce({ success: true, output: { success: false, error: 'Forbidden: bot was blocked by the user' } });
+    await t.deliver('u1', initiative({ for: forChloe }));
+    expect(t.skills.invoke.mock.calls.map((c) => [c[0], c[5]])).toEqual([['sk-bot', { DELIVERY_ADDRESS: '4242' }], ['sk-account', { DELIVERY_ADDRESS: '4242' }]]);
+    // Written in Chloé's guest chat on that channel, where her reply will arrive.
+    expect(t.db.state.chats[0]).toMatchObject({ userId: 'u1', externalSource: 'telegram', externalKey: '4242', title: 'Chloé · telegram' });
+    expect(t.db.state.messages[0]).toMatchObject({ chatId: 'id-1' });
+    expect(t.client.reportInitiative).toHaveBeenLastCalledWith('u1', initiative().id, 'said', { channel: 'messaging' });
+    // No address on any messaging channel: the chat.
+    await t.deliver('u1', initiative({ id: '44444444-4444-4444-8444-444444444444', for: { ...forChloe, addresses: [{ channel: 'homeassistant', id: 'person.chloe' }] } }));
+    expect(t.skills.invoke).toHaveBeenCalledTimes(2);
+    expect(t.client.reportInitiative).toHaveBeenLastCalledWith('u1', '44444444-4444-4444-8444-444444444444', 'said', { channel: 'chat' });
+    // An ask accepts voice and chat only.
+    await t.deliver('u1', initiative({ id: '55555555-5555-4555-8555-555555555555', kind: 'ask', channels: ['voice', 'chat'] }));
+    expect(t.skills.invoke).toHaveBeenCalledTimes(2);
+  });
+
+  it('messaging falls back to a push on the person\'s phone (Home Assistant) when no skill reaches them', async () => {
+    const pushed: any[] = [];
+    t.svc.setPush({ push: async (person, text) => { pushed.push({ person, text }); return person === 'person.chloe'; } });
+    const forChloe = { personId: 'p', name: 'Chloé', addresses: [{ channel: 'homeassistant', id: 'person.chloe' }] };
+    await t.deliver('u1', initiative({ for: forChloe, channels: ['messaging', 'chat'] }));
+    expect(pushed).toEqual([{ person: 'person.chloe', text: initiative().text }]);
+    expect(t.db.state.messages[0]).toMatchObject({ chatId: 'id-1' });
+    expect(t.client.reportInitiative).toHaveBeenLastCalledWith('u1', initiative().id, 'said', { channel: 'messaging' });
+  });
+
+  it('by voice first when a voice channel reaches the person: their room, the message in the chat, reported voice', async () => {
+    const said: any[] = [];
+    t.svc.setVoice({ say: async (user, text, where, chatId) => { said.push({ user, text, where, chatId }); return where.person === 'person.chloe' ? 'assist_satellite.cucina' : null; } });
+    const forChloe = { personId: 'p', name: 'Chloé', addresses: [{ channel: 'homeassistant', id: 'person.chloe' }] };
+    expect(await t.deliver('u1', initiative({ for: forChloe }))).toBe(true);
+    expect(said[0]).toMatchObject({ user: 'u1', where: { person: 'person.chloe' }, chatId: 'id-1' });
+    expect(t.db.state.messages[0]).toMatchObject({ chatId: 'id-1' });
+    expect(t.pushed).toHaveLength(0);
+    expect(t.client.reportInitiative).toHaveBeenLastCalledWith('u1', initiative().id, 'said', { channel: 'voice' });
+    // Nobody to reach by voice (no Home Assistant address, no room): the next channel (the chat).
+    await t.deliver('u1', initiative({ id: '66666666-6666-4666-8666-666666666666' }));
+    expect(t.client.reportInitiative).toHaveBeenLastCalledWith('u1', '66666666-6666-4666-8666-666666666666', 'said', { channel: 'chat' });
+  });
+
+  it('a room\'s presence: what Recordare answers is said in that room; with others there, only the opening', async () => {
+    const said: any[] = [];
+    t.svc.setVoice({ say: async (_u, text, where) => { said.push({ text, where }); return 'assist_satellite.cucina'; } });
+    t.client.presence.mockResolvedValueOnce({ person: null, people: [], initiative: initiative({ for: null, channel: 'voice' }), askWho: null, opening: null } as any);
+    const impulse = { channel: 'voice' as const, place: 'Cucina', people: [{ identity: { channel: 'homeassistant', externalId: 'person.chloe' } }] };
+    await t.svc.roomPresence('u1', impulse, 'cucina');
+    expect(t.client.presence).toHaveBeenCalledWith('u1', impulse);
+    expect(said[0]).toEqual({ text: initiative().text, where: { areaId: 'cucina', person: undefined } });
+    const opening = 'Chloé, ho una cosa per te: vuoi sentirla?';
+    t.client.presence.mockResolvedValueOnce({ person: null, people: [], initiative: initiative({ id: '77777777-7777-4777-8777-777777777777', status: 'pending' }), askWho: null, opening } as any);
+    await t.svc.roomPresence('u1', { ...impulse, someone: 1 }, 'cucina');
+    expect(said[1]).toEqual({ text: opening, where: { areaId: 'cucina' } });
+    expect(t.db.state.messages).toHaveLength(1); // the opening is not the initiative
+    await t.svc.roomPresence('u2', impulse, 'cucina'); // memory off
+    expect(t.client.presence).toHaveBeenCalledTimes(2);
   });
 
   it('delivers once (webhook and feed), ignores the other events, look-ups and users with the memory off', async () => {
@@ -110,6 +193,26 @@ describe('RecordareInitiativesService', () => {
     expect(sharedWords('chiamare il commercialista', 'Promemoria: chiamare il Commercialista')).toBe(2);
   });
 
+  it('a task covers an initiative only for the same person, and a task already run near its time too (never twice)', async () => {
+    const eriona = { personId: 'p-er', name: 'Eriona', addresses: [{ channel: 'telegram', id: '4242001' }] };
+    const yogurt = initiative({ for: eriona as any, text: 'Eriona, ricordati di preparare lo yogurt con la yogurtiera', dueAt: '2026-11-06T19:00:00Z', source: null });
+    // The task the agent made at her request was a push to Andrea: it does not cover what is for Eriona (she would get nothing).
+    t.db.state.tasks.push({ userId: 'u1', chatId: 'x', runAt: new Date('2026-11-06T20:00:00Z'), title: 'Promemoria yogurt in yogurtiera', instruction: 'Invia ad Andrea una notifica push: prepara lo yogurt', status: 'active' });
+    expect(await t.svc.alreadyScheduled('u1', yogurt)).toBe(false);
+    // A task that names her (or carries her Telegram id) covers it; its own time wins (an hour apart).
+    t.db.state.tasks[0].instruction = 'Manda a Eriona su Telegram: prepara lo yogurt';
+    expect(await t.svc.alreadyScheduled('u1', yogurt)).toBe(true);
+    t.db.state.tasks[0].instruction = 'send_message to 4242001: prepara lo yogurt nella yogurtiera';
+    expect(await t.svc.alreadyScheduled('u1', yogurt)).toBe(true);
+    // Already run near the initiative's time: covered (said once); run long before, or failed: the memory's net.
+    Object.assign(t.db.state.tasks[0], { status: 'done', lastRunAt: new Date('2026-11-06T18:30:00Z') });
+    expect(await t.svc.alreadyScheduled('u1', yogurt)).toBe(true);
+    t.db.state.tasks[0].lastRunAt = new Date('2026-11-06T08:00:00Z');
+    expect(await t.svc.alreadyScheduled('u1', yogurt)).toBe(false);
+    expect(names('Promemoria per Eriona', eriona)).toBe(true);
+    expect(names('Promemoria per Andrea', eriona)).toBe(false);
+  });
+
   it('a presence impulse when the user opens the app may bring one (at most every ten minutes)', async () => {
     t.client.presence.mockResolvedValueOnce({ person: { personId: 'mem-1', name: 'Andrea' }, initiative: initiative({ channel: 'chat' }), askWho: null } as any);
     await t.svc.onPresence('u1', NOW);
@@ -121,14 +224,15 @@ describe('RecordareInitiativesService', () => {
     expect(t.client.presence).toHaveBeenCalledTimes(1);
   });
 
-  it('the feed catches up on what was pushed to the chat in the last day, from its cursor', async () => {
+  it('the feed catches up on what was pushed to its channels in the last day, from its cursor', async () => {
     t.client.initiatives.mockResolvedValueOnce({ items: [
       initiative({ id: 'recent', seq: 5 }),
       initiative({ id: 'old', seq: 6, pushedAt: '2026-11-01T08:00:00Z' }),
       initiative({ id: 'pending', seq: 7, status: 'pending', pushedAt: null }),
       initiative({ id: 'voice', seq: 8, channel: 'voice' }),
     ], next: 8, more: false });
-    expect(await t.svc.pollFeed(NOW)).toBe(1);
+    // Recent pushes on Arkimede's channels — the chat and the voice one too (nobody in a room: the chat takes it).
+    expect(await t.svc.pollFeed(NOW)).toBe(2);
     expect(t.client.initiatives).toHaveBeenCalledWith('u1', { since: 0, limit: 200 });
     await t.svc.pollFeed(NOW);
     expect(t.client.initiatives).toHaveBeenLastCalledWith('u1', { since: 8, limit: 200 });

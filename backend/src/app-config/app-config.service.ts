@@ -54,6 +54,28 @@ export interface McpSecurityConfigDto {
   mcpHostAllowlist: string[];
 }
 
+/** Home Assistant settings as read (the token only as `hasHaToken`, or decrypted for the integration itself). */
+export interface HomeAssistantSettings {
+  haUrl: string | null;
+  hasHaToken: boolean;
+  haToken?: string | null;
+  haPresenceEnabled: boolean;
+  haVoiceEnabled: boolean;
+  haToolsEnabled: boolean;
+  haToolsUserIds: string[] | null;
+}
+
+/** Home Assistant settings to change: a value sets, null clears, undefined keeps. */
+export interface HomeAssistantSettingsDto {
+  haUrl?: string | null;
+  /** Plaintext token — encrypted before saving. */
+  haToken?: string | null;
+  haPresenceEnabled?: boolean;
+  haVoiceEnabled?: boolean;
+  haToolsEnabled?: boolean;
+  haToolsUserIds?: string[] | null;
+}
+
 /** Recordare settings: a string sets (secrets encrypted), null clears (back to the environment), undefined keeps. */
 export interface RecordareConfigDto {
   recordareUrl?: string | null;
@@ -487,6 +509,51 @@ export class AppConfigService implements OnModuleInit {
       ctx: { section: 'wyoming', enabled: dto.wyomingEnabled, allowlist: cidrs || null, handleUserId: dto.wyomingHandleUserId ?? null, handleAgentId: dto.wyomingHandleAgentId ?? null, persistConversations: dto.wyomingPersistConversations ?? null },
     });
     return this.getWyomingConfig();
+  }
+
+  // ── Home Assistant (native integration) ──────────────────────────────────────
+
+  /** The Home Assistant settings; the token decrypted only with `withSecret` (the integration's own use). */
+  async getHomeAssistantConfig(withSecret = false): Promise<HomeAssistantSettings> {
+    const c = await this.repo.findOne({ where: { id: CONFIG_ID } });
+    let token: string | null = null;
+    if (withSecret && c?.haToken) {
+      try { token = decrypt(c.haToken); } catch { this.logger.warn('Home Assistant: the stored token could not be decrypted (ignored)'); }
+    }
+    return {
+      haUrl: c?.haUrl ?? null,
+      hasHaToken: !!c?.haToken,
+      ...(withSecret ? { haToken: token } : {}),
+      haPresenceEnabled: c?.haPresenceEnabled ?? false,
+      haVoiceEnabled:    c?.haVoiceEnabled    ?? false,
+      haToolsEnabled:    c?.haToolsEnabled    ?? false,
+      haToolsUserIds:    c?.haToolsUserIds    ?? null,
+    };
+  }
+
+  /** Updates the Home Assistant settings: a string sets (the token encrypted), null clears, undefined keeps. */
+  async updateHomeAssistantConfig(dto: HomeAssistantSettingsDto, actorId?: string): Promise<HomeAssistantSettings> {
+    const current = await this.repo.findOne({ where: { id: CONFIG_ID } });
+    const keep = <T>(v: T | undefined, old: T) => (v === undefined ? old : v);
+    await this.repo.save({
+      ...current,
+      id: CONFIG_ID,
+      systemPrompt: current?.systemPrompt ?? SYSTEM_PROMPT,
+      haUrl: dto.haUrl === undefined ? current?.haUrl ?? null : dto.haUrl?.trim().replace(/\/+$/, '') || null,
+      haToken: dto.haToken === undefined ? current?.haToken ?? null : dto.haToken?.trim() ? encrypt(dto.haToken.trim()) : null,
+      haPresenceEnabled: keep(dto.haPresenceEnabled, current?.haPresenceEnabled ?? false),
+      haVoiceEnabled:    keep(dto.haVoiceEnabled,    current?.haVoiceEnabled    ?? false),
+      haToolsEnabled:    keep(dto.haToolsEnabled,    current?.haToolsEnabled    ?? false),
+      haToolsUserIds:    dto.haToolsUserIds === undefined ? current?.haToolsUserIds ?? null : dto.haToolsUserIds?.length ? dto.haToolsUserIds : null,
+    });
+    await this.audit?.record({
+      actorId: actorId ?? null,
+      action: 'appconfig.update',
+      resource: 'home-assistant',
+      outcome: 'ok',
+      ctx: { section: 'home-assistant', ...dto, haToken: dto.haToken === undefined ? undefined : dto.haToken ? '(set)' : null },
+    });
+    return this.getHomeAssistantConfig();
   }
 
   // ── TTS Configuration (Piper) ───────────────────────────────────────────────

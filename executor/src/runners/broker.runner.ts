@@ -6,6 +6,7 @@ import * as fs from 'fs';
 import { ExecuteRequest, ExecuteResult } from '../types';
 import { resolveNetworks, usesEgressProxy } from './networks';
 import { listTopLevelFiles } from './outputs';
+import { hostStateDir as prepareStateDir } from '../skill-state';
 
 /**
  * broker.runner.ts — runs a skill as a **container-job** via the job-launcher
@@ -26,9 +27,6 @@ const JOB_RUNTIME   = process.env.JOB_RUNTIME || 'runc'; // 'runc' | 'runsc'
 // not honor HTTP_PROXY natively, so we preload global-agent to route http/https via proxy).
 const RUNNER_GLOBAL_AGENT_BOOTSTRAP =
   process.env.RUNNER_GLOBAL_AGENT_BOOTSTRAP || '/opt/proxy/node_modules/global-agent/bootstrap';
-// Host root for the per-skill persistent state (T5a). If not configured,
-// no /skill-state mount.
-const STATE_HOST    = process.env.SKILL_STATE_HOST_BASE || '';
 // Host root for the ephemeral per-job work dirs (T5b copy-in/out).
 const WORK_HOST     = process.env.WORK_HOST_BASE || '';
 // Host skills-output dir where the job outputs are materialized (T5c copy-out).
@@ -46,18 +44,6 @@ function copyDirInto(src: string, dst: string): void {
   }
 }
 
-/** Creates (if needed) and returns the per-skill persistent state host dir, or null. */
-function prepareStateDir(skillId: string): string | null {
-  if (!STATE_HOST) return null;
-  const dir = path.join(STATE_HOST, skillId);
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-    fs.chmodSync(dir, 0o777); // writable by the container uid (non-root runner)
-    return dir;
-  } catch {
-    return null;
-  }
-}
 
 export function brokerEnabled(): boolean {
   return !!BROKER_URL;
@@ -99,7 +85,7 @@ export async function runViaBroker(req: ExecuteRequest): Promise<ExecuteResult> 
   }
 
   // Per-skill persistent state (T5a): if configured, mounts /skill-state.
-  const hostStateDir = prepareStateDir(req.skill_id);
+  const hostStateDir = prepareStateDir(req.skill_id); // the same dir daemons and in-process runs use (skill-state.ts)
   if (hostStateDir) env.SKILL_STATE_DIR = '/skill-state';
 
   // Nix: if the skill has system.nix deps installed ({skillDir}/.nix/bin), the job

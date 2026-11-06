@@ -25,6 +25,8 @@ import { AppConfigModule } from './app-config/app-config.module';
 import { TranscriptionModule } from './transcription/transcription.module';
 import { TtsModule } from './tts/tts.module';
 import { WyomingModule } from './wyoming/wyoming.module';
+import { GuestsModule } from './guests/guests.module';
+import { HomeAssistantModule } from './home-assistant/home-assistant.module';
 import { RecordareModule } from './recordare/recordare.module';
 import { DatabaseChecksModule } from './database/database-checks.module';
 import { InvocationsModule } from './invocations/invocations.module';
@@ -137,6 +139,8 @@ import { I18nModule, AcceptLanguageResolver, QueryResolver } from 'nestjs-i18n';
     WyomingModule,
     DatabaseChecksModule, // Postgres collation-version warning at start-up
     RecordareModule,      // Recordare episodic memory (opt-in: RECORDARE_URL + RECORDARE_API_KEY)
+    GuestsModule,         // contacts writing on a skill's messaging channel (Telegram), answered as the account
+    HomeAssistantModule,  // presence and voice at home for the memory (opt-in, admin settings)
     InvocationsModule,
     VectorDbModule,
     SkillsModule,

@@ -40,9 +40,31 @@ export interface FocusView {
   expiresAt: string;
 }
 
+/** A turn heard on a satellite: the hub's ids for it (an `assist_satellite.*` entity, and its device). */
+export interface VoiceTurn {
+  userId: string;
+  satelliteId: string | null;
+  deviceId: string | null;
+}
+
 @Injectable()
 export class ConversationFocusService {
   private readonly focus = new Map<string, Focus>();
+  /** Who hears that a satellite was spoken to (a native integration placing it: Home Assistant — the room's presence). */
+  private turnListener: ((turn: VoiceTurn) => void) | null = null;
+
+  /** The integration that places a satellite's turns (one at a time; null: none). */
+  setVoiceTurnListener(listener: ((turn: VoiceTurn) => void) | null): void {
+    this.turnListener = listener;
+  }
+
+  /** A satellite was spoken to (Wyoming, after the answer): told to the listener, never failing the turn. */
+  voiceTurn(turn: VoiceTurn): void {
+    try {
+      this.turnListener?.(turn);
+    } catch { /* the listener's own failure is not the turn's */ }
+  }
+
   /** When the satellite's last focus ended: unfocused turns start fresh after it. */
   private readonly endedAt = new Map<string, number>();
 

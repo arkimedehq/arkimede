@@ -627,6 +627,22 @@ describe('ingest mapper', () => {
     ]);
   });
 
+  it('a guest\'s message (a contact writing on a channel, no account) carries their channel identity', () => {
+    const body = buildIngestBody(
+      { id: 'c', title: 'Chloé · telegram', userId: 'agent', externalSource: 'telegram' },
+      [{ id: 'a', role: 'assistant', content: 'Chloé, hai la verifica domani alle 8.', toolCalls: null, authorId: null, createdAt: new Date(0) },
+       { id: 'b', role: 'user', content: 'sì, lo so!', toolCalls: null, authorId: null, createdAt: new Date(1), speaker: { channel: 'telegram', externalId: '4242', displayName: 'Chloé' } },
+       { id: 'c1', role: 'user', content: 'grazie', toolCalls: null, authorId: null, createdAt: new Date(2), speaker: { channel: 'telegram', externalId: '4242' } }],
+      new Map([['agent', 'Arkim3de']]), 'Arkimede',
+    );
+    expect(body.conversation.channel).toBe('arkimede-telegram');
+    expect(body.messages.map((m) => [m.externalId, m.role, m.authorRef])).toEqual([
+      ['a', 'assistant', 'assistant'], ['b', 'other', 'telegram:4242'], ['c1', 'other', 'telegram:4242'],
+    ]);
+    expect(body.conversation.participants[2]).toEqual({ ref: 'telegram:4242', role: 'other', displayName: 'Chloé', identity: { channel: 'telegram', externalId: '4242' } });
+    expect(body.conversation.participants).toHaveLength(3);
+  });
+
   it('marks a person\'s private message (owner or other author), never the assistant\'s', () => {
     const body = buildIngestBody(
       { id: 'c', title: null, userId: 'andrea', externalSource: null },

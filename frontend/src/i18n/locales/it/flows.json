@@ -23,7 +23,14 @@
     "webhookSaveHint": "salva per generare URL e token",
     "exposeAsTool": "esponi all'agente (chat-as-tool)",
     "loadOnFirstTitle": "Se off, il flow-tool non entra nel contesto della chat: resta usabile solo via agente che lo include.",
-    "loadOnFirst": "carica in chat (loadOnFirst)"
+    "loadOnFirst": "carica in chat (loadOnFirst)",
+    "homeAssistant": "Home Assistant (cambia uno stato)",
+    "haEntity": "entità, es. binary_sensor.campanello",
+    "haEntityHint": "Un'entità esposta ad Assist; * vale qualunque carattere (person.*, binary_sensor.*_porta). L'input del run: entity_id, name, area, from, to, at.",
+    "haFrom": "da (qualsiasi)",
+    "haTo": "a (qualsiasi)",
+    "haCooldown": "30 s",
+    "haCooldownHint": "Al massimo un run ogni tanti secondi (default 30)."
   },
   "palette": { "add": "Aggiungi:" },
   "nodeType": {

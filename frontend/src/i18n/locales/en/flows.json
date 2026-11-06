@@ -23,7 +23,14 @@
     "webhookSaveHint": "save to generate URL and token",
     "exposeAsTool": "expose to the agent (chat-as-tool)",
     "loadOnFirstTitle": "If off, the flow-tool doesn't enter the chat context: it stays usable only via an agent that includes it.",
-    "loadOnFirst": "load in chat (loadOnFirst)"
+    "loadOnFirst": "load in chat (loadOnFirst)",
+    "homeAssistant": "Home Assistant (a state changes)",
+    "haEntity": "entity, e.g. binary_sensor.doorbell",
+    "haEntityHint": "An entity exposed to Assist; * matches any characters (person.*, binary_sensor.*_door). The run's input: entity_id, name, area, from, to, at.",
+    "haFrom": "from (any)",
+    "haTo": "to (any)",
+    "haCooldown": "30 s",
+    "haCooldownHint": "At most one run every so many seconds (default 30)."
   },
   "palette": { "add": "Add:" },
   "nodeType": {

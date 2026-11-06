@@ -66,6 +66,30 @@ import { runWithLlmCallContext } from '../usage/llm-call-context';
 
 // ─── Internal types ─────────────────────────────────────────────────────────────
 
+/**
+ * A channel a skill offers for reaching a person with no model in between (SKILL.md `user-channel`): the host runs
+ * `script` with `{text}` and the recipient's address in `_config.DELIVERY_ADDRESS` (none: the invoking user's own
+ * account). `channel` names the address (a Recordare identity channel, e.g. `telegram`); `reaches` says whom it can
+ * reach: the invoking user (`self`), other people by address (`contacts`).
+ */
+export interface UserChannel {
+  kind:    'messaging';
+  channel: string;
+  script:  string;
+  reaches: Array<'self' | 'contacts'>;
+}
+
+/** A SKILL.md `user-channel` block, or null when absent or malformed. */
+export function parseUserChannel(raw: unknown): UserChannel | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  if (r.kind !== 'messaging' || typeof r.channel !== 'string' || !r.channel.trim() || typeof r.script !== 'string' || !r.script.trim()) return null;
+  const reaches = Array.isArray(r.reaches)
+    ? r.reaches.filter((x): x is 'self' | 'contacts' => x === 'self' || x === 'contacts')
+    : ['self' as const];
+  return { kind: 'messaging', channel: r.channel.trim(), script: r.script.trim(), reaches };
+}
+
 interface SkillYaml {
   name:        string;
   version?:    string;
@@ -90,6 +114,7 @@ interface SkillYaml {
     type?:        'text' | 'json' | 'datasource' | 'collection';
     family?:      'relational' | 'document' | 'keyvalue' | 'fileshare';
   }>;
+  userChannel?: UserChannel | null;
   scripts?: Array<{
     filename:      string;
     language:      'python' | 'javascript' | 'node';
@@ -1730,6 +1755,8 @@ export class SkillsService implements OnModuleInit {
     input:          Record<string, unknown>,
     timeoutMs = 30_000,
     actorId?:       string,
+    /** Host-only config for this run (e.g. a user channel's DELIVERY_ADDRESS): never from a model's arguments. */
+    configExtra?:   Record<string, string>,
   ): Promise<{
     success:     boolean;
     output:      unknown;      // stdout parsed as JSON (null if it is not JSON)
@@ -1795,7 +1822,7 @@ export class SkillsService implements OnModuleInit {
     }
 
     // ── 3. Resolve config and invoke the executor ──────────────────────────
-    const config = await this.resolveConfig(skillId);
+    const config = { ...(await this.resolveConfig(skillId)), ...configExtra };
 
     this.logger.log(
       `invoke: skill="${skill.name}" script="${script.filename}" input_keys=${Object.keys(input).join(',') || '(none)'}`,
@@ -2051,6 +2078,27 @@ export class SkillsService implements OnModuleInit {
    *
    * Dedup by name: the user's personal wins over a same-named shared one.
    */
+  /**
+   * The user channels (SKILL.md `user-channel`) of the skills this user may use, in a stable order (the user's own
+   * first): read from each skill's SKILL.md on disk, so no column holds them.
+   */
+  async userChannels(userId: string): Promise<Array<UserChannel & { skillId: string; skillName: string }>> {
+    const skills = await this.collectAccessibleSkills(userId);
+    skills.sort((a, b) => Number(b.ownerId === userId) - Number(a.ownerId === userId) || a.name.localeCompare(b.name));
+    const found: Array<UserChannel & { skillId: string; skillName: string }> = [];
+    for (const skill of skills) {
+      const mdPath = this.findSkillMdPath(skill.packagePath ?? path.join(this.skillsBase, skill.id));
+      if (!mdPath) continue;
+      try {
+        const ch = parseSkillMd(fs.readFileSync(mdPath, 'utf-8')).manifest.userChannel;
+        if (ch) found.push({ ...ch, skillId: skill.id, skillName: skill.name });
+      } catch (err) {
+        this.logger.warn(`user channel of "${skill.name}" not read: ${(err as Error).message}`);
+      }
+    }
+    return found;
+  }
+
   private async collectAccessibleSkills(userId: string, projectId?: string): Promise<Skill[]> {
     const teamIds = await this.teamsService.teamIdsForUser(userId);
     const where: Record<string, unknown>[] = [
@@ -2477,6 +2525,7 @@ function parseSkillMd(raw: string): { manifest: SkillYaml; body: string } {
     network:      runtime.network,
     config:       runtime.config,
     scripts:      runtime.scripts,
+    userChannel:  parseUserChannel(parsed['user-channel'] ?? runtime['user-channel']),
   };
   return { manifest, body: fm.body };
 }

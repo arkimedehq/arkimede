@@ -1411,18 +1411,64 @@ Recordare becomes configured). An empty setting falls back to the variable.
 
 - **The memory's initiatives** (Recordare D55, `backend/src/recordare/recordare-initiatives.service.ts`): Recordare
   decides what the agent says on its own — a reminder the user asked for, "how did it go?", "did you hang the laundry?" —
-  and when; Arkimede delivers it as an assistant message in the user's dedicated chat (`💭 <APP_NAME>`, `externalSource
-  'recordare'`), with a notification and the Socket.IO push, and reports the outcome. Three ways in, all through the
+  and when; Arkimede delivers it on the first of the initiative's acceptable channels (`channels`, in order) that
+  reaches the person now, and reports the outcome with that channel: **messaging** through a skill that declares a
+  `user-channel` (docs/SKILLS.md §2: `telegram`), its script run directly with no model — to the
+  user's own account, or to the person the initiative is for at their address (`for.addresses`, from Recordare) —, the
+  message also written where the reply will continue — a contact's guest chat on that channel, the chat the skill uses
+  with the user — (else the dedicated one) with no push; a contact's reply comes back through the skill's daemon as a
+  guest turn (`POST /internal/guests/message`, docs/SKILLS.md §10h: run as the account, the speaker sent to Recordare as
+  their channel identity, `messages.speaker`); else **chat**, an
+  assistant message in the user's dedicated chat (`💭 <APP_NAME>`, `externalSource 'recordare'`), with a notification and
+  the Socket.IO push; **voice** first, on the voice satellite of the person's room, when Home Assistant is on (below). Three ways in, all through the
   client library's `InitiativeInbox` (each initiative handed over once — the notification row is the record —, the
   outcome reported): the webhook `POST /api/recordare/webhook` (public, Standard Webhooks signature checked with
   `RECORDARE_WEBHOOK_SECRET` over the raw body; 404 without it), a presence impulse when the user opens the app (first
   socket, at most every 10 min: Recordare may answer with something to say now), the feed every 15 min and at start-up
-  (catch-up, pushes of the last day). A reminder the user already scheduled in Arkimede (an active one-shot task from the
-  same chat sharing a word, or within two hours sharing two) is reported `done`, not delivered twice. In a turn, every
+  (catch-up, pushes of the last day). A reminder the user already scheduled in Arkimede (a one-shot task from the
+  same chat sharing a word, or within two hours sharing two; still to run, or run within two hours of it) is reported
+  `done`, not delivered twice: the explicit, confirmed task is the source of truth (its time wins). It covers only the
+  same person — an initiative for a contact needs a task that names them or carries one of their addresses — and a
+  task that failed or was deleted covers nothing: the memory's initiative is the safety net. In a turn, every
   agent already gets the initiative due for the speaker inside the memory context (nothing to do here). Set-up (Recordare
   admin, once): `POST api/v1/admin/clients/{id}/webhooks {url: "http://backend:3000/api/recordare/webhook", events:
   ["initiative.deliver"]}` → put the `whsec_` secret in `RECORDARE_WEBHOOK_SECRET`; `PATCH api/v1/admin/clients/{id}
-  {channels: [{kind: "chat", reach: "always"}]}`; `WEBHOOK_ALLOW_PRIVATE=true` on a co-hosted Recordare.
+  {channels: [{kind: "chat", reach: "always"}, {kind: "messaging", reach: "always"}]}` (messaging when a user-channel skill is installed; a person's address bound in Recordare's console); `WEBHOOK_ALLOW_PRIVATE=true` on a co-hosted Recordare.
+
+- **Home Assistant, a native integration** (`backend/src/home-assistant/`; Settings → Integrations → Home Assistant,
+  admin; each part off by default): one connection to its WebSocket API (`ws`) with the admin's URL and long-lived
+  token (encrypted; or imported from the Home Assistant MCP server, which is then turned off), shared by:
+  - **the agent's tools** (`ha-tools.service.ts`, a native tool source — `tool-sources/`, loaded beside custom tools,
+    MCP, skills and flows, filterable per agent as `ha_*`): `ha_find_entities`, `ha_get_state`, `ha_call_service`,
+    `ha_history`, `ha_logbook`, `ha_calendar_events` / `ha_calendar_add`, `ha_todo_items` / `ha_todo_add` /
+    `ha_todo_complete` (service calls with `return_response`), `ha_camera_snapshot` (the image as a tool file, shown to
+    the model), `ha_notify` (a push on a person's phone), only on the entities Home Assistant exposes to Assist
+    (`homeassistant/expose_entity/list`); locks, alarms, garage doors and gates need the user's confirmation
+    (`confirmed: true`); the server's own services (`homeassistant`, `hassio`, `shell_command`…) never; for every user
+    or a list (`haToolsUserIds`); each user's person (`users.haPerson`) named in the descriptions ("me");
+  - **flows started by Home Assistant** (`ha-triggers.service.ts`): trigger type `home-assistant` — an exposed entity
+    (`*` patterns), optional `from` / `to` states, `cooldownSeconds` (30) — runs the flow as its owner (allowed the
+    tools) with `{entity_id, name, area, from, to, at}` as input ("when the doorbell rings", "when Chloé gets home");
+  - **the home in the turn**: a short `<home>` line in the per-request blocks (who is home and in which room — the
+    persons exposed to Assist and the user's own —, who the user is), from the native sources' `contextFor`;
+  - **a push channel for the memory's initiatives**: when no messaging skill reaches the person, a notification on
+    their phone (`notify.mobile_app_<phone>`, found from their `device_trackers`' device — the person's `homeassistant`
+    address, or the user's own `haPerson`);
+  - **presence and voice for the memory** (Recordare D55 §5c). From its registries and states (`ha-model.ts`): **voice points** (every
+  `assist_satellite` with its area; a mobile one — the quacksat duck — from a sensor on its device naming an area) and
+  **presence** (`person.*` at home; a person in a room from a sensor on their tracker's device naming an area —
+  Bermuda / ESPresense; occupancy without identity = someone). Every change goes to the **Wyoming user's** memory as
+  presence impulses (`channel home | voice`, `place` = the area, people by their `homeassistant` identity `person.x` —
+  bind it on their card in Recordare's console), refreshed every 5 min; what Recordare answers is said in that room.
+  **A satellite spoken to** is a presence in its room too (Wyoming tells `ConversationFocusService.voiceTurn`, 10 s after
+  the answer, so what follows never talks over it): the speaker by elimination — the one person the room's sensors place
+  there (0.9), else the one person at home (0.6, medium), else someone; Recordare tells a first turn (an arrival: what is
+  due may follow) from the next ones (a refresh: only a timed request or promise). The
+  initiatives' **voice channel**: `assist_satellite.start_conversation` when the satellite listens, else `announce`, on
+  the satellite of the person's room; the message is written in the dedicated chat and the satellite bound to it
+  (`ConversationFocusService`, 15 min) so the spoken reply lands there; with others in the room only the opening.
+  `GET/PATCH /api/admin/config/home-assistant` (settings, live status: entities exposed, voice points, who is home and
+  where, persons), `POST …/import-mcp`, `PATCH …/people` (a user's person).
 
 - **Per-user switch** `users.episodicMemoryEnabled` (default off; Settings → Memory, shown only when Recordare is
   configured; `PATCH /api/users/me {episodicMemoryEnabled}`). It is the **only on/off**: Recordare has no consent

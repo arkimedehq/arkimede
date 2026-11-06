@@ -35,6 +35,7 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Inject, forwardRef }
 import { ModuleRef } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import * as net from 'node:net';
+import { randomUUID } from 'node:crypto';
 import { AppConfigService } from '../app-config/app-config.service';
 import { TranscriptionService } from '../transcription/transcription.service';
 import { TtsService } from '../tts/tts.service';
@@ -47,6 +48,7 @@ import { UsersService } from '../users/users.service';
 import { InvocationsService } from '../invocations/invocations.service';
 import { makeToolCollector } from '../invocations/tool-collector';
 import { ExternalChatsService } from '../chats/external-chats.service';
+import type { ToolCallRecord } from '../messages/messages.entity';
 import { ConversationFocusService, FOCUS_HISTORY_MESSAGES, satelliteName } from '../chats/conversation-focus.service';
 import { APP_NAME, APP_NAME_SLUG } from '../config/app.config';
 import { withTraceUser } from '../observability/genai-tracing';
@@ -100,7 +102,11 @@ export function spokenFailure(language?: string): string {
     : "Sorry, I couldn't finish that. Please try again, maybe asking in another way.";
 }
 
-interface ConversationWindow { messages: { role: 'user' | 'assistant'; content: string }[]; updatedAt: number }
+/** A voice conversation's turns (the assistant's tool calls with its answer: the agent replays them on the next turn). */
+interface ConversationWindow {
+  messages: { id?: string; role: 'user' | 'assistant'; content: string; toolCalls?: ToolCallRecord[] }[];
+  updatedAt: number;
+}
 
 export interface WyomingStatus {
   running:   boolean;
@@ -392,7 +398,7 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
         // A focus that ended since this window's last turn closes the window's conversation.
         const fresh = this.focus.freshSince(userId, satellite);
         if (!focused && fresh && window.messages.length && window.updatedAt < fresh) window.messages = [];
-        const history = (focused ?? window.messages.map((m) => ({ role: m.role, content: m.content }))) as any[];
+        const history = (focused ?? window.messages.map((m) => ({ ...m }))) as any[];
         const t0 = Date.now();
         const tools = makeToolCollector();
         const abort = new AbortController();
@@ -415,7 +421,9 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
             },
           );
           if (!focused) {
-            window.messages.push({ role: 'user', content: text }, { role: 'assistant', content: answer });
+            window.messages.push({ role: 'user', content: text }, {
+              id: randomUUID(), role: 'assistant', content: answer, ...(tools.records.length ? { toolCalls: tools.records as ToolCallRecord[] } : {}),
+            });
             if (window.messages.length > CONVERSATION_MAX_MESSAGES) window.messages.splice(0, window.messages.length - CONVERSATION_MAX_MESSAGES);
             window.updatedAt = Date.now();
           }
@@ -439,6 +447,8 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
           this.send(socket, { type: 'handled', data: {
             text: answer, continue_conversation: expectsReply(answer), ...(context.conversation_id ? { context } : {}),
           } });
+          // Someone spoke to that satellite: its room is lived in now (Home Assistant tells the memory).
+          this.focus.voiceTurn({ userId, satelliteId: satelliteName(context.satellite_id), deviceId: satelliteName(context.device_id) });
         } catch (err: any) {
           const message = err?.message ?? 'Internal error';
           this.logger.warn(`Wyoming: handle failed for ${ip} in ${Date.now() - t0}ms: ${message}`);

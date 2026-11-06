@@ -19,6 +19,13 @@ export interface ToolCallRecord {
   durationMs?: number;
 }
 
+/** A message's author outside Arkimede: their identity on a channel (e.g. `telegram` / a user id). */
+export interface MessageSpeaker {
+  channel: string;
+  externalId: string;
+  displayName?: string;
+}
+
 @Entity('messages')
 export class Message {
   @PrimaryGeneratedColumn('uuid')
@@ -98,6 +105,13 @@ export class Message {
    */
   @Column({ type: 'boolean', default: false })
   isPrivate: boolean;
+
+  /**
+   * Who wrote it when it is not an Arkimede user: a contact of the account on a messaging channel (a guest message,
+   * guest-messages.controller.ts). The memory resolves `{channel, externalId}` to that person.
+   */
+  @Column({ type: 'jsonb', nullable: true, default: null })
+  speaker: MessageSpeaker | null;
 
   @CreateDateColumn()
   createdAt: Date;

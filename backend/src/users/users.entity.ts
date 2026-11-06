@@ -142,6 +142,10 @@ export class User {
   @Column({ type: 'boolean', default: false })
   episodicMemoryEnabled: boolean;
 
+  /** The user's Home Assistant person (`person.x`), set by an admin: "me" for the `ha_*` tools. */
+  @Column({ type: 'varchar', length: 200, nullable: true, default: null })
+  haPerson: string | null;
+
   /** The user's memoryId in Recordare (GET api/v1/me), cached; null = not provisioned yet. */
   @Column({ type: 'varchar', length: 64, nullable: true, default: null })
   recordareMemoryId: string | null;

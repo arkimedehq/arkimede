@@ -733,6 +733,31 @@ export class McpServersService implements OnModuleDestroy {
     }
   }
 
+  /**
+   * The URL and headers (secrets filled in) of an http/sse MCP server, for a host integration that reuses its
+   * credentials (Home Assistant: the same URL and token open its WebSocket API). By id, else the first enabled server
+   * whose name matches `namePattern`. Null when none.
+   */
+  async credentialsFor(serverId: string | null, namePattern: RegExp): Promise<{ id: string; name: string; url: string; headers: Record<string, string> } | null> {
+    const servers = await this.serverRepo.find({ where: serverId ? { id: serverId } : { enabled: true }, order: { createdAt: 'ASC' } });
+    const server = servers.find((s) => (s.transport === 'http' || s.transport === 'sse') && !!s.url && (serverId ? true : namePattern.test(s.name)));
+    if (!server) return null;
+    const secrets = await this.loadSecrets(server.id);
+    return { id: server.id, name: server.name, url: this.interpolate(server.url!, secrets), headers: this.interpolateHeaders(server.headers, secrets) };
+  }
+
+  /** Turns a server off (an admin moved what it gave to a native integration); its tools stop loading. */
+  async disable(serverId: string): Promise<void> {
+    await this.serverRepo.update(serverId, { enabled: false });
+    this.httpSessions.delete(serverId);
+  }
+
+  /** The enabled http/sse MCP servers (id, name), for an admin to pick one whose credentials an integration reuses. */
+  async httpServers(): Promise<Array<{ id: string; name: string }>> {
+    const servers = await this.serverRepo.find({ where: { enabled: true }, order: { createdAt: 'ASC' } });
+    return servers.filter((s) => (s.transport === 'http' || s.transport === 'sse') && !!s.url).map((s) => ({ id: s.id, name: s.name }));
+  }
+
   /** Cached streamable-HTTP sessions per server (TTL; invalidated on session errors). */
   private readonly httpSessions = new Map<string, { session: McpHttpSession; at: number }>();
   private static readonly HTTP_SESSION_TTL_MS = 5 * 60_000;

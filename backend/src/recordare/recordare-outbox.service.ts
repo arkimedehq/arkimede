@@ -136,7 +136,7 @@ export class RecordareOutboxService implements OnModuleInit, OnModuleDestroy {
     const ids = rows.map((r) => r.messageId).filter((x): x is string => !!x);
     const messages: IngestMessage[] = chat
       ? await this.ds.query(
-        `SELECT "id", "role", "content", "toolCalls", "authorId", "createdAt", "isPrivate" FROM "messages"
+        `SELECT "id", "role", "content", "toolCalls", "authorId", "createdAt", "isPrivate", "speaker" FROM "messages"
           WHERE "chatId" = $1 AND "id" = ANY($2::uuid[])`, [chatId, ids])
       : [];
     if (!chat || !messages.length) {

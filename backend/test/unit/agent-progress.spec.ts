@@ -113,4 +113,22 @@ describe('streamResponse progress', () => {
     });
     expect(text).toBe('hi');
   });
+
+  it('a words-only turn never replays the history\'s tool calls (no tool is defined for it); a normal turn does', async () => {
+    const model = new ScriptedModel([[new AIMessageChunk({ content: 'ok' })], [new AIMessageChunk({ content: 'ok' })]]);
+    const svc: any = serviceWith(createReactAgent({ llm: model as any, tools: [] }), model);
+    const seen: any[] = [];
+    const resolve = svc.resolveAgent;
+    svc.resolveAgent = async (...args: any[]) => { seen.push(args[3]); return resolve(); };
+    const history: any[] = [
+      { id: 'm1', role: 'user', content: 'ricordami i pancakes' },
+      { id: 'm2', role: 'assistant', content: 'Te lo attivo?', toolCalls: [{ name: 'schedule_task', input: {}, output: 'PREPARED id=t1' }] },
+    ];
+    const go = (opts: any) => svc.streamResponse('sì', 'u1', undefined, undefined, history, [], [], [], () => {}, () => {}, undefined, undefined, opts);
+    await go({ textOnly: true });
+    await go({});
+    expect(seen[0][1]).toEqual({ id: 'm2', role: 'assistant', content: 'Te lo attivo?' });
+    expect(seen[1][1].toolCalls).toHaveLength(1);
+    expect(history[1].toolCalls).toHaveLength(1); // the caller's history is not changed
+  });
 });
