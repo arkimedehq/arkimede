@@ -26,6 +26,7 @@ import { FlowEngineService } from './flow-engine.service';
 import { FlowSchedulerService } from './flow-scheduler.service';
 import { FlowDefinition, FlowInputVar, FlowScope, FlowTrigger } from './flow.types';
 import { AuditService } from '../audit/audit.service';
+import { ToolFilterCleanupService } from '../tool-filters/tool-filter-cleanup.service';
 
 export interface UpsertFlowData {
   name: string;
@@ -49,6 +50,7 @@ export class FlowsService {
     private readonly engine: FlowEngineService,
     private readonly scheduler: FlowSchedulerService,
     @Optional() private readonly audit?: AuditService,
+    @Optional() private readonly toolFilters?: ToolFilterCleanupService,
   ) {}
 
   // ── Read ──────────────────────────────────────────────────────────────
@@ -158,6 +160,14 @@ export class FlowsService {
     const flow = await this.flowRepo.findOne({ where: { id } });
     await this.scheduler.removeJobs(id);
     await this.flowRepo.delete({ id });
+    if (flow) {
+      // Its tool leaves the agents' and automations' filters, unless a namesake flow remains.
+      const remaining = await this.flowRepo.find({ select: { name: true } });
+      await this.toolFilters?.removeSource(`flow:${flow.name}`, {
+        names: [this.toolNameForFlow(flow.name)],
+        remaining: remaining.map((f) => this.toolNameForFlow(f.name)),
+      });
+    }
     await this.audit?.record({
       actorId: actorId ?? null, action: 'flow.delete', resource: flow?.name ?? id,
       outcome: 'ok', ctx: { flowId: id, trigger: null },

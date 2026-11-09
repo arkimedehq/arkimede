@@ -39,7 +39,7 @@ import {
 } from '../api/customTools';
 import { dataSourcesApi, engineFamily, type DataSource } from '../api/dataSources';
 import { filesApi } from '../api/files';
-import { llmConfigsApi, type LlmConfigDto } from '../api/llmConfigs';
+import { llmConfigsApi, type LlmConfigOption } from '../api/llmConfigs';
 import { useStore } from '../store/useStore';
 import { ScopeSelector, ScopeBadge } from '../components/ScopeSelector';
 
@@ -595,9 +595,9 @@ function ToolEditor({
   const redisDataSources = dataSources.filter((d) => engineFamily(d.engine) === 'keyvalue');
 
   // LLM configs — loaded for the Prompt executor selector
-  const { data: llmConfigs = [] } = useQuery<LlmConfigDto[]>({
-    queryKey: ['llm-configs'],
-    queryFn:  llmConfigsApi.list,
+  const { data: llmConfigs = [] } = useQuery<LlmConfigOption[]>({
+    queryKey: ['llm-configs', 'options'],
+    queryFn:  llmConfigsApi.options,
     enabled:  form.executorType === 'prompt',
     staleTime: 60_000,
   });

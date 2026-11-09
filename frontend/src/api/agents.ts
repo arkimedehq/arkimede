@@ -21,6 +21,8 @@ export interface Agent {
   exposeAsTool: boolean;
   /** The agent uses its memory (charter, context before each answer, memory tools); on by default. */
   memoryContext: boolean;
+  /** A last step of successful action tools ends the turn with the reply written with them (off by default). */
+  actionReplies: boolean;
   scope: AgentScope;
   teamId: string | null;
   createdAt: string;
@@ -58,6 +60,8 @@ export interface UpsertAgentPayload {
   toolFilter?: AgentToolFilter;
   maxIterations?: number | null;
   exposeAsTool?: boolean;
+  memoryContext?: boolean;
+  actionReplies?: boolean;
   scope?: AgentScope;
   teamId?: string | null;
 }
@@ -78,9 +82,9 @@ export interface MemberInput { agentId: string; position?: number; role?: string
 
 /** A source group of tools available to the user (for the agent tool picker). */
 export interface ToolCatalogGroup {
-  source: 'mcp' | 'skill' | 'flow' | 'agent' | 'custom';
+  source: 'mcp' | 'skill' | 'integration' | 'flow' | 'agent' | 'custom';
   label: string;
-  /** Wildcard token that selects the whole group (e.g. "mcp_home_assistant_*"), or null. */
+  /** Wildcard token that selects the whole group (e.g. "mcp_home_assistant_*", "ha_*"), or null. */
   wildcard: string | null;
   tools: { name: string; description: string }[];
 }

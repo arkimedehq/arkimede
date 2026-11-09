@@ -12,9 +12,14 @@
  *     `sensor.quacksat_where`);
  *   - presence sources: `person.*` at home (the "at home" level); a person IN A ROOM when a sensor on the device of one
  *     of their `device_trackers` names an area (per-room Bluetooth such as Bermuda: `sensor.<phone>_area`); occupancy
- *     without identity (`binary_sensor` occupancy / presence / motion, on) is "someone" in its area.
- * A snapshot is who is home and, for the rooms that have a voice point, who is there; `impulses(prev, next)` is what
- * changed, as presence impulses (an arrival, a person who left, someone in an empty room).
+ *     without identity (`binary_sensor` occupancy / presence / motion, on) is "someone" in its area;
+ *   - busy (opt-in, `useBusy`): a person is busy when a sensor of the companion app on one of their phones says so — a
+ *     call (Android `phone_state`: ringing / off-hook), do-not-disturb (Android `dnd_sensor`), a Focus (iOS `focus`).
+ *     The sensors are known by the entity registry (platform `mobile_app`, the sensor's key at the end of the
+ *     unique_id), not by their entity id, which can be renamed. A person with none of them has no busy signal.
+ * A snapshot is who is home, who is busy and, for the rooms that have a voice point, who is there; `impulses(prev,
+ * next)` is what changed, as presence impulses (an arrival, a person who left, someone in an empty room, a person busy
+ * or no longer busy).
  */
 
 export interface HaState {
@@ -26,7 +31,7 @@ export interface HaState {
 export interface HaRegistries {
   areas: Array<{ area_id: string; name: string; aliases?: string[] }>;
   devices: Array<{ id: string; area_id: string | null; name?: string | null; name_by_user?: string | null }>;
-  entities: Array<{ entity_id: string; device_id: string | null; area_id: string | null }>;
+  entities: Array<{ entity_id: string; device_id: string | null; area_id: string | null; platform?: string | null; unique_id?: string | null }>;
 }
 
 export interface VoicePoint {
@@ -41,6 +46,8 @@ export interface Snapshot {
   home: Set<string>;
   /** Rooms with a voice point and someone in them: the people recognised there, and how many it cannot name. */
   rooms: Map<string, { people: Set<string>; someone: number }>;
+  /** `person.*` entities busy now and present (at home or in a room): only with the busy signals on. */
+  busy?: Set<string>;
 }
 
 export interface Impulse {
@@ -51,9 +58,17 @@ export interface Impulse {
   people: string[];
   someone?: number;
   left?: boolean;
+  /** One person busy (true) or no longer busy (false, only after a true); absent = nothing said about it. */
+  busy?: boolean;
 }
 
 const OCCUPANCY = new Set(['occupancy', 'presence', 'motion']);
+/** The companion app's sensors that say a person is busy (the key their unique_id ends with): the busy states. */
+const BUSY_SENSORS: Array<{ domain: string; key: string; busy: (state: string) => boolean }> = [
+  { domain: 'sensor', key: 'phone_state', busy: (v) => v === 'ringing' || v === 'offhook' },
+  { domain: 'sensor', key: 'dnd_sensor', busy: (v) => v === 'priority_only' || v === 'total_silence' || v === 'alarms_only' },
+  { domain: 'binary_sensor', key: 'focus', busy: (v) => v === 'on' },
+];
 const fold = (s: string) => s.trim().toLocaleLowerCase().normalize('NFKD').replace(/\p{M}/gu, '').replace(/[\s_-]+/g, ' ');
 
 export class HaModel {
@@ -64,6 +79,14 @@ export class HaModel {
   private deviceEntities = new Map<string, string[]>();
   private deviceNames = new Map<string, string>();
   private states = new Map<string, HaState>();
+  /** The busy sensors (entity id → which), by device. */
+  private busySensors = new Map<string, Array<{ entityId: string; busy: (state: string) => boolean }>>();
+  private busyOn = false;
+
+  /** Whether the snapshot reads who is busy (the admin's switch). */
+  useBusy(on: boolean): void {
+    this.busyOn = on;
+  }
 
   setRegistries(r: HaRegistries): void {
     this.areas = new Map(r.areas.map((a) => [a.area_id, a.name]));
@@ -74,7 +97,11 @@ export class HaModel {
     this.entityArea = new Map();
     this.entityDevice = new Map();
     this.deviceEntities = new Map();
+    this.busySensors = new Map();
     for (const e of r.entities) {
+      const sensor = e.platform === 'mobile_app' && e.device_id && e.unique_id
+        ? BUSY_SENSORS.find((b) => e.entity_id.startsWith(`${b.domain}.`) && String(e.unique_id).endsWith(`_${b.key}`)) : undefined;
+      if (sensor) this.busySensors.set(e.device_id!, [...(this.busySensors.get(e.device_id!) ?? []), { entityId: e.entity_id, busy: sensor.busy }]);
       const area = e.area_id ?? (e.device_id ? deviceArea.get(e.device_id) : null);
       if (area) this.entityArea.set(e.entity_id, area);
       if (e.device_id) {
@@ -157,6 +184,19 @@ export class HaModel {
     return null;
   }
 
+  /** Whether a sensor of the companion app on one of the person's phones says they are busy now. */
+  personBusy(person: string): boolean {
+    const trackers = this.states.get(person)?.attributes?.device_trackers;
+    for (const tracker of Array.isArray(trackers) ? trackers : []) {
+      const device = this.entityDevice.get(String(tracker));
+      for (const s of device ? this.busySensors.get(device) ?? [] : []) {
+        const state = this.states.get(s.entityId)?.state;
+        if (state && s.busy(state)) return true;
+      }
+    }
+    return false;
+  }
+
   snapshot(): Snapshot {
     const voiceAreas = new Set(this.voicePoints().map((p) => p.areaId));
     const home = new Set<string>();
@@ -174,13 +214,33 @@ export class HaModel {
     }
     // Occupancy says someone is there: nobody more when the people there are already known.
     for (const r of rooms.values()) if (r.people.size) r.someone = 0;
-    return { home, rooms };
+    if (!this.busyOn) return { home, rooms };
+    const placed = new Set([...home, ...[...rooms.values()].flatMap((r) => [...r.people])]);
+    return { home, rooms, busy: new Set([...placed].filter((p) => this.personBusy(p))) };
   }
 }
 
-/** What changed between two snapshots, as presence impulses. */
+/** Where a person is in a snapshot, as an impulse's place: their room with a voice point, else home; null when away. */
+function placeOf(s: Snapshot, person: string): Pick<Impulse, 'channel' | 'areaId'> | null {
+  for (const [areaId, r] of s.rooms) if (r.people.has(person)) return { channel: 'voice', areaId };
+  return s.home.has(person) ? { channel: 'home' } : null;
+}
+
+/**
+ * What changed between two snapshots, as presence impulses. A person who became busy is said first, on their own (busy
+ * is theirs, not the others' in the room), where they are; no longer busy (false) once, only after a true and while
+ * still present — a person who left ends their presence, and the busy with it.
+ */
 export function impulses(prev: Snapshot, next: Snapshot): Impulse[] {
   const out: Impulse[] = [];
+  for (const p of next.busy ?? []) {
+    const place = placeOf(next, p);
+    if (place && !prev.busy?.has(p)) out.push({ ...place, people: [p], busy: true });
+  }
+  for (const p of prev.busy ?? []) {
+    const place = placeOf(next, p);
+    if (place && !next.busy?.has(p)) out.push({ ...place, people: [p], busy: false });
+  }
   for (const p of next.home) if (!prev.home.has(p)) out.push({ channel: 'home', people: [p] });
   for (const p of prev.home) if (!next.home.has(p)) out.push({ channel: 'home', people: [p], left: true });
   for (const [areaId, r] of next.rooms) {

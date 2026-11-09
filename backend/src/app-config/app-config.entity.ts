@@ -331,6 +331,13 @@ export class AppConfigEntity {
   @Column({ type: 'boolean', default: false })
   haPresenceEnabled: boolean;
 
+  /**
+   * With the presence on: a person whose phone says they are busy (a call, do-not-disturb, a Focus — the companion
+   * app's sensors) is told to the memory as busy. Default off.
+   */
+  @Column({ type: 'boolean', default: false })
+  haBusyEnabled: boolean;
+
   /** Speak the memory's initiatives on Home Assistant's voice satellites (the one in the person's room). Default off. */
   @Column({ type: 'boolean', default: false })
   haVoiceEnabled: boolean;

@@ -14,9 +14,11 @@ import { McpBridgeGateway } from './mcp-bridge.gateway';
 import { AuditModule } from '../audit/audit.module';
 import { TeamsModule } from '../teams/teams.module';
 import { FilesModule } from '../files/files.module';
+import { ToolFiltersModule } from '../tool-filters/tool-filters.module';
 
 @Module({
   imports: [
+    ToolFiltersModule,
     AuditModule,
     TeamsModule,
     FilesModule,         // files returned by MCP tools (images, audio, resources) become Files

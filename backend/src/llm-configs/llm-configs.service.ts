@@ -11,6 +11,7 @@ import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { LlmConfigEntity } from './llm-config.entity';
 import { LlmProvider } from '../app-config/app-config.entity';
 import { encrypt, decrypt } from '../custom-tools/crypto.utils';
+import { ReasoningEffort, reasoningModelKwargs } from './reasoning-params';
 import { AuditService } from '../audit/audit.service';
 import { LlmMetricsService } from '../usage/llm-metrics.service';
 import { LlmDispatcherService } from '../usage/llm-dispatcher.service';
@@ -24,13 +25,14 @@ export interface CreateLlmConfigDto {
   baseUrl?: string | null;
   maxTokens?: number | null;
   maxConcurrency?: number | null;
+  reasoningEffort?: ReasoningEffort | null;
   inputPricePerM?: number | null;
   outputPricePerM?: number | null;
   cacheReadPricePerM?: number | null;
   cacheWritePricePerM?: number | null;
 }
 
-export interface UpdateLlmConfigDto extends Partial<CreateLlmConfigDto> {}
+export type UpdateLlmConfigDto = Partial<CreateLlmConfigDto>;
 
 /** DTO returned by the API — apiKey masked with hasApiKey */
 export interface LlmConfigDto {
@@ -42,6 +44,7 @@ export interface LlmConfigDto {
   baseUrl: string | null;
   maxTokens: number | null;
   maxConcurrency: number | null;
+  reasoningEffort: ReasoningEffort | null;
   inputPricePerM: number | null;
   outputPricePerM: number | null;
   cacheReadPricePerM: number | null;
@@ -51,6 +54,19 @@ export interface LlmConfigDto {
   isVision: boolean;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/**
+ * Public view of a config for model pickers (agents, flows, tools, data
+ * sources): readable by every user, so no key, URL or prices.
+ */
+export interface LlmConfigOptionDto {
+  id: string;
+  name: string;
+  provider: LlmProvider;
+  model: string | null;
+  isDefault: boolean;
+  isSummarizer: boolean;
 }
 
 const PROVIDER_DEFAULTS: Record<LlmProvider, { model: string }> = {
@@ -79,6 +95,7 @@ function toDto(e: LlmConfigEntity): LlmConfigDto {
     baseUrl:    e.baseUrl,
     maxTokens:  e.maxTokens,
     maxConcurrency: e.maxConcurrency,
+    reasoningEffort: e.reasoningEffort ?? null,
     inputPricePerM:  e.inputPricePerM != null ? Number(e.inputPricePerM) : null,
     outputPricePerM: e.outputPricePerM != null ? Number(e.outputPricePerM) : null,
     cacheReadPricePerM:  e.cacheReadPricePerM != null ? Number(e.cacheReadPricePerM) : null,
@@ -110,6 +127,15 @@ export class LlmConfigsService {
     return rows.map(toDto);
   }
 
+  /** Configs as model-picker options (see LlmConfigOptionDto). */
+  async listOptions(): Promise<LlmConfigOptionDto[]> {
+    const rows = await this.repo.find({ order: { isDefault: 'DESC', createdAt: 'ASC' } });
+    return rows.map((e) => ({
+      id: e.id, name: e.name, provider: e.provider, model: e.model,
+      isDefault: e.isDefault, isSummarizer: e.isSummarizer,
+    }));
+  }
+
   async findOne(id: string): Promise<LlmConfigEntity> {
     const row = await this.repo.findOne({ where: { id } });
     if (!row) throw new NotFoundException(
@@ -133,6 +159,7 @@ export class LlmConfigsService {
       baseUrl:   dto.baseUrl?.trim() || null,
       maxTokens: dto.maxTokens ?? null,
       maxConcurrency: dto.maxConcurrency ?? null,
+      reasoningEffort: dto.reasoningEffort ?? null,
       inputPricePerM:  dto.inputPricePerM ?? null,
       outputPricePerM: dto.outputPricePerM ?? null,
       cacheReadPricePerM:  dto.cacheReadPricePerM ?? null,
@@ -161,6 +188,7 @@ export class LlmConfigsService {
     if (dto.baseUrl !== undefined)   entity.baseUrl  = dto.baseUrl?.trim() || null;
     if (dto.maxTokens !== undefined) entity.maxTokens = dto.maxTokens ?? null;
     if (dto.maxConcurrency !== undefined) entity.maxConcurrency = dto.maxConcurrency ?? null;
+    if (dto.reasoningEffort !== undefined) entity.reasoningEffort = dto.reasoningEffort ?? null;
     if (dto.inputPricePerM !== undefined)  entity.inputPricePerM  = dto.inputPricePerM ?? null;
     if (dto.outputPricePerM !== undefined) entity.outputPricePerM = dto.outputPricePerM ?? null;
     if (dto.cacheReadPricePerM !== undefined)  entity.cacheReadPricePerM  = dto.cacheReadPricePerM ?? null;
@@ -403,6 +431,11 @@ export class LlmConfigsService {
       ...(overrides?.streaming   !== undefined ? { streaming:  overrides.streaming  } : {}),
     };
 
+    // Reasoning setting as extra body fields (OpenAI-style providers only): empty
+    // when unset, so the request is unchanged.
+    const reasoningKw = reasoningModelKwargs(provider, entity.reasoningEffort);
+    const reasoningOpt = Object.keys(reasoningKw).length ? { modelKwargs: reasoningKw } : {};
+
     const CLOUD_FIXED: LlmProvider[] = ['anthropic', 'openai', 'gemini'];
     const baseUrl = CLOUD_FIXED.includes(provider)
       ? undefined
@@ -424,7 +457,7 @@ export class LlmConfigsService {
         const { ChatOpenAI } = require('@langchain/openai');
         return new ChatOpenAI({
           apiKey: apiKey ?? '',
-          model: modelName, streaming: true, maxTokens, ...tempOpt, ...common,
+          model: modelName, streaming: true, maxTokens, ...tempOpt, ...common, ...reasoningOpt,
         });
       }
       case 'gemini': {
@@ -470,7 +503,7 @@ export class LlmConfigsService {
         };
         return new ChatOpenAI({
           apiKey: apiKey ?? '',
-          model: modelName, streaming: true, maxTokens, ...tempOpt, ...common,
+          model: modelName, streaming: true, maxTokens, ...tempOpt, ...common, ...reasoningOpt,
           configuration: { baseURL: baseUrl ?? 'https://api.deepseek.com/v1', fetch: fetchWithReasoning },
         });
       }
@@ -479,7 +512,7 @@ export class LlmConfigsService {
         const { ChatOpenAI } = require('@langchain/openai');
         return new ChatOpenAI({
           apiKey: apiKey ?? 'lm-studio',
-          model: modelName, streaming: true, maxTokens, ...tempOpt, ...common,
+          model: modelName, streaming: true, maxTokens, ...tempOpt, ...common, ...reasoningOpt,
           configuration: { baseURL: baseUrl ?? 'http://localhost:1234/v1' },
         });
       }

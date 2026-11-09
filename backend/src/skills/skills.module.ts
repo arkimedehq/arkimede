@@ -21,9 +21,11 @@ import { AuditModule } from '../audit/audit.module';
 import { FilesModule } from '../files/files.module';
 import { AppConfigModule } from '../app-config/app-config.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { ToolFiltersModule } from '../tool-filters/tool-filters.module';
 
 @Module({
   imports: [
+    ToolFiltersModule,
     TypeOrmModule.forFeature([Skill, SkillScript, SkillProjectAssignment, SkillConfigVar]),
     ConfigModule,
     TeamsModule,

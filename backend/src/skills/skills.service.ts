@@ -63,6 +63,7 @@ import { LlmProviderService } from '../app-config/llm-provider.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { runWithLlmCallContext } from '../usage/llm-call-context';
+import { ToolFilterCleanupService } from '../tool-filters/tool-filter-cleanup.service';
 
 // ─── Internal types ─────────────────────────────────────────────────────────────
 
@@ -158,6 +159,7 @@ export class SkillsService implements OnModuleInit {
     private readonly llmProvider:    LlmProviderService,
     private readonly notifications:  NotificationsService,
     @Optional() private readonly audit?: AuditService,
+    @Optional() private readonly toolFilters?: ToolFilterCleanupService,
   ) {
     this.skillsBase = config.get<string>('SKILLS_BASE_PATH', '/app/skills');
 
@@ -1148,6 +1150,13 @@ export class SkillsService implements OnModuleInit {
 
     await this.skillRepo.remove(skill);
     this.logger.log(`Skill "${skill.name}" deleted (user: ${userId})`);
+    // Its scripts leave the agents' and automations' filters (unless a namesake skill remains).
+    const skillPrefix = (name: string) => `skill_${name.replace(/-/g, '_').toLowerCase()}_`;
+    const remaining = await this.skillRepo.find({ select: { name: true } });
+    await this.toolFilters?.removeSource(`skill:${skill.name}`, {
+      prefix: skillPrefix(skill.name),
+      remaining: remaining.map((s) => skillPrefix(s.name)),
+    });
     // The skill's domains leave the allowlist.
     await this.syncEgress();
     await this.audit?.record({
@@ -2459,7 +2468,7 @@ export class SkillsService implements OnModuleInit {
  * @returns `{ frontmatter, body }` or `null` if the file has no frontmatter.
  */
 function extractFrontmatter(raw: string): { frontmatter: string; body: string } | null {
-  const norm = raw.replace(/^﻿/, '');           // strip any BOM
+  const norm = raw.replace(/^\uFEFF/, '');           // strip any BOM
   if (!/^---[ \t]*\r?\n/.test(norm)) return null;     // must open with ---
   const afterOpen = norm.slice(norm.indexOf('\n') + 1);
   const close = afterOpen.match(/^---[ \t]*$/m);      // closing-only line ---

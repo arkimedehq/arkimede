@@ -12,9 +12,11 @@ import { EmbedModule } from '../embed/embed.module';
 import { VectorDbModule } from '../vector-db/vector-db.module';
 import { AppConfigModule } from '../app-config/app-config.module';
 import { TeamsModule } from '../teams/teams.module';
+import { ToolFiltersModule } from '../tool-filters/tool-filters.module';
 
 @Module({
   imports: [
+    ToolFiltersModule,
     TypeOrmModule.forFeature([CustomTool, ToolSecret]),
     DataSourcesModule,
     // forwardRef on both: VectorDbModule now imports CustomToolsModule (auto

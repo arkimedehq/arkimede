@@ -314,7 +314,7 @@ export class DataSourcesService {
       connectionString = decrypt(ds.encryptedConnectionString);
     } catch (err: any) {
       this.logger.error(`Failed to decrypt connection string for DataSource "${ds.name}": ${err.message}`);
-      throw new Error(`DataSource "${ds.name}": connection string non decifrabile`);
+      throw new Error(`DataSource "${ds.name}": connection string non decifrabile`, { cause: err });
     }
     // Anti-SSRF at run time (re-resolves DNS each run → mitigates rebinding).
     await this.assertConnAllowed(ds.engine, connectionString);
@@ -341,7 +341,7 @@ export class DataSourcesService {
     try {
       connectionString = decrypt(ds.encryptedConnectionString);
     } catch (err: any) {
-      throw new Error(`DataSource "${ds.name}": connection string non decifrabile`);
+      throw new Error(`DataSource "${ds.name}": connection string non decifrabile`, { cause: err });
     }
     // Anti-SSRF at run time (re-resolves DNS each run → mitigates rebinding).
     await this.assertConnAllowed(ds.engine, connectionString);

@@ -15,6 +15,8 @@ import type { StructuredToolInterface } from '@langchain/core/tools';
 export interface ToolSource {
   /** A stable name (also the tools' prefix, e.g. `ha`). */
   readonly name: string;
+  /** How people call it (the agent form's tool picker shows it), e.g. `Home Assistant`. */
+  readonly label?: string;
   /** The tools this user may use now; [] when the integration is off, unreachable or not for them. */
   loadForUser(userId: string): Promise<StructuredToolInterface[]>;
   /** A short line of live context for the turn (who is home…), or null; it goes in the per-request blocks. */
@@ -50,14 +52,19 @@ export class ToolSourcesRegistry {
 
   /** Every source's tools for this user; a source that fails gives none (logged), the others still load. */
   async loadForUser(userId: string): Promise<StructuredToolInterface[]> {
-    const lists = await Promise.all([...this.sources.values()].map(async (s) => {
+    return (await this.loadGroupsForUser(userId)).flatMap((g) => g.tools);
+  }
+
+  /** The same tools, by source (name, label): the tool picker offers each source as a group. */
+  async loadGroupsForUser(userId: string): Promise<Array<{ name: string; label: string; tools: StructuredToolInterface[] }>> {
+    return Promise.all([...this.sources.values()].map(async (s) => {
+      let tools: StructuredToolInterface[] = [];
       try {
-        return await s.loadForUser(userId);
+        tools = await s.loadForUser(userId);
       } catch (err) {
         this.logger.warn(`tool source "${s.name}" failed for user ${userId}: ${(err as Error).message}`);
-        return [];
       }
+      return { name: s.name, label: s.label ?? s.name, tools };
     }));
-    return lists.flat();
   }
 }

@@ -50,6 +50,12 @@ import { onRecordareSettingsChange, recordareClient } from './recordare.config';
 
 const POLL_MS = Number(process.env.RECORDARE_INITIATIVES_POLL_MS) || 15 * 60_000;
 const FIRST_POLL_MS = 30_000;
+/**
+ * How long a question waits for an answer in its chat before it counts as ignored (Recordare D55 F4: what timing v1
+ * learns from), by the channel it was asked on: a satellite listens for a reply at once; a message or the chat are read
+ * later. A reminder said is not checked: silence after it is normal.
+ */
+export const ANSWER_WINDOW_MS: Record<string, number> = { voice: 10 * 60_000, messaging: 6 * 3_600_000, chat: 12 * 3_600_000 };
 /** A presence impulse at most this often per user (tabs, reconnects). */
 const PRESENCE_EVERY_MS = 10 * 60_000;
 /** A scheduled task within this of the initiative's time, sharing words with it, is the same reminder. */
@@ -71,6 +77,12 @@ export interface VoiceChannel {
 export interface PushChannel {
   /** Sends `message` to the phone of `person` (a `homeassistant` address, `person.x`); true when sent. */
   push(person: string, message: string, title?: string): Promise<boolean>;
+}
+
+/** Who is busy now (Home Assistant: a call, do-not-disturb, a Focus on the person's phone). */
+export interface BusySignal {
+  /** Whether `person` (a `homeassistant` address, `person.x`) is busy now. */
+  busy(person: string): boolean;
 }
 
 /** Words of at least four letters, any script, folded: enough to tell two reminders about the same thing. */
@@ -100,6 +112,7 @@ export class RecordareInitiativesService implements OnModuleInit, OnModuleDestro
   private current: { client: RecordareClient; inbox: InitiativeInbox } | null = null;
   private voice: VoiceChannel | null = null;
   private pushChannel: PushChannel | null = null;
+  private busySignal: BusySignal | null = null;
   /** The room a presence impulse is about, while Recordare answers it (what it gives is said there). */
   private readonly places = new Map<string, string>();
 
@@ -160,14 +173,19 @@ export class RecordareInitiativesService implements OnModuleInit, OnModuleDestro
     return (await this.inbox()?.receive(event)) ?? false;
   }
 
-  /** The user opened Arkimede: tell Recordare they are here (by chat); it may answer with something to say now. */
+  /**
+   * The user opened Arkimede: tell Recordare they are here (by chat); it may answer with something to say now. Busy on
+   * their phone (the user's Home Assistant person), the impulse says so — else nothing is said about it.
+   */
   async onPresence(userId: string, now = Date.now()): Promise<void> {
     const inbox = this.inbox();
     if (!inbox || now - (this.lastPresence.get(userId) ?? 0) < PRESENCE_EVERY_MS) return;
     this.lastPresence.set(userId, now);
     if (!(await this.enabled(userId))) return;
     try {
-      await inbox.presence(userId, { channel: 'chat' });
+      const person = this.busySignal ? await this.ownPerson(userId) : null;
+      const busy = !!person && !!this.busySignal?.busy(person);
+      await inbox.presence(userId, { channel: 'chat', ...(busy ? { busy: true } : {}) });
     } catch (err) {
       this.logger.warn(`Recordare presence failed (user ${userId}): ${(err as Error).message}`);
     }
@@ -176,6 +194,11 @@ export class RecordareInitiativesService implements OnModuleInit, OnModuleDestro
   /** Registers (or removes) the push channel (messaging when no skill reaches the person). */
   setPush(push: PushChannel | null): void {
     this.pushChannel = push;
+  }
+
+  /** Registers (or removes) who tells whether a person is busy. */
+  setBusy(signal: BusySignal | null): void {
+    this.busySignal = signal;
   }
 
   /** Registers (or removes) the voice channel. */
@@ -202,7 +225,40 @@ export class RecordareInitiativesService implements OnModuleInit, OnModuleDestro
 
   /** Lost deliveries: what Recordare pushed to the chat in the last day and Arkimede has not delivered. */
   async pollFeed(now = Date.now()): Promise<number> {
-    return (await this.inbox()?.catchUp(now)) ?? 0;
+    const caught = (await this.inbox()?.catchUp(now)) ?? 0;
+    await this.checkAnswers(now).catch((err: Error) => this.logger.warn(`Recordare answers not checked: ${err.message}`));
+    return caught;
+  }
+
+  /**
+   * Questions nobody answered (Recordare D55 F4): an `ask` delivered by voice, message or chat with no message of the
+   * person in its chat within the channel's window is reported `ignored` — what timing v1 learns from (where and when a
+   * person lets questions go). An answered one is only marked: its `asked` already stands. Each checked once.
+   */
+  async checkAnswers(now = Date.now()): Promise<number> {
+    const client = this.client();
+    if (!client) return 0;
+    const rows: Array<{ id: string; userId: string; createdAt: Date; payload: { chatId?: string; initiativeId?: string; channel?: string } }> =
+      await this.ds.query(
+        `SELECT "id", "userId", "createdAt", "payload" FROM "notifications"
+         WHERE "source" = $1 AND "eventType" = $2 AND "createdAt" > $3 AND "payload"->>'kind' = 'ask' AND "payload"->>'answer' IS NULL`,
+        [CHAT_SOURCE, EVENT_TYPE, new Date(now - 2 * 86_400_000)]);
+    let ignored = 0;
+    for (const r of rows) {
+      const { chatId, initiativeId, channel } = r.payload;
+      if (!chatId || !initiativeId) continue;
+      const [reply] = await this.ds.query(
+        `SELECT 1 FROM "messages" WHERE "chatId" = $1 AND "role" = 'user' AND "createdAt" > $2 LIMIT 1`, [chatId, r.createdAt]);
+      const waited = now - new Date(r.createdAt).getTime();
+      if (!reply && waited < (ANSWER_WINDOW_MS[channel ?? 'chat'] ?? ANSWER_WINDOW_MS.chat)) continue;
+      if (!reply) {
+        await client.reportInitiative(r.userId, initiativeId, 'ignored', { channel: (channel ?? 'chat') as 'chat' | 'messaging' | 'voice' });
+        ignored++;
+      }
+      await this.ds.query(`UPDATE "notifications" SET "payload" = "payload" || $2::jsonb WHERE "id" = $1`,
+        [r.id, JSON.stringify({ answer: reply ? 'answered' : 'ignored' })]);
+    }
+    return ignored;
   }
 
   /**
@@ -218,11 +274,11 @@ export class RecordareInitiativesService implements OnModuleInit, OnModuleDestro
       if (channel === 'messaging') {
         const chatId = await this.sendMessage(userId, i);
         if (chatId === false) continue;
-        await this.record(userId, i, chatId ?? await this.dedicatedChat(userId), false);
+        await this.record(userId, i, chatId ?? await this.dedicatedChat(userId), false, channel);
         return { outcome, channel };
       }
       if (channel === 'chat') {
-        await this.record(userId, i, await this.dedicatedChat(userId), true);
+        await this.record(userId, i, await this.dedicatedChat(userId), true, channel);
         return { outcome, channel };
       }
       if (channel === 'voice') {
@@ -288,7 +344,7 @@ export class RecordareInitiativesService implements OnModuleInit, OnModuleDestro
       return null;
     });
     if (!point) return false;
-    await this.record(userId, i, chatId, false);
+    await this.record(userId, i, chatId, false, 'voice');
     return true;
   }
 
@@ -300,12 +356,13 @@ export class RecordareInitiativesService implements OnModuleInit, OnModuleDestro
   }
 
   /** Writes the delivered initiative in a chat of the user, with its notification (the durable "delivered" record). */
-  private async record(userId: string, i: Initiative, chatId: string, push: boolean): Promise<void> {
+  private async record(userId: string, i: Initiative, chatId: string, push: boolean, channel: 'chat' | 'messaging' | 'voice'): Promise<void> {
     const content = i.text.trim();
     await this.ds.getRepository(Message).save(this.ds.getRepository(Message).create({ chatId, role: 'assistant', content }));
     await this.ds.getRepository(Chat).update(chatId, { unread: true, updatedAt: new Date() });
     const title = `💭 ${APP_NAME}`;
-    const payload = { title, message: content.length > 160 ? `${content.slice(0, 160)}…` : content, chatId, initiativeId: i.id };
+    // The kind and the channel: a question's answer is looked for in this chat (checkAnswers).
+    const payload = { title, message: content.length > 160 ? `${content.slice(0, 160)}…` : content, chatId, initiativeId: i.id, kind: i.kind, channel };
     const notif = await this.notifications.create({ userId, source: CHAT_SOURCE, sourceId: i.id, eventType: EVENT_TYPE, payload });
     if (push) this.gateway.emitToUser(userId, 'notification', { id: notif.id, eventType: EVENT_TYPE, ...payload });
   }
@@ -338,19 +395,30 @@ export class RecordareInitiativesService implements OnModuleInit, OnModuleDestro
    */
   async alreadyScheduled(userId: string, i: Initiative): Promise<boolean> {
     if (i.kind !== 'say') return false;
-    const tasks: Array<{ chatId: string | null; runAt: Date | null; title: string | null; instruction: string; status: string; lastRunAt: Date | null }> =
+    const tasks: Array<{ id: string; chatId: string | null; runAt: Date | null; title: string | null; instruction: string; status: string; lastRunAt: Date | null }> =
       await this.ds.query(
-        `SELECT "chatId", "runAt", "title", "instruction", "status", "lastRunAt" FROM "scheduled_tasks"
+        `SELECT "id", "chatId", "runAt", "title", "instruction", "status", "lastRunAt" FROM "scheduled_tasks"
          WHERE "userId" = $1 AND "scheduleType" = 'scheduled' AND "status" IN ('pending', 'active', 'done')`, [userId]);
     const due = Date.parse(i.dueAt);
     const near = (at: Date | null) => !!at && Math.abs(new Date(at).getTime() - due) <= SAME_TIME_MS;
-    return tasks.some((t) => {
-      if (t.status === 'done' && !near(t.lastRunAt)) return false;
-      const text = `${t.title ?? ''} ${t.instruction}`;
-      if (i.for && !names(text, i.for)) return false;
+    // Why each candidate (a task near the time or from the same chat) did not cover it: logged, so a reminder said twice
+    // can be explained afterwards (Kinox 2026-11-06: the tasks were gone by the next day, the cause could not be told).
+    const rejected: string[] = [];
+    const cover = tasks.find((t) => {
       const sameChat = !!i.source && t.chatId === i.source.conversation;
-      return (sameChat && sharedWords(i.text, text) >= 1) || (near(t.runAt) && sharedWords(i.text, text) >= 2);
+      if (!sameChat && !near(t.runAt)) return false;
+      const text = `${t.title ?? ''} ${t.instruction}`;
+      const why = t.status === 'done' && !near(t.lastRunAt) ? 'already run long before'
+        : i.for && !names(text, i.for) ? `does not name ${i.for.name}`
+        : (sameChat && sharedWords(i.text, text) >= 1) || (near(t.runAt) && sharedWords(i.text, text) >= 2) ? null
+        : 'too few words in common';
+      if (why) rejected.push(`${t.id} (${t.status}): ${why}`);
+      return !why;
     });
+    if (cover) this.logger.log(`initiative ${i.id}: covered by task ${cover.id} (${cover.status}), reported done`);
+    else if (rejected.length) this.logger.log(`initiative ${i.id}: not covered — ${rejected.join('; ')}`);
+    else this.logger.debug(`initiative ${i.id}: no task near its time (${tasks.length} scheduled)`);
+    return !!cover;
   }
 
   private async dedicatedChat(userId: string): Promise<string> {

@@ -12,7 +12,7 @@ export class AddRagExecutorType1778900000012 implements MigrationInterface {
     );
   }
 
-  public async down(queryRunner: QueryRunner): Promise<void> {
+  public async down(_queryRunner: QueryRunner): Promise<void> {
     // PostgreSQL does not support removing values from an enum.
     // To roll back one must recreate the type: a destructive operation,
     // left as an intentional no-op.

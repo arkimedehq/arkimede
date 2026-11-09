@@ -32,7 +32,7 @@ import {
   DocumentManifest, DocumentCollection, isDocumentManifest, mergeDocumentManifest,
 } from './document-manifest.types';
 import {
-  KeyspaceManifest, KeyPattern, isKeyspaceManifest, mergeKeyspaceManifest,
+  KeyPattern, isKeyspaceManifest, mergeKeyspaceManifest,
 } from './keyspace-manifest.types';
 
 /** Tables per LLM call in the comment batch. */

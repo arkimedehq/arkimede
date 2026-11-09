@@ -18,9 +18,11 @@ import { SkillsModule } from '../skills/skills.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { Chat } from '../chats/chats.entity';
 import { Message } from '../messages/messages.entity';
+import { ToolFiltersModule } from '../tool-filters/tool-filters.module';
 
 @Module({
   imports: [
+    ToolFiltersModule,
     // Chat + Message: consegna dell'esito del run come messaggio in chat (repo diretti → no cicli).
     TypeOrmModule.forFeature([Flow, FlowRun, Chat, Message]),
     CustomToolsModule,   // CustomToolsService (nodo tool)

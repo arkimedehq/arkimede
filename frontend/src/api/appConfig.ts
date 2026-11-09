@@ -76,6 +76,7 @@ export interface HomeAssistantConfig {
   haUrl: string | null;
   hasHaToken: boolean;
   haPresenceEnabled: boolean;
+  haBusyEnabled:     boolean;
   haVoiceEnabled:    boolean;
   haToolsEnabled:    boolean;
   haToolsUserIds:    string[] | null;
@@ -90,6 +91,7 @@ export interface HomeAssistantConfig {
     voicePoints: Array<{ entityId: string; area: string; listens: boolean }>;
     home: string[];
     rooms: Array<{ area: string; people: string[]; someone: number }>;
+    busy: string[];
     persons: Array<{ entityId: string; name: string }>;
     exposed: number;
   };
@@ -99,6 +101,7 @@ export interface UpdateHomeAssistantPayload {
   haUrl?: string | null;
   haToken?: string | null;
   haPresenceEnabled?: boolean;
+  haBusyEnabled?:     boolean;
   haVoiceEnabled?:    boolean;
   haToolsEnabled?:    boolean;
   haToolsUserIds?:    string[] | null;

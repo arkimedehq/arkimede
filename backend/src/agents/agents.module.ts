@@ -18,9 +18,11 @@ import { SkillsModule } from '../skills/skills.module';
 import { FlowsModule } from '../flows/flows.module';
 import { LlmConfigsModule } from '../llm-configs/llm-configs.module';
 import { AgentMemoryModule } from '../agent-memory/agent-memory.module';
+import { ToolFiltersModule } from '../tool-filters/tool-filters.module';
 
 @Module({
   imports: [
+    ToolFiltersModule,
     TypeOrmModule.forFeature([Agent, AgentTeam, AgentTeamMember]),
     TeamsModule,
     CustomToolsModule,   // agent tools

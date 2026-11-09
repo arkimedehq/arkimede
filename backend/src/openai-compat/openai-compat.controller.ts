@@ -122,7 +122,7 @@ export class OpenAiCompatController {
     }
 
     let opts: StreamResponseOptions;
-    let modelId = (body?.model || DEFAULT_MODEL_ID).trim();
+    const modelId = (body?.model || DEFAULT_MODEL_ID).trim();
     try {
       opts = await this.resolveModelOptions(modelId, user.id);
     } catch {

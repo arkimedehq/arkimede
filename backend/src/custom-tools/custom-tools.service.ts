@@ -44,6 +44,7 @@ import { TeamsService } from '../teams/teams.service';
 import { AuditService } from '../audit/audit.service';
 import { In } from 'typeorm';
 import { SystemMessage, HumanMessage } from '@langchain/core/messages';
+import { ToolFilterCleanupService } from '../tool-filters/tool-filter-cleanup.service';
 
 /** Regex to validate tool names: snake_case, starts with a lowercase letter */
 const VALID_TOOL_NAME = /^[a-z][a-z0-9_]{1,63}$/;
@@ -92,6 +93,7 @@ export class CustomToolsService {
     @Inject(TeamsService)
     private readonly teamsService: TeamsService,
     @Optional() private readonly audit?: AuditService,
+    @Optional() private readonly toolFilters?: ToolFilterCleanupService,
   ) {}
 
   // ── Read for the agent ──────────────────────────────────────────────────────
@@ -388,6 +390,9 @@ export class CustomToolsService {
     const removedId = tool.id;
     await this.toolRepo.remove(tool);
     this.logger.log(`Custom tool deleted: "${tool.name}" (user: ${userId})`);
+    // Out of the agents' and automations' filters, unless a namesake tool (another scope) remains.
+    const namesakes = await this.toolRepo.find({ where: { name: tool.name }, select: { name: true } });
+    await this.toolFilters?.removeSource(`tool:${tool.name}`, { names: [tool.name], remaining: namesakes.map((t) => t.name) });
     await this.audit?.record({
       actorId: userId,
       action: 'customtool.delete',

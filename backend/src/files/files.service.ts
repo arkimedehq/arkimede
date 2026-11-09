@@ -32,7 +32,6 @@ import * as fs from 'fs';
 import { basename, extname, join, relative, resolve, sep } from 'path';
 import { TeamsService } from '../teams/teams.service';
 // pdf-parse uses module.exports = fn, require() avoids the ES module namespace issue
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const pdfParse = require('pdf-parse');
 import * as mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
@@ -321,7 +320,7 @@ export class FilesService {
   async saveToolFile(userId: string, name: string, mimeType: string, data: Buffer): Promise<File> {
     const dir = resolve(join(this.uploadDir, 'tool-files', userId));
     await fs.promises.mkdir(dir, { recursive: true });
-    const safeName = basename(name || 'file').replace(/[^\w.\-]+/g, '_').replace(/^[_.]+/, '') || 'file';
+    const safeName = basename(name || 'file').replace(/[^\w.-]+/g, '_').replace(/^[_.]+/, '') || 'file';
     const storagePath = join(dir, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`);
     await fs.promises.writeFile(storagePath, data);
     return this.repo.save(this.repo.create({
@@ -362,7 +361,7 @@ export class FilesService {
     // Stage under the (sanitized) original name, not the storage uuid: scripts
     // see a meaningful filename and derive readable output names from it.
     const safeName = (file.originalName ?? '')
-      .replace(/[^\w.\-]+/g, '_')
+      .replace(/[^\w.-]+/g, '_')
       .replace(/^[_.]+/, '');
     return { hostPath: resolve(file.storagePath), name: safeName || basename(file.storagePath) };
   }

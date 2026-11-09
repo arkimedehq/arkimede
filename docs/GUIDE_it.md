@@ -1158,7 +1158,7 @@ l'eccedenza oltre il budget viene buttata via dal trim invece che riassunta.
 | `historyCompactionThreshold` | 80 % | Soglia di scatto della compaction; dopo lo scatto restano verbatim gli ultimi ~40% del budget |
 
 Il limite di passi dell'agente (chiamate LLM ↔ tool per un singolo messaggio) è
-configurabile via env `AGENT_RECURSION_LIMIT` nel `.env` del backend (default 50 step ≈ 25
+configurabile via env `AGENT_RECURSION_LIMIT` nel `.env` del backend (default 100 step ≈ 50
 giri LLM, minimo applicato 10): superarlo produce l'errore `GraphRecursionError` — di norma
 indica che l'agente sta cercando dati che non esistono o che gli manca contesto (vedi
 `DATAFLOW_AGENT.md` per il flusso completo con diagrammi).

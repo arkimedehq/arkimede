@@ -515,14 +515,14 @@ function selectSideEffect(stmt: string): 'fs' | 'into' | null {
  * FROM/JOIN/INTO/UPDATE). Normalizes: removes quoting, drops the schema (`db.tab`→`tab`)
  * and returns lowercase. Used for enforcing the `deny` tables.
  */
-const TABLE_REF_RE = /\b(?:from|join|into|update)\s+([`"\[\]\w.$]+)/gi;
+const TABLE_REF_RE = /\b(?:from|join|into|update)\s+([`"[\]\w.$]+)/gi;
 export function referencedTables(query: string): string[] {
   const s = stripSqlComments(query);
   const out = new Set<string>();
   let m: RegExpExecArray | null;
   TABLE_REF_RE.lastIndex = 0;
   while ((m = TABLE_REF_RE.exec(s)) !== null) {
-    let name = m[1].replace(/[`"\[\]]/g, '');
+    let name = m[1].replace(/[`"[\]]/g, '');
     const dot = name.lastIndexOf('.');
     if (dot >= 0) name = name.slice(dot + 1);
     if (name) out.add(name.toLowerCase());

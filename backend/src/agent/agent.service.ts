@@ -20,6 +20,7 @@
  *   - streamResponse()  → SSE/streaming for the chat interface (progressive response)
  *   - invoke()          → Synchronous response (used internally or for tests)
  */
+import { ActionReplyGate, isActionTool, withReplyArg } from './action-replies';
 import { ToolSourcesRegistry } from '../tool-sources/tool-sources.registry';
 import {forwardRef, Inject, Injectable, Logger, OnModuleInit, Optional} from '@nestjs/common';
 import {InjectRepository} from '@nestjs/typeorm';
@@ -44,7 +45,7 @@ import {FeedbackService} from '../feedback/feedback.service';
 import {FlowsService} from '../flows/flows.service';
 import {
   GET_CURRENT_DATETIME_DESC, languageLine, summaryBlock,
-  feedbackBlock, nowBlock, summarizerPrompt,
+  feedbackBlock, nowBlock, summarizerPrompt, actionRepliesBlock,
 } from '../prompts/prompts';
 import {MultiAgentService} from '../agents/multi-agent.service';
 import {SchedulingService} from '../scheduling/scheduling.service';
@@ -93,6 +94,11 @@ export interface StreamResponseOptions {
    * all, the memory's own included, and no live context of the home (who is in); the memory's context stays.
    */
   textOnly?: boolean;
+  /**
+   * Agent.actionReplies: a last step of successful action tools ends the turn with the reply the model wrote with
+   * the calls, no extra model call (agent/action-replies.ts). The text of each step is held until the step is known.
+   */
+  actionReplies?: boolean;
 }
 
 export type AgentProgressEvent =
@@ -121,12 +127,12 @@ export class AgentService implements OnModuleInit {
 
   /**
    * LangGraph graph step limit (library default: 25). With createReactAgent
-   * each round consumes 2 steps (agent node + tools node), so 50 ≈ 25 LLM calls:
+   * each round consumes 2 steps (agent node + tools node), so 100 ≈ 50 LLM calls:
    * enough for long DB/tool explorations without infinite loops.
    * Override via env `AGENT_RECURSION_LIMIT` (minimum 10 so as not to break every run).
    */
   private static readonly AGENT_RECURSION_LIMIT =
-    Math.max(10, parseInt(process.env.AGENT_RECURSION_LIMIT ?? '', 10) || 50);
+    Math.max(10, parseInt(process.env.AGENT_RECURSION_LIMIT ?? '', 10) || 100);
 
   /**
    * Cap (in characters) on the output of each tool-call re-injected into the history
@@ -238,7 +244,11 @@ export class AgentService implements OnModuleInit {
     // Words only: the history's tool calls are not replayed (no tool is defined for this turn, and some providers refuse
     // a tool call in the history without one — Anthropic).
     if (opts?.textOnly) history = history.map(({ toolCalls: _omit, ...m }) => m as Message);
-    const { agent, contextBreakdown, effectiveMaxHistoryTokens, model, effectiveHistory, provider, modelName } = await this.resolveAgent(userId, projectId, userInput, history, chatId, opts?.toolOverride, opts?.agentPromptOverride, opts?.llmConfigId, opts?.memoryContext, conversationId, opts?.textOnly);
+    const { agent, contextBreakdown, effectiveMaxHistoryTokens, model, effectiveHistory, provider, modelName, actionTools } = await this.resolveAgent(userId, projectId, userInput, history, chatId, opts?.toolOverride, opts?.agentPromptOverride, opts?.llmConfigId, opts?.memoryContext, conversationId, opts?.textOnly, opts?.actionReplies);
+    // Action replies: only when the option is on and the turn has action tools (else the stream is untouched).
+    const gate = actionTools?.size ? new ActionReplyGate(actionTools) : null;
+    const emit = gate ? (chunk: string) => gate.text(chunk) : onChunk;
+    let actionReply = false;
     const messages = await this.buildMessages(userInput, effectiveHistory, attachments, inlineContents, attachmentBlocks, isReasoning, effectiveMaxHistoryTokens, model, provider);
 
     // ── Context breakdown log ─────────────────────────────────────────────────
@@ -336,8 +346,10 @@ export class AgentService implements OnModuleInit {
         // Accumulate streamed tool-call argument deltas (see toolArgsAcc above).
         const tcChunks = (message as any).tool_call_chunks as
           Array<{ name?: string; args?: string; id?: string; index?: number }> | undefined;
+        if (message._getType() !== 'tool') gate?.modelChunk();
         if (tcChunks?.length) {
           for (const c of tcChunks) {
+            gate?.toolCall(c.id);
             const key = c.index ?? c.id ?? 0;
             const acc = toolArgsAcc.get(key) ?? { args: '' };
             if (c.id) acc.id = c.id;
@@ -356,6 +368,8 @@ export class AgentService implements OnModuleInit {
         // If the onToolResult callback is present, we invoke it before skipping
         // (used e.g. by the SSE controller to emit 'file' events to the daemon clients).
         if (message._getType() === 'tool') {
+          // The call's arguments (also the action reply's, below); consumed once per call.
+          const input = takeToolArgs((message as any).tool_call_id);
           if (onToolResult) {
             const toolName = (message as any).name ?? '';
             // status: 'error' when the tool threw an exception (handled by LangGraph),
@@ -366,8 +380,16 @@ export class AgentService implements OnModuleInit {
               const raw = typeof message.content === 'string' ? message.content : JSON.stringify(message.content);
               result = JSON.parse(raw);
             } catch { result = message.content; }
-            const input = takeToolArgs((message as any).tool_call_id);
             onToolResult(toolName, result, status, input);
+          }
+          if (gate) {
+            const done = gate.toolResult((message as any).tool_call_id, (message as any).name ?? '', message.content, (message as any).status, input);
+            if (done) {
+              // The step's actions all worked: the reply written with them is the answer — no model call to say so.
+              onChunk(done.reply);
+              actionReply = true;
+              break;
+            }
           }
           continue;
         }
@@ -384,11 +406,11 @@ export class AgentService implements OnModuleInit {
           progress({ type: 'text' });
         }
         if (typeof message.content === 'string') {
-          if (message.content) onChunk(message.content);
+          if (message.content) emit(message.content);
         } else if (Array.isArray(message.content)) {
           for (const block of message.content) {
             if (block.type === 'text' && block.text) {
-              onChunk(block.text);
+              emit(block.text);
             } else if (block.type === 'tool_use') {
               // Anthropic format: tool call as a content block
               lastToolCalled = block.name;
@@ -404,6 +426,7 @@ export class AgentService implements OnModuleInit {
           const tcs = (message as any).tool_calls as Array<{ name: string; args?: any }> | undefined;
           if (tcs?.length) {
             for (const tc of tcs) {
+              gate?.toolCall((tc as any).id);
               if (tc.name) {
                 lastToolCalled = tc.name;
                 onToolCall({ name: tc.name, input: tc.args ?? {} });
@@ -435,6 +458,12 @@ export class AgentService implements OnModuleInit {
         }
       }
       })); // end runWithLlmCallContext / withAgentSpan
+      // The final step's answer, held while the step could still end in action calls.
+      if (gate && !actionReply) {
+        const rest = gate.flush();
+        if (rest) onChunk(rest);
+      }
+      if (actionReply) this.logger.log(`Action reply: the turn ended on its actions (${userId})`);
     } catch (err: any) {
       // AbortError = intentional interruption by the client → not an error
       if (err?.name === 'AbortError' || signal?.aborted) {
@@ -495,20 +524,20 @@ export class AgentService implements OnModuleInit {
   /**
    * Catalog of the tools available to a user, grouped by source, with the REAL
    * tool names (as the agent tool filter matches them) and a per-source wildcard
-   * ("mcp_home_assistant_*", "skill_knx_*"). Powers the agent-form tool picker
+   * ("mcp_home_assistant_*", "skill_knx_*", "ha_*" for a native integration). Powers the agent-form tool picker
    * so nobody has to hand-type the naming convention. Loads every source
    * (flatOnly=false → includes tools not injected into the flat chat context).
    */
   async buildToolCatalog(userId: string, projectId?: string): Promise<{
     groups: Array<{
-      source: 'mcp' | 'skill' | 'flow' | 'agent' | 'custom';
+      source: 'mcp' | 'skill' | 'integration' | 'flow' | 'agent' | 'custom';
       label: string;
       wildcard: string | null;
       tools: Array<{ name: string; description: string }>;
     }>;
   }> {
     const opts = { flatOnly: false };
-    const [customTools, mcpTools, skillTools, flowTools, agentTools, mcpServers, skills] =
+    const [customTools, mcpTools, skillTools, flowTools, agentTools, mcpServers, skills, nativeGroups] =
       await Promise.all([
         this.customToolsService.loadToolsForUser(userId, projectId, opts),
         this.mcpServersService.loadToolsForUser(userId, opts),
@@ -517,6 +546,7 @@ export class AgentService implements OnModuleInit {
         this.multiAgentService.loadToolsForUser(userId, projectId),
         this.mcpServersService.findAll(userId),
         this.skillsService.findAll(userId),
+        this.nativeTools.loadGroupsForUser(userId),
       ]);
 
     const short = (d: unknown): string => {
@@ -537,7 +567,7 @@ export class AgentService implements OnModuleInit {
       label: s.name,
     }));
 
-    type Group = { source: 'mcp' | 'skill' | 'flow' | 'agent' | 'custom'; label: string; wildcard: string | null; tools: Array<{ name: string; description: string }> };
+    type Group = { source: 'mcp' | 'skill' | 'integration' | 'flow' | 'agent' | 'custom'; label: string; wildcard: string | null; tools: Array<{ name: string; description: string }> };
     const groups: Group[] = [];
     const byWildcard = new Map<string, Group>();
 
@@ -563,6 +593,11 @@ export class AgentService implements OnModuleInit {
 
     assignGrouped(mcpTools, 'mcp', mcpPrefixes);
     assignGrouped(skillTools, 'skill', skillPrefixes);
+
+    // Native integrations (Home Assistant…): their tools carry the source's name as prefix ("ha_*").
+    for (const g of nativeGroups) {
+      if (g.tools.length) groups.push({ source: 'integration', label: g.label, wildcard: `${g.name}_*`, tools: g.tools.map(toEntry) });
+    }
 
     // Flows, agents and custom tools are individual entries (no per-source wildcard).
     if (flowTools.length) groups.push({ source: 'flow', label: 'Flows', wildcard: null, tools: flowTools.map(toEntry) });
@@ -997,7 +1032,9 @@ export class AgentService implements OnModuleInit {
     conversationId?: string,
     /** Words only: no tool, no live home context (StreamResponseOptions.textOnly). */
     textOnly?: boolean,
-  ): Promise<{ agent: any; contextBreakdown: ContextBreakdown; effectiveMaxHistoryTokens: number; model: any; effectiveHistory: Message[]; provider: string; modelName: string | null }> {
+    /** StreamResponseOptions.actionReplies: the reply instructions and the turn's action tools. */
+    actionReplies?: boolean,
+  ): Promise<{ agent: any; contextBreakdown: ContextBreakdown; effectiveMaxHistoryTokens: number; model: any; effectiveHistory: Message[]; provider: string; modelName: string | null; actionTools: Set<string> }> {
     // Per-agent model override: resolved once (cached per config id), BEFORE the
     // parallel loads so the bundle is not built twice concurrently.
     const overrideBundle = llmConfigOverride
@@ -1180,9 +1217,18 @@ export class AgentService implements OnModuleInit {
     // Agent-specific instructions (e.g. a named agent invoked through the
     // OpenAI-compat endpoint) go after the 4-level prompt, same position they
     // would occupy in a dedicated agent runtime.
-    const systemPrompt  = agentPromptOverride?.trim()
+    const withAgentPrompt = agentPromptOverride?.trim()
       ? `${builtPrompt}\n\n## Agent instructions\n${agentPromptOverride.trim()}`
       : builtPrompt;
+    // Action replies (opt-in): the turn's action tools and how to reply with them. None loaded → nothing changes.
+    const actionTools = new Set(actionReplies && !textOnly
+      ? optimizedExtraTools.filter((t: any) => isActionTool(t)).map((t: any) => t.name as string).sort()
+      : []);
+    const systemPrompt = actionTools.size ? `${withAgentPrompt}\n\n${actionRepliesBlock([...actionTools])}` : withAgentPrompt;
+    // ...and those tools take the `reply` argument (removed before they run).
+    const turnExtraTools = actionTools.size
+      ? optimizedExtraTools.map((t: any) => (actionTools.has(t.name) ? withReplyArg(t) : t))
+      : optimizedExtraTools;
 
     // The conversation summary (history compaction) goes in the system prompt:
     // it is the only place accepted by ALL providers (a single system message).
@@ -1268,7 +1314,7 @@ export class AgentService implements OnModuleInit {
       ...memoryTools,
       ...[
         ...this.builtInTools,
-        ...optimizedExtraTools,
+        ...turnExtraTools,
         ...schedulingTools,
         ...sandboxTools,
         ...(deferredMetaTool ? [deferredMetaTool] : []),
@@ -1313,6 +1359,7 @@ export class AgentService implements OnModuleInit {
       effectiveHistory,
       provider,
       modelName,
+      actionTools,
     };
   }
 

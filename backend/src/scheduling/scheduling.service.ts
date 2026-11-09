@@ -446,7 +446,6 @@ export class SchedulingService implements OnModuleInit, OnModuleDestroy {
     let failed = false;
     try {
       // AgentService resolved at runtime (dynamic require) → no module cycle.
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
       const { AgentService } = require('../agent/agent.service');
       const agent = this.moduleRef.get(AgentService, { strict: false });
       // Tool-subset decided at scheduling time (default: none → cheap run).

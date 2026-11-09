@@ -9,7 +9,7 @@ on:
 
 jobs:
   backend:
-    name: Backend — typecheck + test
+    name: Backend — typecheck + lint + test
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -29,6 +29,9 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
 
       # Security gate: the invariants (SSRF, crypto, SQL policy, checksum) must
       # stay green — a regression that reopens them makes CI fail.

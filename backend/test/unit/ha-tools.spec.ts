@@ -7,10 +7,14 @@
  * over a period; the user's person named; a native tool source only for the users allowed.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { HaToolsService, needsConfirmation } from '../../src/home-assistant/ha-tools.service';
+import { HaToolsService, needsConfirmation, resolveTargets } from '../../src/home-assistant/ha-tools.service';
 
 const STATES = [
   { entity_id: 'light.cucina', state: 'off', attributes: { friendly_name: 'Luce cucina' } },
+  { entity_id: 'light.cucina_isola', state: 'off', attributes: { friendly_name: 'Luce isola' } },
+  { entity_id: 'light.mansarda', state: 'off', attributes: { friendly_name: 'Mansarda' } },
+  { entity_id: 'media_player.tv', state: 'idle', attributes: { friendly_name: 'TV' } },
+  { entity_id: 'media_player.tv_lg', state: 'off', attributes: { friendly_name: 'LG TV' } },
   { entity_id: 'sensor.cucina_temp', state: '21.5', attributes: { friendly_name: 'Temperatura cucina', unit_of_measurement: '°C', device_class: 'temperature' } },
   { entity_id: 'lock.porta', state: 'locked', attributes: { friendly_name: 'Porta di casa' } },
   { entity_id: 'cover.garage', state: 'closed', attributes: { friendly_name: 'Garage', device_class: 'garage' } },
@@ -88,6 +92,40 @@ describe('HaToolsService', () => {
     expect(JSON.parse(await call.invoke({ domain: 'homeassistant', service: 'restart', entity_id: 'light.cucina' })).error).toMatch(/not available/);
     expect(t.commands).toHaveLength(2);
     expect(needsConfirmation({ entity_id: 'cover.tenda', state: 'open', attributes: { device_class: 'shade' } })).toBe(false);
+  });
+
+  it('a service call targets entities by name or area, with no find round; an ambiguous name acts on nothing', async () => {
+    const t = setup();
+    const call = byName(t.svc.tools(null), 'ha_call_service');
+    expect(JSON.parse(await call.invoke({ domain: 'light', service: 'turn_on', name: 'mansarda' })).ok).toBe(true);
+    expect(t.commands.at(-1).target).toEqual({ entity_id: ['light.mansarda'] });
+    // An exact name wins over partial matches ("Luce cucina" vs "Luce isola" in the same area).
+    expect(JSON.parse(await call.invoke({ domain: 'light', service: 'turn_off', name: 'luce cucina' })).ok).toBe(true);
+    expect(t.commands.at(-1).target).toEqual({ entity_id: ['light.cucina'] });
+    // An area alone: every entity of the domain there.
+    expect(JSON.parse(await call.invoke({ domain: 'light', service: 'turn_off', area: 'cucina' })).ok).toBe(true);
+    expect(t.commands.at(-1).target).toEqual({ entity_id: ['light.cucina', 'light.cucina_isola'] });
+    // A non-entity domain resolves among all entities: the exact name picks the player.
+    expect(JSON.parse(await call.invoke({ domain: 'music_assistant', service: 'play_media', name: 'TV', data: { media_id: 'Queen' } })).ok).toBe(true);
+    expect(t.commands.at(-1).target).toEqual({ entity_id: ['media_player.tv'] });
+    const sent = t.commands.length;
+    const ambiguous = JSON.parse(await call.invoke({ domain: 'light', service: 'turn_on', name: 'luce' }));
+    expect(ambiguous.error).toMatch(/several/);
+    expect(ambiguous.candidates.map((c: any) => c.entity_id)).toEqual(['light.cucina', 'light.cucina_isola']);
+    expect(JSON.parse(await call.invoke({ domain: 'light', service: 'turn_on', name: 'garage' })).error).toMatch(/no exposed entity/);
+    expect(JSON.parse(await call.invoke({ domain: 'music_assistant', service: 'play_media', area: 'cucina' })).error).toMatch(/entity domain/);
+    expect(JSON.parse(await call.invoke({ domain: 'light', service: 'turn_on' })).error).toMatch(/not exposed|entity_id, name or area/);
+    expect(t.commands).toHaveLength(sent);
+    // A lock found by name still needs the confirmation.
+    expect(JSON.parse(await call.invoke({ domain: 'lock', service: 'unlock', name: 'porta di casa' })).needs_confirmation).toBe(true);
+    expect(t.commands).toHaveLength(sent);
+  });
+
+  it('resolveTargets on its own: the area narrows a name, a missing target is an error', () => {
+    const areaOf = (id: string) => (id.includes('cucina') ? 'Cucina' : null);
+    expect(resolveTargets(STATES as any, areaOf, { domain: 'light', name: 'luce', area: 'cucina' })).toMatchObject({ error: expect.stringMatching(/several/) });
+    expect(resolveTargets(STATES as any, areaOf, { domain: 'light', name: 'isola', area: 'cucina' })).toEqual({ ids: ['light.cucina_isola'] });
+    expect(resolveTargets(STATES as any, areaOf, { domain: 'light' })).toEqual({ error: 'give entity_id, name or area' });
   });
 
   it('history and logbook over a period, logbook limited to exposed entities', async () => {

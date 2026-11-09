@@ -53,11 +53,16 @@
     "exposeTeamToolName": "team_<nome>",
     "toolPickerLoading": "Carico i tool disponibili…",
     "toolPickerError": "Impossibile caricare i tool disponibili.",
-    "toolPickerEmpty": "Nessun tool disponibile. Configura server MCP, skill, flow o altri agenti.",
+    "toolPickerEmpty": "Nessun tool disponibile. Configura server MCP, skill, integrazioni, flow o altri agenti.",
     "toolPickerHint": "{{count}} selezionati. Spunta i singoli tool o un intero gruppo.",
     "toolPickerWholeGroup": "tutto il gruppo",
+    "toolPickerOrphans": "Non più disponibili",
+    "toolPickerOrphansHint": "Salvate nel filtro ma non corrispondono a nessun tool attuale (server, skill o tool rimossi): togli la spunta per eliminarle.",
     "memoryContext": "Memoria attiva",
     "memoryContextText": "L'agente usa la sua memoria (consigliato)",
-    "memoryContextTitle": "Attiva: l'agente ragiona con la sua memoria — le istruzioni su come usarla, i ricordi pertinenti prima di ogni risposta e gli strumenti di memoria (Recordare se la memoria episodica è attiva e raggiungibile, altrimenti la memoria interna). Disattivala solo per un agente che deve rispondere senza ricordi."
+    "memoryContextTitle": "Attiva: l'agente ragiona con la sua memoria — le istruzioni su come usarla, i ricordi pertinenti prima di ogni risposta e gli strumenti di memoria (Recordare se la memoria episodica è attiva e raggiungibile, altrimenti la memoria interna). Disattivala solo per un agente che deve rispondere senza ricordi.",
+    "actionReplies": "Risposte alle azioni",
+    "actionRepliesText": "Dopo un'azione riuscita, risponde senza un'altra chiamata al modello",
+    "actionRepliesTitle": "Quando l'agente chiama solo tool d'azione (accendere una luce, mostrare qualcosa su uno schermo, inviare un messaggio) e riescono tutti, la risposta scritta insieme alle chiamate chiude il turno: niente chiamata in più al modello solo per dire «fatto». Se un'azione fallisce, o serve un tool di lettura, il turno prosegue come sempre. Il testo di ogni passo esce quando il passo è concluso (niente scrittura parola per parola). Utile dove conta la latenza, come la voce."
   }
 }

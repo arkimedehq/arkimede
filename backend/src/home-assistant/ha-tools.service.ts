@@ -28,6 +28,7 @@ import { ToolSourcesRegistry, type ToolSource } from '../tool-sources/tool-sourc
 import { FilesService } from '../files/files.service';
 import { toolFileLine, type ToolFile } from '../files/tool-files';
 import { HomeAssistantService } from './home-assistant.service';
+import { markActionTool } from '../agent/action-replies';
 
 /** Actions that need the user's confirmation first (security: a door opened by a misunderstanding). */
 const CONFIRM_DOMAINS = new Set(['lock', 'alarm_control_panel']);
@@ -53,9 +54,52 @@ export function needsConfirmation(entity: HaState | undefined): boolean {
 
 const fold = (s: string) => s.toLocaleLowerCase().normalize('NFKD').replace(/\p{M}/gu, '');
 
+/** Most entities an area alone may target in one call ("spegni le luci in cucina"). */
+const MAX_AREA_TARGETS = 30;
+const MAX_CANDIDATES = 10;
+
+export type TargetResolution =
+  | { ids: string[] }
+  | { error: string; candidates?: HaState[] };
+
+/**
+ * The entities a service call targets when the agent names them instead of giving entity ids, so an action
+ * needs no ha_find_entities round first. Among the exposed entities — of the service's domain when it is an
+ * entity domain (light.turn_on → lights), else any (music_assistant.play_media → its media player):
+ * - a name: the entity whose name is exactly it, else the only one whose name, id or area holds all its words;
+ *   several → ambiguous, never acted on (the candidates go back to the agent);
+ * - an area alone: every entity of the service's domain in that area (needs an entity domain).
+ */
+export function resolveTargets(
+  states: HaState[], areaOf: (id: string) => string | null,
+  { domain, name, area }: { domain: string; name?: string; area?: string },
+): TargetResolution {
+  const entityDomain = states.some((s) => s.entity_id.startsWith(`${domain}.`));
+  let pool = entityDomain ? states.filter((s) => s.entity_id.startsWith(`${domain}.`)) : states;
+  if (area) pool = pool.filter((s) => { const a = areaOf(s.entity_id); return !!a && fold(a).includes(fold(area)); });
+  const words = name ? fold(name).split(/\s+/).filter(Boolean) : [];
+  if (!words.length) {
+    if (!area) return { error: 'give entity_id, name or area' };
+    if (!entityDomain) return { error: `name the ${domain} target: an area alone works only for an entity domain (light, switch, cover…)` };
+    if (!pool.length) return { error: `no exposed ${domain} entity in the area "${area}"` };
+    if (pool.length > MAX_AREA_TARGETS) return { error: `too many ${domain} entities in "${area}": name them` };
+    return { ids: pool.map((s) => s.entity_id) };
+  }
+  const nameOf = (s: HaState) => fold(String(s.attributes?.friendly_name ?? ''));
+  const exact = pool.filter((s) => nameOf(s) === fold(name!).trim());
+  const found = exact.length ? exact : pool.filter((s) => {
+    const hay = fold(`${s.entity_id} ${s.attributes?.friendly_name ?? ''} ${areaOf(s.entity_id) ?? ''}`);
+    return words.every((w) => hay.includes(w));
+  });
+  if (found.length === 1) return { ids: [found[0].entity_id] };
+  if (!found.length) return { error: `no exposed entity matches "${name}"${area ? ` in "${area}"` : ''}` };
+  return { error: `"${name}" matches several entities: ask which one, or call again with its entity_id`, candidates: found.slice(0, MAX_CANDIDATES) };
+}
+
 @Injectable()
 export class HaToolsService implements ToolSource, OnModuleInit, OnModuleDestroy {
   readonly name = 'ha';
+  readonly label = 'Home Assistant';
 
   constructor(
     private readonly ha: HomeAssistantService,
@@ -146,17 +190,26 @@ export class HaToolsService implements ToolSource, OnModuleInit, OnModuleDestroy
 
     const callService = new DynamicStructuredTool({
       name: 'ha_call_service',
-      description: 'Acts in the home through Home Assistant: calls a service on exposed entities — light.turn_on (data: brightness_pct, color_name…), switch.turn_off, climate.set_temperature (data: temperature), cover.open_cover, media_player.volume_set, script.turn_on, scene.turn_on, and so on. Find the entity ids first with ha_find_entities. Locks, alarms, garage doors and gates: ask the user first, then call again with confirmed: true.',
+      description: 'Acts in the home through Home Assistant: calls a service on exposed entities — light.turn_on (data: brightness_pct, color_name…), switch.turn_off, climate.set_temperature (data: temperature), cover.open_cover, media_player.volume_set, script.turn_on, scene.turn_on, and so on. Target the entities by entity_id, or by name (and/or area) as the user says them: they are resolved among the exposed entities, so ha_find_entities is not needed first; an area alone means every entity of that domain there ("spegni le luci in cucina"). A name that matches several entities is not acted on: the candidates come back, ask which one. Locks, alarms, garage doors and gates: ask the user first, then call again with confirmed: true.',
       schema: z.object({
         domain: z.string().describe('The service domain, e.g. light'),
         service: z.string().describe('The service, e.g. turn_on'),
-        entity_id: z.union([z.string(), z.array(z.string())]).describe('One or more exposed entity ids'),
+        entity_id: z.union([z.string(), z.array(z.string())]).optional().describe('One or more exposed entity ids (or give name / area instead)'),
+        name: z.string().optional().describe('The entity\'s name as the user says it, e.g. "luce cucina" (instead of entity_id)'),
+        area: z.string().optional().describe('An area (room), alone for every entity of the domain there or to narrow a name, e.g. "Cucina"'),
         data: z.record(z.string(), z.any()).optional().describe('Service data, e.g. {"brightness_pct": 40}'),
         confirmed: z.boolean().optional().describe('true only after the user confirmed a lock, alarm, garage door or gate action'),
       }),
-      func: async ({ domain, service, entity_id, data, confirmed }) => {
-        const ids = Array.isArray(entity_id) ? entity_id : [entity_id];
+      func: async ({ domain, service, entity_id, name, area, data, confirmed }) => {
         if (BLOCKED_DOMAINS.has(domain)) return JSON.stringify({ error: `the ${domain} services are not available to the agent` });
+        let ids = entity_id === undefined ? [] : Array.isArray(entity_id) ? entity_id : [entity_id];
+        if (!ids.length && (name || area)) {
+          const target = resolveTargets(this.ha.exposedStates(), (id) => this.ha.areaOf(id), { domain, name, area });
+          if ('error' in target) {
+            return JSON.stringify({ error: target.error, ...(target.candidates ? { candidates: target.candidates.map((s) => this.view(s)) } : {}) });
+          }
+          ids = target.ids;
+        }
         const states = new Map(this.ha.exposedStates().map((s) => [s.entity_id, s]));
         const unknown = ids.filter((id) => !states.has(id));
         if (!ids.length || unknown.length) return JSON.stringify({ error: `not exposed to Assist: ${unknown.join(', ') || '(no entity)'}` });
@@ -345,6 +398,8 @@ export class HaToolsService implements ToolSource, OnModuleInit, OnModuleDestroy
       },
     });
 
+    // Action tools (agent/action-replies.ts): they act and answer only whether it worked.
+    for (const t of [callService, calendarAdd, todoAdd, todoComplete, notify]) markActionTool(t);
     return [find, getState, callService, history, logbook, calendarEvents, calendarAdd, todoItems, todoAdd, todoComplete, camera, notify];
   }
 }

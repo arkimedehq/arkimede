@@ -181,7 +181,7 @@ export class ReembedService {
       } catch (err: any) {
         c.status = 'failed';
         c.error = err?.message ?? String(err);
-        throw new Error(`Collection "${c.name}": ${c.error}`);
+        throw new Error(`Collection "${c.name}": ${c.error}`, { cause: err });
       }
     }
 

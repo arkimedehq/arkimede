@@ -794,7 +794,7 @@ Due assi ortogonali — *quali* tool caricare (`toolLoadingStrategy`) e *come* d
   stadi DEVONO vedere lo stesso peso, altrimenti la compaction non scatta e il trim taglia al posto suo
 - Il summary va nel **system prompt** (unica sede cross-provider), blocco separato e non cacheato
 
-**Limite step agente:** env `AGENT_RECURSION_LIMIT` (default 50 ≈ 25 giri LLM↔tool, minimo 10) passato a
+**Limite step agente:** env `AGENT_RECURSION_LIMIT` (default 100 ≈ 50 giri LLM↔tool, minimo 10) passato a
 `agent.stream()` e `agent.invoke()`; il default LangGraph (25 ≈ 12 giri) era insufficiente per esplorazioni DB
 lunghe e produceva `GraphRecursionError`. Flusso completo con diagrammi e tabella soglie: **`DATAFLOW_AGENT.md`**.
 
@@ -931,7 +931,8 @@ del backend chiude le esecuzioni in corso (in memoria, di proposito).
 Un `Agent` restringe i suoi tool via `toolFilter` (`{ mode: 'all' | 'names' | 'none', names?: string[] }`).
 In modalità `names` una voce che finisce con `*` matcha per **prefisso** —
 `mcp_home_assistant_*` seleziona tutti i tool di quel server MCP, `skill_knx_*`
-tutti gli script di quella skill — così il filtro sopravvive all'aggiunta di
+tutti gli script di quella skill, `ha_*` tutti i tool di un'integrazione nativa
+(Home Assistant) — così il filtro sopravvive all'aggiunta di
 tool alla fonte. Il form agenti costruisce questi token con un **tool picker**
 alimentato da `GET /api/agent/tool-catalog` (niente convenzione di nomi da
 ricordare). `Agent.maxIterations` conta i **giri di tool ReAct** (il recursion
@@ -943,7 +944,24 @@ scegliere un agente come modello lo esegue sul suo provider/model — così es. 
 agente vocale può usare un provider a bassa latenza mentre chat, skill e
 automazioni restano sul default. Questi override viaggiano su
 `StreamResponseOptions` (`toolOverride`, `agentPromptOverride`, `maxIterations`,
-`llmConfigId`, `origin`) passati a `streamResponse` → `resolveAgent`.
+`llmConfigId`, `origin`, `actionReplies`) passati a `streamResponse` → `resolveAgent`.
+
+**Risposte alle azioni** (`Agent.actionReplies`, spenta di default — `agent/action-replies.ts`): niente chiamata al
+modello solo per dire "fatto". Un *tool d'azione* fa qualcosa e risponde solo se è riuscito (accendere una luce, mostrare
+delle foto, inviare un messaggio); un *tool di lettura* restituisce ciò di cui è fatta la risposta (una ricerca, uno stato,
+la memoria), quindi dopo di lui il modello gira sempre di nuovo. Ogni sorgente segna i suoi tool d'azione: le integrazioni
+native nel codice (`ha_call_service`, `ha_notify`, le scritture di calendario e liste di Home Assistant), i server MCP con
+l'annotazione standard `readOnlyHint: false` (un server che non annota i suoi tool non ne ha). Con l'opzione attiva i tool
+d'azione del turno sono elencati nel prompt di sistema (`actionRepliesBlock`) e ognuno riceve un argomento in più, `reply`
+(`withReplyArg`, facoltativo, tolto prima che il tool giri): la risposta che il modello darà se l'azione riesce. Un
+argomento, non un testo: i modelli compilano sempre gli argomenti dei tool, mentre alcuni non scrivono mai testo nel
+messaggio che chiama un tool (DeepSeek, verificato). Il testo di ogni passo è trattenuto (`ActionReplyGate`) invece che
+inviato in streaming. Un passo di soli tool d'azione tutti riusciti (nessuna eccezione, nessun `error`,
+`needs_confirmation`, `ok:false`/`success:false`, `isError` MCP) e con una risposta (i `reply` delle chiamate, una frase
+ciascuno; altrimenti il testo scritto con le chiamate) chiude il turno su quella risposta — la chiamata successiva al
+modello non parte; altrimenti il testo trattenuto è scartato e il turno prosegue come prima. Costo: il testo
+di ogni passo esce a passo concluso (niente streaming parola per parola) — pensata per la voce, dove la risposta viene
+comunque raccolta.
 
 ---
 
@@ -1190,7 +1208,7 @@ POST   /api/openai/v1/chat/completions    ← formato chat OpenAI; streaming SSE
 #     model = slug di un agente → applica prompt, tool filter, cap iterazioni, config LLM.
 
 # Catalogo tool agenti (per il picker nel form agenti)
-GET    /api/agent/tool-catalog            ← tool disponibili raggruppati per fonte (mcp/skill/flow/agent/custom) + wildcard per-fonte
+GET    /api/agent/tool-catalog            ← tool disponibili raggruppati per fonte (mcp/skill/integration/flow/agent/custom) + wildcard per-fonte
 
 # Configurazione app (admin only)
 GET    /api/app-config
@@ -1312,7 +1330,7 @@ JWT_EXPIRES_IN=7d
 # Non si impostano via env. (Il container `embedding` usa EMBEDDING_MODEL/DEVICE/BATCH_SIZE.)
 
 # Agent (opzionali) — limite step LangGraph per messaggio e cap replay output tool in history
-AGENT_RECURSION_LIMIT=50            # default 50 ≈ 25 giri LLM↔tool, min 10
+AGENT_RECURSION_LIMIT=100           # default 100 ≈ 50 giri LLM↔tool, min 10
 REPLAY_TOOL_OUTPUT_MAX_CHARS=3000   # default 3000 char/output, min 500
 
 # Database applicativo
@@ -1436,7 +1454,12 @@ le iniziative partono quando Recordare risulta configurato). Un campo vuoto rica
   della stessa chat con una parola in comune, o entro due ore con due; ancora da eseguire, o eseguito entro due ore da
   esso) viene riportato `done`, non consegnato due volte: il task esplicito e confermato è la fonte di verità (vale il
   suo orario). Copre solo la stessa persona — un'iniziativa per un contatto richiede un task che la nomini o porti uno
-  dei suoi indirizzi — e un task fallito o cancellato non copre niente: l'iniziativa della memoria è la rete di sicurezza.
+  dei suoi indirizzi — e un task fallito o cancellato non copre niente: l'iniziativa della memoria è la rete di sicurezza. Ogni decisione finisce
+  nel log (il task che l'ha coperta, o perché ogni candidato non l'ha coperta), così un promemoria detto due volte si spiega
+  anche dopo che il task non c'è più.
+  Una domanda (`ask`) a cui nessuno risponde nella sua chat — 10 min dopo che l'ha fatta un satellite, 6 h dopo un
+  messaggio, 12 h in chat — viene riportata `ignored` (`checkAnswers`, a ogni giro): ciò da cui impara il tempo v1 di
+  Recordare; un promemoria detto non viene mai controllato (il silenzio dopo è normale).
   Nel turno, ogni agente riceve già l'iniziativa dovuta per chi parla dentro il contesto di memoria (niente da fare qui).
   Configurazione (admin di Recordare, una volta): `POST api/v1/admin/clients/{id}/webhooks {url:
   "http://backend:3000/api/recordare/webhook", events: ["initiative.deliver"]}` → il segreto `whsec_` in
@@ -1451,7 +1474,10 @@ le iniziative partono quando Recordare risulta configurato). Un campo vuoto rica
     `ha_call_service`, `ha_history`, `ha_logbook`, `ha_calendar_events` / `ha_calendar_add`, `ha_todo_items` /
     `ha_todo_add` / `ha_todo_complete` (chiamate di servizio con `return_response`), `ha_camera_snapshot` (l'immagine come
     file di un tool, mostrata al modello), `ha_notify` (un push sul telefono di una persona), solo sulle entità che Home Assistant espone ad Assist
-    (`homeassistant/expose_entity/list`); serrature, allarmi, porte del garage e cancelli chiedono conferma all'utente
+    (`homeassistant/expose_entity/list`); `ha_call_service` le indica con `entity_id` o per `name` / `area` come le dice
+    l'utente (`resolveTargets`: il nome esatto, altrimenti l'unica entità che contiene tutte le parole; più d'una → i
+    candidati tornano indietro, nulla eseguito; un'area da sola → tutte le entità del dominio lì), così un'azione è una
+    chiamata sola senza un giro di `ha_find_entities` prima; serrature, allarmi, porte del garage e cancelli chiedono conferma all'utente
     (`confirmed: true`); i servizi del server stesso (`homeassistant`, `hassio`, `shell_command`…) mai; per tutti gli
     utenti o una lista (`haToolsUserIds`); la persona di ogni utente (`users.haPerson`) nominata nelle descrizioni ("io");
   - **flow avviati da Home Assistant** (`ha-triggers.service.ts`): il trigger `home-assistant` — un'entità esposta
@@ -1476,9 +1502,20 @@ le iniziative partono quando Recordare risulta configurato). Un campo vuoto rica
   ciò che è dovuto) dai successivi (un rinnovo: solo una richiesta o promessa con orario). Il **canale voce** delle iniziative:
   `assist_satellite.start_conversation` quando il satellite ascolta, altrimenti `announce`, sul satellite della stanza
   della persona; il messaggio è scritto nella chat dedicata e il satellite legato a essa (`ConversationFocusService`, 15
-  min) così la risposta parlata arriva lì; con altri nella stanza solo l'apertura. `GET/PATCH
+  min) così la risposta parlata arriva lì; con altri nella stanza solo l'apertura. **Occupato** (interruttore
+  `haBusyEnabled`, sotto la presenza, default spento; migration 107): una persona il cui telefono dice che è occupata —
+  una chiamata (Android `phone_state` squilla / in linea), il non disturbare (Android `dnd_sensor`), un Focus (iOS
+  `focus`) — viene detta da sola, dove si trova, con `busy: true` appena inizia (poi a ogni rinnovo), e `busy: false` una
+  volta quando finisce mentre è ancora presente (chi è uscito chiude con l'uscita). I sensori sono quelli dell'app
+  companion sui dispositivi dei `device_trackers` della persona, riconosciuti dal registro entità (piattaforma
+  `mobile_app`, la chiave del sensore in fondo allo `unique_id`), non da un entity id che si può rinominare; un telefono
+  senza non manda niente. La presenza in chat (`onPresence`) porta `busy: true` quando la `haPerson` dell'utente è
+  occupata (`RecordareInitiativesService.setBusy`). `talking` non viene mai mandato: i satelliti trasmettono solo dopo la
+  parola di attivazione, quindi Arkimede non sente persone che parlano tra loro — e né più persone in una stanza né un
+  turno rivolto all'agente sono una conversazione del genere. Interruttore spento: gli impulsi sono esattamente quelli
+  di prima. `GET/PATCH
   /api/admin/config/home-assistant` (impostazioni, stato dal vivo: entità esposte, punti voce, chi è in casa e dove,
-  persone), `POST …/import-mcp`, `PATCH …/people` (la persona di un utente).
+  chi è occupato, persone), `POST …/import-mcp`, `PATCH …/people` (la persona di un utente).
 
 - **Interruttore per utente** `users.episodicMemoryEnabled` (default spento; Impostazioni → Memoria, visibile solo
   se Recordare è configurato; `PATCH /api/users/me {episodicMemoryEnabled}`). È l'**unico interruttore**: Recordare
@@ -1828,6 +1865,7 @@ agents                         # un agente riusabile (come tool/skill: scope per
   ├── llmConfigId (FK→llm_configs)        ← modello dell'agente (override per-ruolo)
   ├── toolFilter (jsonb)                  ← quali tool/skill/MCP carica (per nome o per scope)
   ├── maxIterations (int, null)           ← cap loop ReAct del sub-agente
+  ├── actionReplies (bool, false)         ← un passo di tool d'azione riusciti chiude sulla risposta scritta con esso
   └── scope (personal|team|org) + teamId  ← stesso modello di custom_tools/skills (assertCanManage)
 
 agent_teams

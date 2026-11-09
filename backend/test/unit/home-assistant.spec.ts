@@ -30,6 +30,7 @@ function fakeHa() {
           { entity_id: 'assist_satellite.cucina', device_id: 'dv', area_id: null },
           { entity_id: 'device_tracker.chloe', device_id: 'ph', area_id: null },
           { entity_id: 'sensor.chloe_area', device_id: 'ph', area_id: null },
+          { entity_id: 'binary_sensor.ph_focus', device_id: 'ph', area_id: null, platform: 'mobile_app', unique_id: 'wh1_focus' },
         ];
         case 'homeassistant/expose_entity/list': return { exposed_entities: { 'light.cucina': { conversation: true }, 'lock.porta': { conversation: true }, 'switch.hidden': { conversation: false } } };
         case 'get_states': return [
@@ -39,6 +40,7 @@ function fakeHa() {
           { entity_id: 'assist_satellite.cucina', state: 'idle', attributes: { supported_features: 3 } },
           { entity_id: 'person.chloe', state: 'home', attributes: { device_trackers: ['device_tracker.chloe'] } },
           { entity_id: 'sensor.chloe_area', state: 'Cucina', attributes: {} },
+          { entity_id: 'binary_sensor.ph_focus', state: 'off', attributes: {} },
         ];
         default: return null;
       }
@@ -47,7 +49,7 @@ function fakeHa() {
   return { socket, calls, handlers };
 }
 
-const BASE = { haUrl: 'http://homeassistant.local:8123', haToken: 'tok-1', hasHaToken: true, haPresenceEnabled: true, haVoiceEnabled: true, haToolsEnabled: true, haToolsUserIds: null as string[] | null };
+const BASE = { haUrl: 'http://homeassistant.local:8123', haToken: 'tok-1', hasHaToken: true, haPresenceEnabled: true, haBusyEnabled: false, haVoiceEnabled: true, haToolsEnabled: true, haToolsUserIds: null as string[] | null };
 
 function setup(over: Partial<typeof BASE> = {}) {
   const cfg = { ...BASE, ...over };
@@ -57,7 +59,7 @@ function setup(over: Partial<typeof BASE> = {}) {
     getWyomingConfig: vi.fn(async () => ({ wyomingHandleUserId: 'body' })),
   };
   const focus = { set: vi.fn(), setVoiceTurnListener: vi.fn() };
-  const initiatives = { setVoice: vi.fn(), setPush: vi.fn(), roomPresence: vi.fn(async () => undefined) };
+  const initiatives = { setVoice: vi.fn(), setPush: vi.fn(), setBusy: vi.fn(), roomPresence: vi.fn(async () => undefined) };
   const svc = new HomeAssistantService(appConfig as any, focus as any, initiatives as any);
   svc.newSocket = () => ha.socket;
   return { svc, ha, focus, initiatives };
@@ -149,4 +151,55 @@ describe('HomeAssistantService', () => {
     expect((t.svc.fetchImpl as any).mock.calls[0][0]).toBe('http://homeassistant.local:8123/api/camera_proxy/camera.ingresso');
     t.svc.onModuleDestroy();
   });
+
+  it('busy (switch on): a Focus on the phone is said at once where the person is, then false when it ends', async () => {
+    const t = setup({ haBusyEnabled: true });
+    await t.svc.apply();
+    expect(t.initiatives.setBusy).toHaveBeenLastCalledWith(t.svc);
+    await settle();
+    expect(t.initiatives.roomPresence.mock.calls.some(([, imp]: any) => 'busy' in imp)).toBe(false); // nobody busy: as before
+    const focus = (state: string) => t.ha.handlers.get('state_changed')!({ data: { entity_id: 'binary_sensor.ph_focus', new_state: { entity_id: 'binary_sensor.ph_focus', state, attributes: {} } } });
+    t.initiatives.roomPresence.mockClear();
+    focus('on');
+    await settle(2_100);
+    expect(t.svc.busy('person.chloe')).toBe(true);
+    expect(t.svc.getStatus().busy).toEqual(['person.chloe']);
+    expect(t.initiatives.roomPresence).toHaveBeenCalledTimes(1);
+    expect(t.initiatives.roomPresence).toHaveBeenLastCalledWith('body', {
+      channel: 'voice', place: 'Cucina', people: [{ identity: { channel: 'homeassistant', externalId: 'person.chloe' }, confidence: 0.9 }],
+      ttlSeconds: 600, busy: true,
+    }, 'cucina');
+    focus('off');
+    await settle(2_100);
+    expect(t.initiatives.roomPresence).toHaveBeenLastCalledWith('body', expect.objectContaining({ channel: 'voice', place: 'Cucina', busy: false }), 'cucina');
+    t.svc.onModuleDestroy();
+    expect(t.initiatives.setBusy).toHaveBeenLastCalledWith(null);
+  });
+
+  it('busy switch off (or the presence off): a Focus on changes nothing, no impulse says busy', async () => {
+    for (const over of [{ haBusyEnabled: false }, { haBusyEnabled: true, haPresenceEnabled: false }]) {
+      const t = setup(over);
+      await t.svc.apply();
+      expect(t.initiatives.setBusy).not.toHaveBeenCalledWith(t.svc);
+      t.ha.handlers.get('state_changed')!({ data: { entity_id: 'binary_sensor.ph_focus', new_state: { entity_id: 'binary_sensor.ph_focus', state: 'on', attributes: {} } } });
+      await settle(2_100);
+      expect(t.svc.busy('person.chloe')).toBe(false);
+      expect(t.initiatives.roomPresence.mock.calls.some(([, imp]: any) => 'busy' in imp)).toBe(false);
+      t.svc.onModuleDestroy();
+    }
+  });
+
+  it('a change is told within the gathering time even while other entities change several times a second', async () => {
+    const t = setup();
+    await t.svc.apply();
+    await settle();
+    t.initiatives.roomPresence.mockClear();
+    const noise = setInterval(() => t.ha.handlers.get('state_changed')!({ data: { entity_id: 'sensor.power', new_state: { entity_id: 'sensor.power', state: String(Math.random()), attributes: {} } } }), 100);
+    t.ha.handlers.get('state_changed')!({ data: { entity_id: 'sensor.chloe_area', new_state: { entity_id: 'sensor.chloe_area', state: 'unknown', attributes: {} } } });
+    await settle(2_300);
+    clearInterval(noise);
+    expect(t.initiatives.roomPresence).toHaveBeenCalledWith('body', expect.objectContaining({ channel: 'voice', place: 'Cucina', left: true }), 'cucina');
+    t.svc.onModuleDestroy();
+  });
 });
+

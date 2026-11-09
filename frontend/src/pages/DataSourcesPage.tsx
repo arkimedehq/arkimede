@@ -238,8 +238,8 @@ function ManifestEditor({
   // Configured models: the user picks the one suited to the enrichment
   // (for large schemas a capable model performs much better than a flash/summarizer).
   const { data: llmConfigs } = useQuery({
-    queryKey: ['llm-configs'],
-    queryFn: () => llmConfigsApi.list(),
+    queryKey: ['llm-configs', 'options'],
+    queryFn: () => llmConfigsApi.options(),
   });
 
   const applyServer = (ds: DataSource) => {

@@ -14,6 +14,7 @@ export interface LlmConfigDto {
     hasApiKey: boolean;
     maxTokens: number | null;
     maxConcurrency?: number | null;
+    reasoningEffort?: 'off' | 'low' | 'medium' | 'high' | null;
     inputPricePerM?: number | null;
     outputPricePerM?: number | null;
     isDefault: boolean;

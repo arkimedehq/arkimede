@@ -1157,7 +1157,7 @@ the excess beyond the budget is thrown away by the trim instead of being summari
 | `historyCompactionThreshold` | 80% | Compaction trigger threshold; after firing, the last ~40% of the budget stays verbatim |
 
 The agent's step limit (LLM ↔ tool calls for a single message) is
-configurable via the `AGENT_RECURSION_LIMIT` env in the backend `.env` (default 50 steps ≈ 25
+configurable via the `AGENT_RECURSION_LIMIT` env in the backend `.env` (default 100 steps ≈ 50
 LLM turns, minimum applied 10): exceeding it produces the `GraphRecursionError` error — usually
 it indicates the agent is looking for data that doesn't exist or that it lacks context (see
 `DATAFLOW_AGENT.md` for the full flow with diagrams).

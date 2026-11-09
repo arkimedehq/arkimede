@@ -27,6 +27,7 @@ export function loadOptional(moduleName: string, engine: string): any {
     if (err?.code === 'MODULE_NOT_FOUND') {
       throw new Error(
         `Driver "${engine}" unavailable: package "${moduleName}" is not installed on the server.`,
+        { cause: err },
       );
     }
     throw err;

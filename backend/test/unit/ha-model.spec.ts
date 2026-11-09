@@ -96,3 +96,95 @@ describe('HaModel', () => {
     expect(turnSpeaker(snap([]), 'salotto', 0.9, 0.6)).toEqual({ people: [], someone: 1 });
   });
 });
+
+describe('HaModel busy (opt-in)', () => {
+  /** Two phones: an iPhone with the Focus sensor, an Android with the call and do-not-disturb sensors. */
+  function phones(busy = true) {
+    const m = new HaModel();
+    m.useBusy(busy);
+    m.setRegistries({
+      areas: [{ area_id: 'studio', name: 'Studio' }],
+      devices: [{ id: 'dev-sat', area_id: 'studio' }, { id: 'dev-ios', area_id: null }, { id: 'dev-android', area_id: null }],
+      entities: [
+        { entity_id: 'assist_satellite.studio', device_id: 'dev-sat', area_id: null },
+        { entity_id: 'device_tracker.ios', device_id: 'dev-ios', area_id: null },
+        { entity_id: 'sensor.ios_area', device_id: 'dev-ios', area_id: null },
+        { entity_id: 'binary_sensor.ios_focus', device_id: 'dev-ios', area_id: null, platform: 'mobile_app', unique_id: 'abc123_focus' },
+        { entity_id: 'sensor.ios_focus_name', device_id: 'dev-ios', area_id: null, platform: 'mobile_app', unique_id: 'abc123_focus_name' },
+        { entity_id: 'device_tracker.android', device_id: 'dev-android', area_id: null },
+        // Renamed entity ids: known by the registry's unique_id.
+        { entity_id: 'sensor.calls', device_id: 'dev-android', area_id: null, platform: 'mobile_app', unique_id: 'def456_phone_state' },
+        { entity_id: 'sensor.quiet', device_id: 'dev-android', area_id: null, platform: 'mobile_app', unique_id: 'def456_dnd_sensor' },
+        // Not the companion app: not a busy signal.
+        { entity_id: 'binary_sensor.other_focus', device_id: 'dev-android', area_id: null, platform: 'template', unique_id: 'x_focus' },
+      ],
+    });
+    m.setStates([
+      st('assist_satellite.studio', 'idle', { supported_features: 3 }),
+      st('person.alex', 'home', { device_trackers: ['device_tracker.ios'] }),
+      st('sensor.ios_area', 'studio'),
+      st('binary_sensor.ios_focus', 'off'),
+      st('sensor.ios_focus_name', 'Work'),
+      st('person.sam', 'home', { device_trackers: ['device_tracker.android'] }),
+      st('sensor.calls', 'idle'),
+      st('sensor.quiet', 'off'),
+      st('binary_sensor.other_focus', 'on'),
+    ]);
+    return m;
+  }
+
+  it('reads a call, do-not-disturb and a Focus from the companion app\'s sensors; nothing else counts', () => {
+    const m = phones();
+    expect(m.personBusy('person.alex')).toBe(false);
+    expect(m.personBusy('person.sam')).toBe(false); // the template "focus" on the same device does not count
+    m.update('binary_sensor.ios_focus', st('binary_sensor.ios_focus', 'on'));
+    expect(m.personBusy('person.alex')).toBe(true);
+    for (const [state, busy] of [['ringing', true], ['offhook', true], ['idle', false], ['unavailable', false]] as const) {
+      m.update('sensor.calls', st('sensor.calls', state));
+      expect(m.personBusy('person.sam')).toBe(busy);
+    }
+    for (const [state, busy] of [['priority_only', true], ['total_silence', true], ['alarms_only', true], ['off', false]] as const) {
+      m.update('sensor.quiet', st('sensor.quiet', state));
+      expect(m.personBusy('person.sam')).toBe(busy);
+    }
+  });
+
+  it('switched off: the snapshot and the impulses are the ones of before, a Focus on or not', () => {
+    const on = phones(false);
+    on.update('binary_sensor.ios_focus', st('binary_sensor.ios_focus', 'on'));
+    const s = on.snapshot();
+    expect(s.busy).toBeUndefined();
+    expect(current(s).some((i) => 'busy' in i)).toBe(false);
+    expect(current(s)).toEqual(current(phones(false).snapshot()));
+  });
+
+  it('busy where the person is, on their own and first; again on every refresh; false once when it ends', () => {
+    const m = phones();
+    const before = m.snapshot();
+    expect(current(before).some((i) => 'busy' in i)).toBe(false); // nobody busy: as before
+    m.update('binary_sensor.ios_focus', st('binary_sensor.ios_focus', 'on'));
+    const busy = m.snapshot();
+    expect(impulses(before, busy)).toEqual([{ channel: 'voice', areaId: 'studio', people: ['person.alex'], busy: true }]);
+    // The refresh keeps it live; the other impulses carry nothing about it.
+    const refresh = current(busy);
+    expect(refresh[0]).toEqual({ channel: 'voice', areaId: 'studio', people: ['person.alex'], busy: true });
+    expect(refresh.slice(1).some((i) => 'busy' in i)).toBe(false);
+    m.update('sensor.calls', st('sensor.calls', 'offhook'));
+    const both = m.snapshot();
+    expect(impulses(busy, both)).toEqual([{ channel: 'home', people: ['person.sam'], busy: true }]);
+    m.update('binary_sensor.ios_focus', st('binary_sensor.ios_focus', 'off'));
+    const ended = m.snapshot();
+    expect(impulses(both, ended)).toEqual([{ channel: 'voice', areaId: 'studio', people: ['person.alex'], busy: false }]);
+    expect(impulses(ended, m.snapshot())).toEqual([]);
+  });
+
+  it('a busy person away is not said; one who leaves while busy ends with the departure, no false', () => {
+    const m = phones();
+    m.update('sensor.calls', st('sensor.calls', 'offhook'));
+    const busy = m.snapshot();
+    m.update('person.sam', st('person.sam', 'not_home', { device_trackers: ['device_tracker.android'] }));
+    const gone = m.snapshot();
+    expect(gone.busy).toEqual(new Set());
+    expect(impulses(busy, gone)).toEqual([{ channel: 'home', people: ['person.sam'], left: true }]);
+  });
+});

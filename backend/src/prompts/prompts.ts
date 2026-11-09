@@ -243,6 +243,22 @@ export function toolsNotLoadedBlock(lines: string[]): string {
   ].join('\n');
 }
 
+/**
+ * Agents with action replies on (Agent.actionReplies — agent/action-replies.ts): the model writes, together with
+ * the action calls, the reply it gives if they succeed; that reply ends the turn with no extra model call.
+ * Appended after the agent's instructions; the tool names are the turn's action tools (stable across turns).
+ */
+export function actionRepliesBlock(actionTools: string[]): string {
+  return [
+    '## Replies to actions',
+    `Action tools: ${actionTools.join(', ')}. They do something and answer only whether it worked.`,
+    'Each of them takes a `reply` argument: always fill it with the short reply you give the user if the action ' +
+    'succeeds (e.g. "Done, kitchen light on"), in the user\'s language. When a step of yours calls only action tools ' +
+    'and they all succeed, that reply is your answer and you are not called again; when one fails you are called ' +
+    'again as usual and the reply is discarded.',
+  ].join('\n');
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Background prompts (run on the summarizer model, off the interactive path)
 // ─────────────────────────────────────────────────────────────────────────────

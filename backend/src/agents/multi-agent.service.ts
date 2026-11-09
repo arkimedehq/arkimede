@@ -38,6 +38,7 @@ import { AgentTeam } from './agent-team.entity';
 import { LlmUsage, emptyUsage, addUsage, sumUsageFromMessages, usageFromResult } from '../common/llm-usage.util';
 import { runWithLlmCallContext, getLlmCallContext } from '../usage/llm-call-context';
 import { withAgentSpan, withRunParent } from '../observability/genai-tracing';
+import { agentToolName } from './agent-tool-name';
 
 export interface TeamStep { agent: string; role: string | null; output: string }
 export interface TeamRunResult {
@@ -138,8 +139,7 @@ export class MultiAgentService {
 
   /** snake_case tool name, `agent_`/`team_` prefix (mirror of FlowsService). */
   private toolName(prefix: 'agent' | 'team', name: string): string {
-    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 50);
-    return `${prefix}_${slug || 'no_name'}`;
+    return agentToolName(prefix, name);
   }
 
   // ── Building & running a single agent ──────────────────────────

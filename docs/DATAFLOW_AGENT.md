@@ -161,7 +161,7 @@ LLM["🤖 LLM call"] --> DEC{"tool_calls<br/>in the response?"}
 DEC -- "yes (+2 steps in the graph)" --> EXEC["ToolNode executes<br/>e.g. SQL: ⚙️ maxRows=10000 · timeoutMs=60s<br/>⚙️ prefetchTables/AllColumns (per-tool)"]
 EXEC -- "ToolMessage (result)" --> LLM
 
-DEC -- "⚙️ env AGENT_RECURSION_LIMIT<br/>reached (default 50 ≈ 25 rounds)" --> RERR["⚠️ GraphRecursionError"]
+DEC -- "⚙️ env AGENT_RECURSION_LIMIT<br/>reached (default 100 ≈ 50 rounds)" --> RERR["⚠️ GraphRecursionError"]
 DEC -- "no → final response" --> OUT["✅ Complete response"]
 
 LLM -. "SSE: chunk (progressive text)" .-> SSE["📡 Chat UI"]
@@ -190,7 +190,7 @@ SAVE -. "on the next turn:<br/>replay in the history (Diagram A)" .-> CTX
 | Base / user / project system prompt | Admin / profile / project | — | The 4 prompt levels |
 | LLM default + summarizer + vision | `llm_configs` | — | Agent-loop model, rolling-summary model, model for multimodal tasks (image OCR) |
 | `maxRows`, `timeoutMs`, `prefetchTables`, `prefetchAllColumns` | `executorConfig` of the individual SQL tool | 10000 / 60s / on | Tool output size (heavily affects history weight) |
-| `AGENT_RECURSION_LIMIT` | backend env (`.env`) | 50 (~25 LLM rounds, min 10) | LangGraph step limit per message on `stream()`/`invoke()`; exceeded → `GraphRecursionError` |
+| `AGENT_RECURSION_LIMIT` | backend env (`.env`) | 100 (~50 LLM rounds, min 10) | LangGraph step limit per message on `stream()`/`invoke()`; exceeded → `GraphRecursionError` |
 | `REPLAY_TOOL_OUTPUT_MAX_CHARS` | backend env (`.env`) | 3000 char (min 500) | Cap for tool output re-injected into the history (replay of previous turns) |
 
 ### Hardcoded 🔒

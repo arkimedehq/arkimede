@@ -74,9 +74,10 @@ function AgentEditor({ agent, onClose, onSaved }: { agent?: Agent; onClose: () =
   const [scope, setScope] = useState<AgentScope>(agent?.scope ?? 'personal');
   const [exposeAsTool, setExposeAsTool] = useState(agent?.exposeAsTool ?? false);
   const [memoryContext, setMemoryContext] = useState(agent?.memoryContext ?? true);
+  const [actionReplies, setActionReplies] = useState(agent?.actionReplies ?? false);
   const [err, setErr] = useState<string | null>(null);
 
-  const llmConfigs = useQuery({ queryKey: ['llm-configs'], queryFn: llmConfigsApi.list, staleTime: 30_000 });
+  const llmConfigs = useQuery({ queryKey: ['llm-configs', 'options'], queryFn: llmConfigsApi.options, staleTime: 30_000 });
 
   const save = useMutation({
     mutationFn: () => {
@@ -86,6 +87,7 @@ function AgentEditor({ agent, onClose, onSaved }: { agent?: Agent; onClose: () =
         toolFilter: { mode: toolMode, names: toolMode === 'names' ? [...selectedTools] : undefined },
         exposeAsTool,
         memoryContext,
+        actionReplies,
         scope,
       };
       return agent ? agentsApi.update(agent.id, payload) : agentsApi.create(payload);
@@ -141,6 +143,12 @@ function AgentEditor({ agent, onClose, onSaved }: { agent?: Agent; onClose: () =
         <label className="flex items-center gap-2 text-sm text-gray-300" title={t('modal.memoryContextTitle')}>
           <input type="checkbox" checked={memoryContext} onChange={(e) => setMemoryContext(e.target.checked)} />
           {t('modal.memoryContextText')}
+        </label>
+      </Field>
+      <Field label={t('modal.actionReplies')}>
+        <label className="flex items-center gap-2 text-sm text-gray-300" title={t('modal.actionRepliesTitle')}>
+          <input type="checkbox" checked={actionReplies} onChange={(e) => setActionReplies(e.target.checked)} />
+          {t('modal.actionRepliesText')}
         </label>
       </Field>
       <EditorFooter

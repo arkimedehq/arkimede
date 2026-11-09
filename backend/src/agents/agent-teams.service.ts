@@ -15,6 +15,8 @@ import { AuditService } from '../audit/audit.service';
 import { AgentTeam } from './agent-team.entity';
 import { AgentTeamMember } from './agent-team-member.entity';
 import { AgentScope, TeamTopology } from './agent.types';
+import { ToolFilterCleanupService } from '../tool-filters/tool-filter-cleanup.service';
+import { agentToolName } from './agent-tool-name';
 
 export interface UpsertTeamData {
   name: string;
@@ -39,6 +41,7 @@ export class AgentTeamsService {
     @InjectRepository(AgentTeamMember) private readonly memberRepo: Repository<AgentTeamMember>,
     private readonly teams: TeamsService,
     @Optional() private readonly audit?: AuditService,
+    @Optional() private readonly toolFilters?: ToolFilterCleanupService,
   ) {}
 
   async findAll(userId: string): Promise<AgentTeam[]> {
@@ -108,6 +111,14 @@ export class AgentTeamsService {
   async remove(id: string, actorId?: string): Promise<void> {
     const team = await this.repo.findOne({ where: { id } });
     await this.repo.delete({ id });
+    if (team) {
+      // Its tool (team exposed as a tool) leaves the agents' filters, unless a namesake remains.
+      const remaining = await this.repo.find({ select: { name: true } });
+      await this.toolFilters?.removeSource(`team:${team.name}`, {
+        names: [agentToolName('team', team.name)],
+        remaining: remaining.map((t) => agentToolName('team', t.name)),
+      });
+    }
     await this.audit?.record({
       actorId: actorId ?? null,
       action: 'agentteam.delete',

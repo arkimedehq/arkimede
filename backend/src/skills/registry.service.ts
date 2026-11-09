@@ -23,7 +23,7 @@ import { Injectable, Logger, ForbiddenException, BadGatewayException } from '@ne
 import { I18nContext } from 'nestjs-i18n';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'node:crypto';
-import { RegistryIndex, RegistrySkill } from './registry.types';
+import { RegistryIndex } from './registry.types';
 
 /** URL of the official registry — points to the raw file in the public GitHub repo */
 const OFFICIAL_REGISTRY_URL =

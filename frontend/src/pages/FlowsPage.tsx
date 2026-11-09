@@ -247,7 +247,7 @@ function FlowEditor({ flow, isNew = false, onClose }: { flow: Flow; isNew?: bool
   const [showRuns, setShowRuns] = useState(false);
 
   const tools = useQuery({ queryKey: ['custom-tools'], queryFn: customToolsApi.list, staleTime: 30_000 });
-  const llmConfigs = useQuery({ queryKey: ['llm-configs'], queryFn: llmConfigsApi.list, staleTime: 30_000 });
+  const llmConfigs = useQuery({ queryKey: ['llm-configs', 'options'], queryFn: llmConfigsApi.options, staleTime: 30_000 });
   const skills = useQuery({ queryKey: ['skills'], queryFn: skillsApi.list, staleTime: 30_000 });
   const allFlows = useQuery({ queryKey: ['flows'], queryFn: flowsApi.list, staleTime: 10_000 });
   const agents = useQuery({ queryKey: ['agents'], queryFn: agentsApi.list, staleTime: 30_000 });

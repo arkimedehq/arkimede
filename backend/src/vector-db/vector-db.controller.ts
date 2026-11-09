@@ -10,7 +10,6 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import {
   IsString, IsOptional, IsBoolean, MaxLength, MinLength, IsIn, IsObject, IsArray, ArrayMaxSize,
 } from 'class-validator';
-import { Type } from 'class-transformer';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';

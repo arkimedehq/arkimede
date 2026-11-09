@@ -25,6 +25,10 @@ class UpdateHomeAssistantDto {
   @IsOptional() @IsBoolean()
   haPresenceEnabled?: boolean;
 
+  /** With the presence on: a person busy on their phone (a call, do-not-disturb, a Focus) is told to the memory. */
+  @IsOptional() @IsBoolean()
+  haBusyEnabled?: boolean;
+
   @IsOptional() @IsBoolean()
   haVoiceEnabled?: boolean;
 

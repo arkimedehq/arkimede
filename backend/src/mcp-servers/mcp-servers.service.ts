@@ -42,6 +42,8 @@ import {
 } from './mcp-http-client';
 import {AuditService} from '../audit/audit.service';
 import {LocalMcpProcess} from './local-mcp-process';
+import { ToolFilterCleanupService } from '../tool-filters/tool-filter-cleanup.service';
+import { markActionTool } from '../agent/action-replies';
 
 // ── MCP types ─────────────────────────────────────────────────────────────────
 
@@ -61,6 +63,8 @@ interface McpTool {
   name: string;
   description?: string;
   inputSchema: McpToolInputSchema;
+  /** MCP tool annotations (hints): readOnlyHint false → an action tool (agent/action-replies.ts). */
+  annotations?: { readOnlyHint?: boolean };
 }
 
 interface McpToolsListResult {
@@ -160,6 +164,7 @@ export class McpServersService implements OnModuleDestroy {
     // Files returned by tools are stored through it (absent in unit contexts:
     // file blocks are then only described in the text).
     @Optional() @Inject(FilesService) private readonly files: FilesService | null = null,
+    @Optional() private readonly toolFilters?: ToolFilterCleanupService,
   ) {}
 
   private static readonly LIST_SELECT = {
@@ -392,6 +397,11 @@ export class McpServersService implements OnModuleDestroy {
     return this.findOne(id, userId);
   }
 
+  /** The server's tool-name slug: its tools are `mcp_<slug>_<tool>`. */
+  static slug(name: string): string {
+    return name.toLowerCase().replace(/\W+/g, '_');
+  }
+
   async remove(id: string, userId: string, isAdmin = false): Promise<void> {
     const server = await this.findManageable(id, userId, isAdmin);
     // Stop the local process if present
@@ -404,6 +414,12 @@ export class McpServersService implements OnModuleDestroy {
     this.remoteDiscovery.delete(id);
     await this.serverRepo.remove(server);
     this.logger.log(`MCP server deleted: "${server.name}" (user: ${userId})`);
+    // Its tools leave the agents' and automations' filters (unless a namesake server remains).
+    const remaining = await this.serverRepo.find({ select: { name: true } });
+    await this.toolFilters?.removeSource(`mcp:${server.name}`, {
+      prefix: `mcp_${McpServersService.slug(server.name)}_`,
+      remaining: remaining.map((s) => `mcp_${McpServersService.slug(s.name)}_`),
+    });
     await this.audit.record({
       actorId: userId, action: 'mcp.delete', resource: server.name,
       outcome: 'ok', ctx: { serverId: id, transport: server.transport },
@@ -481,7 +497,7 @@ export class McpServersService implements OnModuleDestroy {
     const perServer = await Promise.all(servers.map(async (server) => {
       const allTools: DynamicStructuredTool[] = [];
       try {
-        const serverSlug = server.name.toLowerCase().replace(/\W+/g, '_');
+        const serverSlug = McpServersService.slug(server.name);
 
         // ── http / sse ────────────────────────────────────────────────────
         if (server.transport === 'http' || server.transport === 'sse') {
@@ -492,7 +508,7 @@ export class McpServersService implements OnModuleDestroy {
             const schema   = this.buildZodSchema(mcpTool);
             const toolName = `mcp_${serverSlug}_${mcpTool.name}`;
 
-            allTools.push(new DynamicStructuredTool<any>({
+            allTools.push(McpServersService.withHints(mcpTool, new DynamicStructuredTool<any>({
               name:        toolName,
               description: mcpTool.description ?? mcpTool.name,
               schema,
@@ -507,7 +523,7 @@ export class McpServersService implements OnModuleDestroy {
                   return McpServersService.noFiles(`MCP error: ${err.message}`);
                 }
               },
-            }));
+            })));
           }
 
           // Resources (read-only context the server exposes) are surfaced to the
@@ -535,7 +551,7 @@ export class McpServersService implements OnModuleDestroy {
             const toolName = `mcp_${serverSlug}_${mcpTool.name}`;
             const procRef  = this.localProcesses.get(server.id)!;
 
-            allTools.push(new DynamicStructuredTool<any>({
+            allTools.push(McpServersService.withHints(mcpTool, new DynamicStructuredTool<any>({
               name:        toolName,
               description: mcpTool.description ?? mcpTool.name,
               schema,
@@ -552,7 +568,7 @@ export class McpServersService implements OnModuleDestroy {
                   return McpServersService.noFiles(`Local MCP error: ${err.message}`);
                 }
               },
-            }));
+            })));
           }
 
           this.logger.log(`MCP server "${server.name}" (local): ${mcpTools.length} tool`);
@@ -1217,6 +1233,11 @@ export class McpServersService implements OnModuleDestroy {
     return [out, { toolFiles: files }];
   }
 
+  /** The tool marked as an action tool when the server annotates it as not read-only (agent/action-replies.ts). */
+  private static withHints<T extends DynamicStructuredTool<any>>(mcpTool: { annotations?: { readOnlyHint?: boolean } }, tool: T): T {
+    return mcpTool.annotations?.readOnlyHint === false ? markActionTool(tool) : tool;
+  }
+
   private async callRemoteMcpTool(
     server: McpServer,
     secrets: Record<string, string>,
@@ -1229,6 +1250,11 @@ export class McpServersService implements OnModuleDestroy {
       { timeoutMs: 30_000 },
     );
     if (!result) return 'No result';
+    // A tool error (isError) is an error, as on the local transport: the caller reports it as "MCP error: …".
+    if (result.isError) {
+      const errText = Array.isArray(result.content) ? result.content.find((c: any) => c?.type === 'text')?.text : null;
+      throw new Error(errText ?? 'Tool call error');
+    }
 
     // The MCP result is an array of content blocks: return it structured, the
     // caller sanitizes it (text extracted, images saved as per-user files —
@@ -1287,7 +1313,7 @@ export class McpServersService implements OnModuleDestroy {
    *
    * @returns The process's tool list (empty if the start fails within 15s)
    */
-  private async ensureLocalProcess(server: McpServer): Promise<{ name: string; description?: string; inputSchema: Record<string, unknown> }[]> {
+  private async ensureLocalProcess(server: McpServer): Promise<{ name: string; description?: string; inputSchema: Record<string, unknown>; annotations?: { readOnlyHint?: boolean } }[]> {
     const existing = this.localProcesses.get(server.id);
 
     // Process present and working → reuse immediately

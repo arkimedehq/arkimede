@@ -20,7 +20,7 @@
  */
 import {
   Injectable, Logger, NotFoundException, BadRequestException,
-  ForbiddenException, OnModuleInit, OnModuleDestroy,
+  OnModuleInit, OnModuleDestroy,
 } from '@nestjs/common';
 import { I18nContext } from 'nestjs-i18n';
 import { InjectRepository } from '@nestjs/typeorm';

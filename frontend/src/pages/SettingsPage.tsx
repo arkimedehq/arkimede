@@ -22,7 +22,7 @@ import { profileApi, type MemoryMode, type UserGender } from '../api/profile';
 import { appConfigApi } from '../api/appConfig';
 import { userMemoryApi, type UserMemoryItem } from '../api/userMemory';
 import { usageApi, type TokenGroup, type AdminUsageSummary } from '../api/usage';
-import { llmConfigsApi, type LlmConfigDto } from '../api/llmConfigs';
+import { llmConfigsApi, REASONING_EFFORTS_BY_PROVIDER, type LlmConfigDto, type ReasoningEffort } from '../api/llmConfigs';
 import { vectorDbApi, type VectorCollection, type VectorDbProvider } from '../api/vectorDb';
 import { ocrApi, OCR_LEVELS, type OcrLevel } from '../api/ocr';
 import { teamsApi, type Team } from '../api/teams';
@@ -2647,7 +2647,7 @@ function LlmConfigForm({
   onSave: (payload: {
     name: string; provider: LlmProvider; model: string | null;
     apiKey?: string | null; baseUrl: string | null; maxTokens: number | null;
-    maxConcurrency: number | null;
+    maxConcurrency: number | null; reasoningEffort: ReasoningEffort | null;
     inputPricePerM: number | null; outputPricePerM: number | null;
     cacheReadPricePerM: number | null; cacheWritePricePerM: number | null;
   }) => void;
@@ -2663,6 +2663,7 @@ function LlmConfigForm({
   const [baseUrl, setBaseUrl]   = useState(initial?.baseUrl ?? '');
   const [maxTokens, setMaxTokens] = useState(String(initial?.maxTokens ?? 4096));
   const [maxConcurrency, setMaxConcurrency] = useState(initial?.maxConcurrency != null ? String(initial.maxConcurrency) : '');
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort | ''>(initial?.reasoningEffort ?? '');
   const [inputPrice, setInputPrice]   = useState(initial?.inputPricePerM != null ? String(initial.inputPricePerM) : '');
   const [outputPrice, setOutputPrice] = useState(initial?.outputPricePerM != null ? String(initial.outputPricePerM) : '');
   const [cacheReadPrice, setCacheReadPrice]   = useState(initial?.cacheReadPricePerM != null ? String(initial.cacheReadPricePerM) : '');
@@ -2670,6 +2671,7 @@ function LlmConfigForm({
   const [showKey, setShowKey]   = useState(false);
 
   const meta = LLM_PROVIDERS.find((p) => p.value === provider)!;
+  const reasoningOptions = REASONING_EFFORTS_BY_PROVIDER[provider] ?? [];
 
   const handleProviderChange = (p: LlmProvider) => {
     setProvider(p);
@@ -2685,6 +2687,8 @@ function LlmConfigForm({
       baseUrl: baseUrl.trim() || null,
       maxTokens: parseInt(maxTokens, 10) || null,
       maxConcurrency: maxConcurrency.trim() !== '' ? parseInt(maxConcurrency, 10) || null : null,
+      // A value the new provider does not accept is dropped (the backend would ignore it anyway).
+      reasoningEffort: reasoningEffort && reasoningOptions.includes(reasoningEffort) ? reasoningEffort : null,
       inputPricePerM:  inputPrice.trim()  !== '' ? Number(inputPrice)  : null,
       outputPricePerM: outputPrice.trim() !== '' ? Number(outputPrice) : null,
       cacheReadPricePerM:  cacheReadPrice.trim()  !== '' ? Number(cacheReadPrice)  : null,
@@ -2839,6 +2843,26 @@ function LlmConfigForm({
             text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-600 transition-colors"
         />
       </div>
+
+      {/* Reasoning (thinking) setting: only for providers that accept it */}
+      {reasoningOptions.length > 0 && (
+        <div>
+          <label className="block text-xs font-medium text-gray-400 mb-1">
+            {t('llm.formReasoningLabel')} <span className="text-gray-600">— {t('llm.formReasoningHint')}</span>
+          </label>
+          <select
+            value={reasoningOptions.includes(reasoningEffort as ReasoningEffort) ? reasoningEffort : ''}
+            onChange={(e) => setReasoningEffort(e.target.value as ReasoningEffort | '')}
+            className="w-48 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm
+              text-gray-200 focus:outline-none focus:border-blue-600 transition-colors"
+          >
+            <option value="">{t('llm.formReasoningDefault')}</option>
+            {reasoningOptions.map((r) => (
+              <option key={r} value={r}>{t(`llm.formReasoning_${r}`)}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* Prices (for the usage dashboard) */}
       <div>
@@ -5825,6 +5849,7 @@ function HomeAssistantCard() {
   const [url, setUrl]           = useState('');
   const [token, setToken]       = useState('');
   const [presence, setPresence] = useState(false);
+  const [busy, setBusy]         = useState(false);
   const [voice, setVoice]       = useState(false);
   const [tools, setTools]       = useState(false);
   const [toolUsers, setToolUsers] = useState<string[]>([]);
@@ -5835,10 +5860,11 @@ function HomeAssistantCard() {
     if (!data) return;
     setUrl(data.haUrl ?? '');
     setPresence(data.haPresenceEnabled);
+    setBusy(data.haBusyEnabled);
     setVoice(data.haVoiceEnabled);
     setTools(data.haToolsEnabled);
     setToolUsers(data.haToolsUserIds ?? []);
-  }, [data?.haUrl, data?.haPresenceEnabled, data?.haVoiceEnabled, data?.haToolsEnabled, (data?.haToolsUserIds ?? []).join(',')]);
+  }, [data?.haUrl, data?.haPresenceEnabled, data?.haBusyEnabled, data?.haVoiceEnabled, data?.haToolsEnabled, (data?.haToolsUserIds ?? []).join(',')]);
 
   const done = (res: HomeAssistantConfig) => {
     qc.setQueryData(['home-assistant-config'], res);
@@ -5851,7 +5877,7 @@ function HomeAssistantCard() {
   const save = useMutation({
     mutationFn: () => appConfigApi.updateHomeAssistantConfig({
       haUrl: url.trim() || null, ...(token.trim() ? { haToken: token.trim() } : {}),
-      haPresenceEnabled: presence, haVoiceEnabled: voice, haToolsEnabled: tools, haToolsUserIds: toolUsers.length ? toolUsers : null,
+      haPresenceEnabled: presence, haBusyEnabled: busy, haVoiceEnabled: voice, haToolsEnabled: tools, haToolsUserIds: toolUsers.length ? toolUsers : null,
     }),
     onSuccess: done, onError: fail,
   });
@@ -5864,7 +5890,7 @@ function HomeAssistantCard() {
     onSuccess: (res) => qc.setQueryData(['home-assistant-config'], res),
   });
 
-  const dirty = !!data && (url.trim() !== (data.haUrl ?? '') || !!token.trim() || presence !== data.haPresenceEnabled
+  const dirty = !!data && (url.trim() !== (data.haUrl ?? '') || !!token.trim() || presence !== data.haPresenceEnabled || busy !== data.haBusyEnabled
     || voice !== data.haVoiceEnabled || tools !== data.haToolsEnabled || toolUsers.join(',') !== (data.haToolsUserIds ?? []).join(','));
   const s = data?.status;
   const badge = s?.state === 'connected' ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10'
@@ -5948,6 +5974,7 @@ function HomeAssistantCard() {
         </div>
       )}
       {row(t('homeAssistant.presenceLabel'), t('homeAssistant.presenceHint'), toggle(presence, setPresence))}
+      {presence && row(t('homeAssistant.busyLabel'), t('homeAssistant.busyHint'), toggle(busy, setBusy))}
       {row(t('homeAssistant.voiceLabel'), t('homeAssistant.voiceHint'), toggle(voice, setVoice))}
 
       {/* ── Users ↔ persons ── */}
@@ -5986,6 +6013,7 @@ function HomeAssistantCard() {
               ? s.rooms.map((r) => `${r.area}: ${[...r.people, ...(r.someone ? [t('homeAssistant.someone')] : [])].join(', ')}`).join(' · ')
               : t('homeAssistant.noRooms')}
           </p>
+          {data?.haBusyEnabled && <p><span className="text-gray-300 font-medium">{t('homeAssistant.busy')}: </span>{s.busy?.length ? s.busy.join(', ') : t('homeAssistant.none')}</p>}
           {(presence || voice) && !s.memoryUserId && <p className="text-amber-400">{t('homeAssistant.noWyomingUser')}</p>}
         </div>
       )}

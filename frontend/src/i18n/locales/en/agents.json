@@ -53,11 +53,16 @@
     "exposeTeamToolName": "team_<name>",
     "toolPickerLoading": "Loading available tools…",
     "toolPickerError": "Could not load the available tools.",
-    "toolPickerEmpty": "No tools available. Configure MCP servers, skills, flows or other agents.",
+    "toolPickerEmpty": "No tools available. Configure MCP servers, skills, integrations, flows or other agents.",
     "toolPickerHint": "{{count}} selected. Tick individual tools or a whole group.",
     "toolPickerWholeGroup": "whole group",
+    "toolPickerOrphans": "No longer available",
+    "toolPickerOrphansHint": "Saved in the filter but matching no current tool (removed server, skill or tool): uncheck to remove them.",
     "memoryContext": "Active memory",
     "memoryContextText": "The agent uses its memory (recommended)",
-    "memoryContextTitle": "On: the agent reasons with its memory — how to use it, the relevant memories before each answer and the memory tools (Recordare when the episodic memory is on and reachable, otherwise the built-in memory). Turn it off only for an agent that must answer without memories."
+    "memoryContextTitle": "On: the agent reasons with its memory — how to use it, the relevant memories before each answer and the memory tools (Recordare when the episodic memory is on and reachable, otherwise the built-in memory). Turn it off only for an agent that must answer without memories.",
+    "actionReplies": "Action replies",
+    "actionRepliesText": "After a successful action, replies with no extra model call",
+    "actionRepliesTitle": "When the agent calls only action tools (turn on a light, show something on a screen, send a message) and they all succeed, the reply written with the calls ends the turn: no extra model call just to say \"done\". If an action fails, or a read tool is needed, the turn goes on as usual. Each step's text comes out once the step is over (no word-by-word streaming). Useful where latency matters, like voice."
   }
 }

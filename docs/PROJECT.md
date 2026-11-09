@@ -793,7 +793,7 @@ Two orthogonal axes — *which* tools to load (`toolLoadingStrategy`) and *how* 
   stages MUST see the same weight, otherwise compaction does not trigger and the trim cuts in its place
 - The summary goes into the **system prompt** (the only cross-provider location), a separate and non-cached block
 
-**Agent step limit:** env `AGENT_RECURSION_LIMIT` (default 50 ≈ 25 LLM↔tool rounds, minimum 10) passed to
+**Agent step limit:** env `AGENT_RECURSION_LIMIT` (default 100 ≈ 50 LLM↔tool rounds, minimum 10) passed to
 `agent.stream()` and `agent.invoke()`; the LangGraph default (25 ≈ 12 rounds) was insufficient for long DB
 explorations and produced `GraphRecursionError`. Full flow with diagrams and threshold table: **`DATAFLOW_AGENT.md`**.
 
@@ -927,7 +927,8 @@ progress (in memory on purpose).
 
 An `Agent` restricts its tools via `toolFilter` (`{ mode: 'all' | 'names' | 'none', names?: string[] }`).
 In `names` mode an entry ending with `*` matches by **prefix** — `mcp_home_assistant_*`
-selects every tool of that MCP server, `skill_knx_*` every script of that skill — so
+selects every tool of that MCP server, `skill_knx_*` every script of that skill, `ha_*`
+every tool of a native integration (Home Assistant) — so
 the filter survives tools being added to the selected source. The agent form builds
 these tokens with a **tool picker** fed by `GET /api/agent/tool-catalog` (no need to
 know the naming convention). `Agent.maxIterations` counts **ReAct tool rounds**
@@ -938,7 +939,22 @@ The per-agent LLM config (`Agent.llmConfigId`) is honored on the **main pipeline
 as the model runs it on that agent's provider/model — letting e.g. a voice agent use a
 low-latency provider while chat, skills and automations stay on the platform default.
 These overrides ride on `StreamResponseOptions` (`toolOverride`, `agentPromptOverride`,
-`maxIterations`, `llmConfigId`, `origin`) threaded through `streamResponse` → `resolveAgent`.
+`maxIterations`, `llmConfigId`, `origin`, `actionReplies`) threaded through `streamResponse` → `resolveAgent`.
+
+**Action replies** (`Agent.actionReplies`, off by default — `agent/action-replies.ts`): no model call just to say
+"done". An *action tool* does something and answers only whether it worked (turn a light on, show photos, send a
+message); a *read tool* returns what the answer is made of (a search, a state, the memory), so after it the model always
+runs again. Each source marks its action tools: the native integrations in code (Home Assistant's `ha_call_service`,
+`ha_notify`, calendar and to-do writes), MCP servers through the standard annotation `readOnlyHint: false` (a server
+that does not annotate its tools has none). With the option on, the turn's action tools are listed in the system prompt
+(`actionRepliesBlock`) and each takes one more argument, `reply` (`withReplyArg`, optional, removed before the tool
+runs): the reply the model gives if the action succeeds. An argument, not text: models always fill tool arguments, while
+some never write text in the message that calls a tool (DeepSeek, verified). The text of each step is held
+(`ActionReplyGate`) instead of streamed. A step of action tools that all succeeded (no thrown error, no `error`,
+`needs_confirmation`, `ok:false`/`success:false`, MCP `isError`) with a reply (the calls' `reply`, one sentence each;
+else text written with the calls) ends the turn on that reply — the next model call never starts; otherwise the held
+text is dropped and the turn goes on as before. Cost: each step's text
+comes out when the step is over (no word-by-word streaming) — meant for voice, where the answer is collected anyway.
 
 ---
 
@@ -1185,7 +1201,7 @@ POST   /api/openai/v1/chat/completions    ← OpenAI chat format; SSE streaming 
 #     model = an agent slug → applies its prompt, tool filter, iteration cap, LLM config.
 
 # Agent tool catalog (for the agent-form tool picker)
-GET    /api/agent/tool-catalog            ← available tools grouped by source (mcp/skill/flow/agent/custom) + per-source wildcard
+GET    /api/agent/tool-catalog            ← available tools grouped by source (mcp/skill/integration/flow/agent/custom) + per-source wildcard
 
 # App configuration (admin only)
 GET    /api/app-config
@@ -1429,7 +1445,11 @@ Recordare becomes configured). An empty setting falls back to the variable.
   same chat sharing a word, or within two hours sharing two; still to run, or run within two hours of it) is reported
   `done`, not delivered twice: the explicit, confirmed task is the source of truth (its time wins). It covers only the
   same person — an initiative for a contact needs a task that names them or carries one of their addresses — and a
-  task that failed or was deleted covers nothing: the memory's initiative is the safety net. In a turn, every
+  task that failed or was deleted covers nothing: the memory's initiative is the safety net. Each decision is logged (the
+  task that covered it, or why each candidate did not), so a reminder said twice can be explained after the task is gone. A question (`ask`) nobody
+  answers in its chat — 10 min after a satellite asked it, 6 h after a message, 12 h in the chat — is reported `ignored`
+  (`checkAnswers`, every poll): what Recordare's timing v1 learns from; a reminder said is never checked (silence after it is
+  normal). In a turn, every
   agent already gets the initiative due for the speaker inside the memory context (nothing to do here). Set-up (Recordare
   admin, once): `POST api/v1/admin/clients/{id}/webhooks {url: "http://backend:3000/api/recordare/webhook", events:
   ["initiative.deliver"]}` → put the `whsec_` secret in `RECORDARE_WEBHOOK_SECRET`; `PATCH api/v1/admin/clients/{id}
@@ -1443,7 +1463,10 @@ Recordare becomes configured). An empty setting falls back to the variable.
     `ha_history`, `ha_logbook`, `ha_calendar_events` / `ha_calendar_add`, `ha_todo_items` / `ha_todo_add` /
     `ha_todo_complete` (service calls with `return_response`), `ha_camera_snapshot` (the image as a tool file, shown to
     the model), `ha_notify` (a push on a person's phone), only on the entities Home Assistant exposes to Assist
-    (`homeassistant/expose_entity/list`); locks, alarms, garage doors and gates need the user's confirmation
+    (`homeassistant/expose_entity/list`); `ha_call_service` targets them by `entity_id` or by `name` / `area` as the user
+    says them (`resolveTargets`: an exact name, else the only entity holding all the words; several → the candidates
+    back, nothing done; an area alone → every entity of the domain there), so an action is one call with no
+    `ha_find_entities` round first; locks, alarms, garage doors and gates need the user's confirmation
     (`confirmed: true`); the server's own services (`homeassistant`, `hassio`, `shell_command`…) never; for every user
     or a list (`haToolsUserIds`); each user's person (`users.haPerson`) named in the descriptions ("me");
   - **flows started by Home Assistant** (`ha-triggers.service.ts`): trigger type `home-assistant` — an exposed entity
@@ -1467,8 +1490,18 @@ Recordare becomes configured). An empty setting falls back to the variable.
   initiatives' **voice channel**: `assist_satellite.start_conversation` when the satellite listens, else `announce`, on
   the satellite of the person's room; the message is written in the dedicated chat and the satellite bound to it
   (`ConversationFocusService`, 15 min) so the spoken reply lands there; with others in the room only the opening.
+  **Busy** (switch `haBusyEnabled`, under the presence, default off; migration 107): a person whose phone says they are
+  busy — a call (Android `phone_state` ringing / off-hook), do-not-disturb (Android `dnd_sensor`), a Focus (iOS
+  `focus`) — is told on their own, where they are, with `busy: true` the moment it starts (then on every refresh), and
+  `busy: false` once when it ends while they are still present (one who left ends with the departure). The sensors are
+  the companion app's on the person's `device_trackers`' devices, known by the entity registry (platform
+  `mobile_app`, the sensor's key at the end of the `unique_id`), not by a renamable entity id; a phone without them
+  sends nothing. The chat presence (`onPresence`) carries `busy: true` when the user's `haPerson` is busy
+  (`RecordareInitiativesService.setBusy`). `talking` is never sent: the satellites stream only after the wake word, so
+  Arkimede does not hear people talking to each other — and neither several people in a room nor a turn spoken to the
+  agent is such a conversation. Switch off: the impulses are exactly the ones of before.
   `GET/PATCH /api/admin/config/home-assistant` (settings, live status: entities exposed, voice points, who is home and
-  where, persons), `POST …/import-mcp`, `PATCH …/people` (a user's person).
+  where, who is busy, persons), `POST …/import-mcp`, `PATCH …/people` (a user's person).
 
 - **Per-user switch** `users.episodicMemoryEnabled` (default off; Settings → Memory, shown only when Recordare is
   configured; `PATCH /api/users/me {episodicMemoryEnabled}`). It is the **only on/off**: Recordare has no consent
@@ -1811,6 +1844,7 @@ agents                         # a reusable agent (like tool/skill: scope person
   ├── llmConfigId (FK→llm_configs)        ← the agent's model (per-role override)
   ├── toolFilter (jsonb)                  ← which tools/skills/MCP it loads (by name or by scope)
   ├── maxIterations (int, null)           ← cap on the sub-agent's ReAct loop
+  ├── actionReplies (bool, false)         ← a step of successful action tools ends on the reply written with it
   └── scope (personal|team|org) + teamId  ← same model as custom_tools/skills (assertCanManage)
 
 agent_teams

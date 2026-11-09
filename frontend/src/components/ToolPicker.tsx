@@ -4,12 +4,13 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
-import { Loader2, Plug, Sparkles, Workflow, Wrench, Bot, ChevronDown, ChevronRight } from 'lucide-react';
+import { Loader2, Plug, Sparkles, Workflow, Wrench, Bot, Home, ChevronDown, ChevronRight, CircleOff } from 'lucide-react';
 import { agentsApi, type ToolCatalogGroup } from '../api/agents';
 
 const SOURCE_META: Record<ToolCatalogGroup['source'], { Icon: React.ElementType; color: string }> = {
   mcp:    { Icon: Plug,     color: 'text-blue-400' },
   skill:  { Icon: Sparkles, color: 'text-violet-400' },
+  integration: { Icon: Home,  color: 'text-sky-400' },
   flow:   { Icon: Workflow, color: 'text-amber-400' },
   agent:  { Icon: Bot,      color: 'text-emerald-400' },
   custom: { Icon: Wrench,   color: 'text-teal-400' },
@@ -19,7 +20,9 @@ const SOURCE_META: Record<ToolCatalogGroup['source'], { Icon: React.ElementType;
  * Tool picker for a `names` tool filter (agents, automations). Selection is a set of tokens:
  * individual tool names and/or per-source wildcards (e.g. "mcp_home_assistant_*").
  * Selecting a group's wildcard supersedes its individual tools (which the backend
- * matches by prefix), so those checkboxes are shown as covered.
+ * matches by prefix), so those checkboxes are shown as covered. Selected tokens that
+ * match nothing in the catalog any more (a removed MCP server, skill, tool) are listed
+ * apart, so they can be seen and unchecked instead of staying hidden in the filter.
  */
 export function ToolPicker({ selected, onChange }: { selected: Set<string>; onChange: (s: Set<string>) => void }) {
   const { t } = useTranslation('agents');
@@ -41,6 +44,10 @@ export function ToolPicker({ selected, onChange }: { selected: Set<string>; onCh
   if (data.groups.length === 0) return <p className="text-xs text-gray-500">{t('modal.toolPickerEmpty')}</p>;
 
   const selectedCount = selected.size;
+  const matchesCatalog = (token: string) => data.groups.some((g) =>
+    g.wildcard === token || g.tools.some((tool) =>
+      token.endsWith('*') ? tool.name.startsWith(token.slice(0, -1)) : tool.name === token));
+  const orphans = [...selected].filter((token) => !matchesCatalog(token)).sort();
 
   return (
     <div className="space-y-2">
@@ -86,6 +93,23 @@ export function ToolPicker({ selected, onChange }: { selected: Set<string>; onCh
             </div>
           );
         })}
+        {orphans.length > 0 && (
+          <div className="rounded-md bg-gray-900/40">
+            <div className="flex items-center gap-2 px-2 py-1.5">
+              <CircleOff size={13} className="text-gray-500 ml-[21px]" />
+              <span className="text-xs font-medium text-gray-200 flex-1 truncate">{t('modal.toolPickerOrphans')}</span>
+            </div>
+            <div className="pl-8 pr-2 pb-2 space-y-1">
+              <p className="text-[11px] text-gray-500">{t('modal.toolPickerOrphansHint')}</p>
+              {orphans.map((token) => (
+                <label key={token} className="flex items-start gap-2 text-xs cursor-pointer">
+                  <input type="checkbox" className="mt-0.5 accent-indigo-500" checked onChange={() => toggle(token)} />
+                  <span className="font-mono text-gray-400">{token}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

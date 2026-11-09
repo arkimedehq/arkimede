@@ -189,6 +189,17 @@ The tools listed above exist but are NOT loaded for this message: the platform s
 > tools out, in every schema format. Prevents the model from denying capabilities that exist
 > but were not elected by the per-message RAG selection.
 
+### Action replies — `actionRepliesBlock(actionTools)`
+```
+## Replies to actions
+Action tools: <names>. They do something and answer only whether it worked.
+Each of them takes a `reply` argument: always fill it with the short reply you give the user if the action succeeds (e.g. "Done, kitchen light on"), in the user's language. When a step of yours calls only action tools and they all succeed, that reply is your answer and you are not called again; when one fails you are called again as usual and the reply is discarded.
+```
+> Appended after the agent's instructions only for an agent with `actionReplies` on and when the
+> turn has action tools (`agent/action-replies.ts`); the list is the turn's action tools, sorted
+> (stable across turns → cached). The `reply` argument's own description (`withReplyArg`): "The short reply you give
+> the user if this action succeeds, in their language".
+
 ---
 
 ## 3. Background prompts (separate LLM calls that shape the agent's context)

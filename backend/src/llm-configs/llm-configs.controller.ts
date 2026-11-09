@@ -15,6 +15,7 @@ import { AdminGuard } from '../common/guards/admin.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { LlmConfigsService } from './llm-configs.service';
 import { LlmProvider } from '../app-config/app-config.entity';
+import { REASONING_EFFORTS, ReasoningEffort } from './reasoning-params';
 
 const LLM_PROVIDERS: LlmProvider[] = [
   'anthropic', 'openai', 'gemini', 'ollama', 'lmstudio', 'openai-compatible', 'deepseek',
@@ -28,6 +29,7 @@ class CreateLlmConfigDto {
   @IsOptional() @IsString() baseUrl?: string | null;
   @IsOptional() @IsInt() @Min(256) @Max(384000) @Type(() => Number) maxTokens?: number | null;
   @IsOptional() @IsInt() @Min(1) @Max(64) @Type(() => Number) maxConcurrency?: number | null;
+  @IsOptional() @IsIn(REASONING_EFFORTS) reasoningEffort?: ReasoningEffort | null;
   @IsOptional() @IsNumber() @Min(0) @Type(() => Number) inputPricePerM?: number | null;
   @IsOptional() @IsNumber() @Min(0) @Type(() => Number) outputPricePerM?: number | null;
   @IsOptional() @IsNumber() @Min(0) @Type(() => Number) cacheReadPricePerM?: number | null;
@@ -42,10 +44,28 @@ class UpdateLlmConfigDto {
   @IsOptional() @IsString() baseUrl?: string | null;
   @IsOptional() @IsInt() @Min(256) @Max(384000) @Type(() => Number) maxTokens?: number | null;
   @IsOptional() @IsInt() @Min(1) @Max(64) @Type(() => Number) maxConcurrency?: number | null;
+  @IsOptional() @IsIn(REASONING_EFFORTS) reasoningEffort?: ReasoningEffort | null;
   @IsOptional() @IsNumber() @Min(0) @Type(() => Number) inputPricePerM?: number | null;
   @IsOptional() @IsNumber() @Min(0) @Type(() => Number) outputPricePerM?: number | null;
   @IsOptional() @IsNumber() @Min(0) @Type(() => Number) cacheReadPricePerM?: number | null;
   @IsOptional() @IsNumber() @Min(0) @Type(() => Number) cacheWritePricePerM?: number | null;
+}
+
+/**
+ * Model-picker options for every signed-in user: the forms that pick a model
+ * (agents, flows, tools, data sources) are not admin-only, the config CRUD is.
+ */
+@ApiTags('llm-configs')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
+@Controller('api/llm-configs')
+export class LlmConfigOptionsController {
+  constructor(private readonly svc: LlmConfigsService) {}
+
+  @Get('options')
+  options() {
+    return this.svc.listOptions();
+  }
 }
 
 @ApiTags('llm-configs')

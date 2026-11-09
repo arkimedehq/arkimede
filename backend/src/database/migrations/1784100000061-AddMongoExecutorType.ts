@@ -18,7 +18,7 @@ export class AddMongoExecutorType1784100000061 implements MigrationInterface {
     );
   }
 
-  public async down(queryRunner: QueryRunner): Promise<void> {
+  public async down(_queryRunner: QueryRunner): Promise<void> {
     // PostgreSQL does not support removing values from an enum (intentional no-op).
   }
 }

@@ -154,7 +154,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
     const params: any[] = [vecStr, limit];
 
     if (filter && Object.keys(filter).length > 0) {
-      const conditions = Object.entries(filter).map(([key, value], idx) => {
+      const conditions = Object.entries(filter).map(([key, value]) => {
         params.push(value);
         return `payload->>'${key}' = $${params.length}`;
       });

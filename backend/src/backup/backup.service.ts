@@ -161,7 +161,8 @@ export class BackupService {
           // stdout ended; give the process a tick to report its exit code.
           const check = () => {
             if (exitCode === null) return setTimeout(check, 20);
-            exitCode === 0 ? res() : rej(new Error(`pg_dump exited ${exitCode}: ${err.slice(0, 400)}`));
+            if (exitCode === 0) res();
+            else rej(new Error(`pg_dump exited ${exitCode}: ${err.slice(0, 400)}`));
           };
           check();
         })

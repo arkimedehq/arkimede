@@ -35,6 +35,7 @@ class UpsertAgentDto {
   @IsOptional() @IsInt() maxIterations?: number | null;
   @IsOptional() @IsBoolean() exposeAsTool?: boolean;
   @IsOptional() @IsBoolean() memoryContext?: boolean;
+  @IsOptional() @IsBoolean() actionReplies?: boolean;
   @IsOptional() @IsIn(['personal', 'team', 'org']) scope?: AgentScope;
   @IsOptional() @IsString() teamId?: string | null;
 }

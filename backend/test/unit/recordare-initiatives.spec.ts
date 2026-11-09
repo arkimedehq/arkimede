@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createHmac } from 'crypto';
 import type { Initiative } from '@arkimedehq/recordare-client';
-import { RecordareInitiativesService, sharedWords, names, CHAT_SOURCE, EVENT_TYPE } from '../../src/recordare/recordare-initiatives.service';
+import { RecordareInitiativesService, sharedWords, names, CHAT_SOURCE, EVENT_TYPE, ANSWER_WINDOW_MS } from '../../src/recordare/recordare-initiatives.service';
 import { RecordareWebhookController } from '../../src/recordare/recordare-webhook.controller';
 import { Chat } from '../../src/chats/chats.entity';
 import { Message } from '../../src/messages/messages.entity';
@@ -31,7 +31,7 @@ function initiative(over: Partial<Initiative> = {}): Initiative {
 function fakeDb() {
   const state = {
     users: [{ id: 'u1', episodicMemoryEnabled: true, recordareMemoryId: 'mem-1' }, { id: 'u2', episodicMemoryEnabled: false, recordareMemoryId: 'mem-2' }],
-    notifications: [] as Array<{ userId: string; source: string; sourceId: string }>,
+    notifications: [] as Array<{ id?: string; userId: string; source: string; sourceId: string; eventType?: string; payload?: any; createdAt?: Date }>,
     tasks: [] as Array<{ userId: string; chatId: string | null; runAt: Date | null; title: string | null; instruction: string; status?: string; lastRunAt?: Date | null }>,
     chats: [] as any[],
     messages: [] as any[],
@@ -46,7 +46,17 @@ function fakeDb() {
     query: async (sql: string, p: any[] = []) => {
       if (/FROM "users" WHERE "id" = \$1/.test(sql)) return state.users.filter((u) => u.id === p[0] && u.episodicMemoryEnabled);
       if (/FROM "users"/.test(sql)) return state.users.filter((u) => u.episodicMemoryEnabled && u.recordareMemoryId);
+      if (/FROM "notifications"/.test(sql) && /'kind' = 'ask'/.test(sql)) {
+        return state.notifications.filter((n) => n.source === p[0] && n.eventType === p[1] && n.payload?.kind === 'ask' && !n.payload?.answer
+          && (n.createdAt as Date) > p[2]);
+      }
       if (/FROM "notifications"/.test(sql)) return state.notifications.filter((n) => n.source === p[0] && n.sourceId === p[1]);
+      if (/UPDATE "notifications"/.test(sql)) {
+        const n = state.notifications.find((x) => x.id === p[0]);
+        if (n) n.payload = { ...n.payload, ...JSON.parse(p[1]) };
+        return [];
+      }
+      if (/FROM "messages"/.test(sql)) return state.messages.filter((m) => m.chatId === p[0] && m.role === 'user' && m.createdAt > p[1]);
       if (/FROM "scheduled_tasks"/.test(sql)) return state.tasks.filter((t) => t.userId === p[0]);
       throw new Error(`unexpected SQL: ${sql}`);
     },
@@ -55,9 +65,16 @@ function fakeDb() {
   return { ds: ds as any, state };
 }
 
+const clock = { now: NOW };
+
 function setup() {
+  clock.now = NOW;
   const db = fakeDb();
-  const notifications = { create: vi.fn(async (dto: any) => { db.state.notifications.push(dto); return { id: `n${db.state.notifications.length}` }; }) };
+  const notifications = { create: vi.fn(async (dto: any) => {
+    const id = `n${db.state.notifications.length + 1}`;
+    db.state.notifications.push({ ...dto, id, createdAt: new Date(clock.now) });
+    return { id };
+  }) };
   const pushed: any[] = [];
   const listeners: Array<(u: string) => void> = [];
   const gateway = { emitToUser: (userId: string, event: string, data: unknown) => pushed.push({ userId, event, data }), onUserConnected: (l: (u: string) => void) => { listeners.push(l); return () => {}; } };
@@ -94,6 +111,29 @@ describe('RecordareInitiativesService', () => {
     await t.deliver('u1', initiative({ id: '22222222-2222-4222-8222-222222222222', kind: 'ask', text: 'Com\'è andata dal dentista?' }));
     expect(t.db.state.chats).toHaveLength(1);
     expect(t.client.reportInitiative).toHaveBeenLastCalledWith('u1', '22222222-2222-4222-8222-222222222222', 'asked', { channel: 'chat' });
+  });
+
+  it('a question nobody answers in its chat within the channel\'s window is reported ignored; an answered one is not (F4)', async () => {
+    const ask = (id: string) => initiative({ id, kind: 'ask', text: 'Hai steso i panni?' });
+    await t.deliver('u1', ask('44444444-4444-4444-8444-444444444444'));
+    await t.deliver('u1', ask('55555555-5555-4555-8555-555555555555'));
+    await t.deliver('u1', initiative({ id: '66666666-6666-4666-8666-666666666666' })); // a reminder said: never checked
+    const chatId = t.db.state.chats[0].id;
+    // An hour later: within the chat's 12 hours, nothing reported yet.
+    expect(await t.svc.checkAnswers(NOW + 3_600_000)).toBe(0);
+    // The person answers (one reply after both questions, in the chat they were asked in).
+    t.db.state.messages.push({ chatId, role: 'user', content: 'sì', createdAt: new Date(NOW + 2 * 3_600_000) });
+    t.client.reportInitiative.mockClear();
+    expect(await t.svc.checkAnswers(NOW + 13 * 3_600_000)).toBe(0);
+    expect(t.client.reportInitiative).not.toHaveBeenCalled();
+    expect(t.db.state.notifications.filter((n) => n.payload?.kind === 'ask').map((n) => n.payload.answer)).toEqual(['answered', 'answered']);
+    // A new question, unanswered past the window: ignored, on its channel, once.
+    clock.now = NOW + 20 * 3_600_000;
+    await t.deliver('u1', ask('77777777-7777-4777-8777-777777777777'));
+    expect(await t.svc.checkAnswers(NOW + 33 * 3_600_000)).toBe(1);
+    expect(t.client.reportInitiative).toHaveBeenLastCalledWith('u1', '77777777-7777-4777-8777-777777777777', 'ignored', { channel: 'chat' });
+    expect(await t.svc.checkAnswers(NOW + 34 * 3_600_000)).toBe(0);
+    expect(ANSWER_WINDOW_MS).toEqual({ voice: 600_000, messaging: 21_600_000, chat: 43_200_000 });
   });
 
   it('messaging first when a skill offers a user channel: to the user\'s own account, recorded in the chat the skill uses, no push', async () => {
@@ -198,7 +238,10 @@ describe('RecordareInitiativesService', () => {
     const yogurt = initiative({ for: eriona as any, text: 'Eriona, ricordati di preparare lo yogurt con la yogurtiera', dueAt: '2026-11-06T19:00:00Z', source: null });
     // The task the agent made at her request was a push to Andrea: it does not cover what is for Eriona (she would get nothing).
     t.db.state.tasks.push({ userId: 'u1', chatId: 'x', runAt: new Date('2026-11-06T20:00:00Z'), title: 'Promemoria yogurt in yogurtiera', instruction: 'Invia ad Andrea una notifica push: prepara lo yogurt', status: 'active' });
+    const log = vi.spyOn((t.svc as any).logger, 'log');
     expect(await t.svc.alreadyScheduled('u1', yogurt)).toBe(false);
+    // Why it did not cover is logged (the task may be gone by the time someone asks).
+    expect(log).toHaveBeenLastCalledWith(expect.stringMatching(/not covered — .*: does not name Eriona/));
     // A task that names her (or carries her Telegram id) covers it; its own time wins (an hour apart).
     t.db.state.tasks[0].instruction = 'Manda a Eriona su Telegram: prepara lo yogurt';
     expect(await t.svc.alreadyScheduled('u1', yogurt)).toBe(true);
@@ -222,6 +265,21 @@ describe('RecordareInitiativesService', () => {
     expect(t.client.presence).toHaveBeenCalledTimes(1);
     await t.svc.onPresence('u2', NOW); // memory off
     expect(t.client.presence).toHaveBeenCalledTimes(1);
+  });
+
+  it('the chat presence says busy when the user\'s Home Assistant person is busy on their phone, else nothing about it', async () => {
+    (t.db.state.users[0] as any).haPerson = 'person.alex';
+    const busy = new Set<string>(['person.alex']);
+    t.svc.setBusy({ busy: (p) => busy.has(p) });
+    await t.svc.onPresence('u1', NOW);
+    expect(t.client.presence).toHaveBeenLastCalledWith('u1', { channel: 'chat', busy: true });
+    busy.clear();
+    await t.svc.onPresence('u1', NOW + 11 * 60_000);
+    expect(t.client.presence).toHaveBeenLastCalledWith('u1', { channel: 'chat' });
+    t.svc.setBusy(null);
+    busy.add('person.alex');
+    await t.svc.onPresence('u1', NOW + 22 * 60_000);
+    expect(t.client.presence).toHaveBeenLastCalledWith('u1', { channel: 'chat' });
   });
 
   it('the feed catches up on what was pushed to its channels in the last day, from its cursor', async () => {

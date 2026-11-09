@@ -64,6 +64,13 @@ export class Agent {
   @Column({ type: 'boolean', default: true })
   memoryContext: boolean;
 
+  /**
+   * Action replies (agent/action-replies.ts): a last step of successful action tools ends the turn with the reply
+   * the model wrote with the calls — no model call just to say "done". Off by default.
+   */
+  @Column({ type: 'boolean', default: false })
+  actionReplies: boolean;
+
   @Column({ type: 'varchar', length: 16, default: 'personal' })
   scope: AgentScope;
 

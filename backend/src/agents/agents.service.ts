@@ -15,6 +15,8 @@ import { TeamsService } from '../teams/teams.service';
 import { AuditService } from '../audit/audit.service';
 import { Agent } from './agent.entity';
 import { AgentScope, AgentToolFilter } from './agent.types';
+import { ToolFilterCleanupService } from '../tool-filters/tool-filter-cleanup.service';
+import { agentToolName } from './agent-tool-name';
 
 export interface UpsertAgentData {
   name: string;
@@ -25,6 +27,7 @@ export interface UpsertAgentData {
   maxIterations?: number | null;
   exposeAsTool?: boolean;
   memoryContext?: boolean;
+  actionReplies?: boolean;
   scope?: AgentScope;
   teamId?: string | null;
 }
@@ -35,6 +38,7 @@ export class AgentsService {
     @InjectRepository(Agent) private readonly repo: Repository<Agent>,
     private readonly teams: TeamsService,
     @Optional() private readonly audit?: AuditService,
+    @Optional() private readonly toolFilters?: ToolFilterCleanupService,
   ) {}
 
   async findAll(userId: string): Promise<Agent[]> {
@@ -74,6 +78,7 @@ export class AgentsService {
       maxIterations: data.maxIterations ?? null,
       exposeAsTool: data.exposeAsTool ?? false,
       memoryContext: data.memoryContext ?? true,
+      actionReplies: data.actionReplies ?? false,
       scope: data.scope ?? 'personal',
       teamId: data.scope === 'team' ? (data.teamId ?? null) : null,
     });
@@ -98,6 +103,7 @@ export class AgentsService {
     if (data.maxIterations !== undefined) agent.maxIterations = data.maxIterations;
     if (data.exposeAsTool !== undefined) agent.exposeAsTool = data.exposeAsTool;
     if (data.memoryContext !== undefined) agent.memoryContext = data.memoryContext;
+    if (data.actionReplies !== undefined) agent.actionReplies = data.actionReplies;
     if (data.scope !== undefined) {
       agent.scope = data.scope;
       agent.teamId = data.scope === 'team' ? (data.teamId ?? agent.teamId ?? null) : null;
@@ -108,6 +114,14 @@ export class AgentsService {
   async remove(id: string, actorId?: string): Promise<void> {
     const agent = await this.repo.findOne({ where: { id } });
     await this.repo.delete({ id });
+    if (agent) {
+      // Its tool (agent exposed as a tool) leaves the other filters, unless a namesake remains.
+      const remaining = await this.repo.find({ select: { name: true } });
+      await this.toolFilters?.removeSource(`agent:${agent.name}`, {
+        names: [agentToolName('agent', agent.name)],
+        remaining: remaining.map((a) => agentToolName('agent', a.name)),
+      });
+    }
     await this.audit?.record({
       actorId: actorId ?? null,
       action: 'agent.delete',

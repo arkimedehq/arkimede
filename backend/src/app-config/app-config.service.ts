@@ -60,6 +60,7 @@ export interface HomeAssistantSettings {
   hasHaToken: boolean;
   haToken?: string | null;
   haPresenceEnabled: boolean;
+  haBusyEnabled: boolean;
   haVoiceEnabled: boolean;
   haToolsEnabled: boolean;
   haToolsUserIds: string[] | null;
@@ -71,6 +72,7 @@ export interface HomeAssistantSettingsDto {
   /** Plaintext token — encrypted before saving. */
   haToken?: string | null;
   haPresenceEnabled?: boolean;
+  haBusyEnabled?: boolean;
   haVoiceEnabled?: boolean;
   haToolsEnabled?: boolean;
   haToolsUserIds?: string[] | null;
@@ -525,6 +527,7 @@ export class AppConfigService implements OnModuleInit {
       hasHaToken: !!c?.haToken,
       ...(withSecret ? { haToken: token } : {}),
       haPresenceEnabled: c?.haPresenceEnabled ?? false,
+      haBusyEnabled:     c?.haBusyEnabled     ?? false,
       haVoiceEnabled:    c?.haVoiceEnabled    ?? false,
       haToolsEnabled:    c?.haToolsEnabled    ?? false,
       haToolsUserIds:    c?.haToolsUserIds    ?? null,
@@ -542,6 +545,7 @@ export class AppConfigService implements OnModuleInit {
       haUrl: dto.haUrl === undefined ? current?.haUrl ?? null : dto.haUrl?.trim().replace(/\/+$/, '') || null,
       haToken: dto.haToken === undefined ? current?.haToken ?? null : dto.haToken?.trim() ? encrypt(dto.haToken.trim()) : null,
       haPresenceEnabled: keep(dto.haPresenceEnabled, current?.haPresenceEnabled ?? false),
+      haBusyEnabled:     keep(dto.haBusyEnabled,     current?.haBusyEnabled     ?? false),
       haVoiceEnabled:    keep(dto.haVoiceEnabled,    current?.haVoiceEnabled    ?? false),
       haToolsEnabled:    keep(dto.haToolsEnabled,    current?.haToolsEnabled    ?? false),
       haToolsUserIds:    dto.haToolsUserIds === undefined ? current?.haToolsUserIds ?? null : dto.haToolsUserIds?.length ? dto.haToolsUserIds : null,

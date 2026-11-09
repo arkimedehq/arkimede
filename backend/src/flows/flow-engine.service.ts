@@ -316,7 +316,6 @@ export class FlowEngineService {
   // avoid the cycle at the module level: AgentsModule already imports FlowsModule.
 
   private getMultiAgent(): any {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { MultiAgentService } = require('../agents/multi-agent.service');
     return this.moduleRef.get(MultiAgentService, { strict: false });
   }

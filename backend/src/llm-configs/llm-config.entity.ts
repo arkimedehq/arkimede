@@ -6,6 +6,7 @@ import {
   CreateDateColumn, UpdateDateColumn,
 } from 'typeorm';
 import { LlmProvider } from '../app-config/app-config.entity';
+import { ReasoningEffort } from './reasoning-params';
 
 /**
  * A named LLM configuration — multi-record table that replaces
@@ -54,6 +55,13 @@ export class LlmConfigEntity {
    */
   @Column({ type: 'int', nullable: true })
   maxConcurrency: number | null;
+
+  /**
+   * Reasoning setting: off | low | medium | high. Null = the provider's default.
+   * Applied only where the provider supports it (see reasoning-params.ts).
+   */
+  @Column({ type: 'varchar', length: 10, nullable: true })
+  reasoningEffort: ReasoningEffort | null;
 
   /** If true, this is the active config for the agent. Only one at a time. */
   @Column({ type: 'boolean', default: false })

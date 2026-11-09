@@ -13,6 +13,8 @@
  *     every change is told to the memory as presence impulses (an arrival, a departure, someone in an empty room —
  *     people by their `homeassistant` identity, `person.x`, the address bound on their card in Recordare), and what
  *     is present is told again every few minutes so it stays live. What the memory answers is said in that room.
+ *     With the busy switch on, a person busy on their phone (a call, do-not-disturb, a Focus) is told as busy, and the
+ *     chat presence of their user says it too (RecordareInitiativesService.setBusy).
  *   - Voice: the voice channel of the initiatives (RecordareInitiativesService.setVoice): a text is said on the voice
  *     point of a room — `assist_satellite.start_conversation` (it listens for the answer) when the satellite can, else
  *     `announce` — and the satellite is bound to the chat for the reply (ConversationFocusService: the Wyoming turn of
@@ -22,13 +24,16 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { AppConfigService } from '../app-config/app-config.service';
 import { ConversationFocusService, FOCUS_DEFAULT_TTL_MS, type VoiceTurn } from '../chats/conversation-focus.service';
-import { RecordareInitiativesService, type PushChannel, type VoiceChannel } from '../recordare/recordare-initiatives.service';
+import { RecordareInitiativesService, type BusySignal, type PushChannel, type VoiceChannel } from '../recordare/recordare-initiatives.service';
 import { HaModel, current, impulses, slugify, turnSpeaker, type Impulse, type Snapshot, type VoicePoint } from './ha-model';
 import { HaSocket } from './ha-socket';
 
 /** What is present is told again this often (presences live 2× as long). */
 const REFRESH_MS = 5 * 60_000;
-/** State changes are gathered this long before the impulses are worked out. */
+/**
+ * State changes are gathered this long, from the first one, before the impulses are worked out: later changes do not
+ * push it back (a busy Home Assistant sends several a second, and a wait for quiet would never end).
+ */
 const SETTLE_MS = 2_000;
 const RETRY_MIN_MS = 5_000;
 const RETRY_MAX_MS = 5 * 60_000;
@@ -51,6 +56,8 @@ export interface HomeAssistantStatus {
   voicePoints: Array<{ entityId: string; area: string; listens: boolean }>;
   home: string[];
   rooms: Array<{ area: string; people: string[]; someone: number }>;
+  /** The people present and busy on their phone (the busy switch on). */
+  busy: string[];
   /** Every `person.*` (to link Arkimede users to them). */
   persons: Array<{ entityId: string; name: string }>;
   /** How many entities are exposed to Assist (what the tools see). */
@@ -65,13 +72,13 @@ export function bearerToken(headers: Record<string, string>): string | null {
 }
 
 @Injectable()
-export class HomeAssistantService implements OnModuleInit, OnModuleDestroy, VoiceChannel, PushChannel {
+export class HomeAssistantService implements OnModuleInit, OnModuleDestroy, VoiceChannel, PushChannel, BusySignal {
   private readonly logger = new Logger(HomeAssistantService.name);
   private socket: HaSocket | null = null;
   private model = new HaModel();
   private last: Snapshot = { home: new Set(), rooms: new Map() };
-  private settings = { presence: false, voice: false, tools: false, toolsUserIds: null as string[] | null };
-  private status: Omit<HomeAssistantStatus, 'voicePoints' | 'home' | 'rooms' | 'persons' | 'exposed'> = { state: 'off', error: null, version: null, url: null, memoryUserId: null };
+  private settings = { presence: false, busy: false, voice: false, tools: false, toolsUserIds: null as string[] | null };
+  private status: Omit<HomeAssistantStatus, 'voicePoints' | 'home' | 'rooms' | 'busy' | 'persons' | 'exposed'> = { state: 'off', error: null, version: null, url: null, memoryUserId: null };
   /** The entities exposed to Assist: all the tools may see or touch. */
   private exposedSet = new Set<string>();
   /** Every entity's current state (the tools read it). */
@@ -111,7 +118,7 @@ export class HomeAssistantService implements OnModuleInit, OnModuleDestroy, Voic
   async apply(): Promise<HomeAssistantStatus> {
     this.stop();
     const cfg = await this.appConfig.getHomeAssistantConfig(true);
-    this.settings = { presence: cfg.haPresenceEnabled, voice: cfg.haVoiceEnabled, tools: cfg.haToolsEnabled, toolsUserIds: cfg.haToolsUserIds };
+    this.settings = { presence: cfg.haPresenceEnabled, busy: cfg.haPresenceEnabled && cfg.haBusyEnabled, voice: cfg.haVoiceEnabled, tools: cfg.haToolsEnabled, toolsUserIds: cfg.haToolsUserIds };
     this.status = { ...this.status, state: 'off', error: null, version: null, url: cfg.haUrl };
     if ((this.settings.presence || this.settings.voice || this.settings.tools) && cfg.haUrl && cfg.haToken) {
       await this.connect(this.generation, cfg.haUrl, cfg.haToken);
@@ -128,6 +135,7 @@ export class HomeAssistantService implements OnModuleInit, OnModuleDestroy, Voic
       voicePoints: this.socket ? this.model.voicePoints().map((p) => ({ entityId: p.entityId, area: this.model.areaName(p.areaId), listens: (p.features & START_CONVERSATION) !== 0 })) : [],
       home: [...snap.home],
       rooms: [...snap.rooms].map(([a, r]) => ({ area: this.model.areaName(a), people: [...r.people], someone: r.someone })),
+      busy: [...(snap.busy ?? [])],
       persons: [...this.statesById.values()].filter((s) => s.entity_id.startsWith('person.'))
         .map((s) => ({ entityId: s.entity_id, name: String(s.attributes?.friendly_name ?? s.entity_id) })),
       exposed: this.exposedSet.size,
@@ -256,6 +264,7 @@ export class HomeAssistantService implements OnModuleInit, OnModuleDestroy, Voic
         socket.command({ type: 'get_states' }),
       ]);
       const model = new HaModel();
+      model.useBusy(this.settings.busy);
       model.setRegistries({ areas, devices, entities });
       model.setStates(states);
       this.statesById = new Map((states as any[]).map((s) => [s.entity_id, s]));
@@ -284,11 +293,13 @@ export class HomeAssistantService implements OnModuleInit, OnModuleDestroy, Voic
         this.socket = null;
         this.initiatives.setVoice(null);
         this.initiatives.setPush(null);
+        this.initiatives.setBusy(null);
         this.focus.setVoiceTurnListener(null);
         this.fail(`connection lost: ${reason}`, gen, true);
       };
       if (this.settings.voice) this.initiatives.setVoice(this);
       this.initiatives.setPush(this);
+      if (this.settings.busy) this.initiatives.setBusy(this);
       if (this.settings.presence) this.focus.setVoiceTurnListener((turn) => this.voiceTurn(turn));
       this.logger.log(`connected to Home Assistant ${socket.version}: ${model.voicePoints().length} voice points, ${this.exposedSet.size} entities exposed to Assist`);
       if (this.settings.presence) {
@@ -351,6 +362,7 @@ export class HomeAssistantService implements OnModuleInit, OnModuleDestroy, Voic
     this.clearTimers();
     this.initiatives.setVoice(null);
     this.initiatives.setPush(null);
+    this.initiatives.setBusy(null);
     this.focus.setVoiceTurnListener(null);
     const socket = this.socket;
     this.socket = null;
@@ -366,9 +378,9 @@ export class HomeAssistantService implements OnModuleInit, OnModuleDestroy, Voic
 
   // ── Presence ─────────────────────────────────────────────────────────────────
 
-  /** A state changed: once things settle, the impulses for what changed. */
+  /** A state changed: once the changes are gathered, the impulses for what changed. */
   private changed(delayMs = SETTLE_MS): void {
-    if (this.settle) clearTimeout(this.settle);
+    if (this.settle) return;
     this.settle = setTimeout(() => {
       this.settle = null;
       const next = this.model.snapshot();
@@ -403,6 +415,11 @@ export class HomeAssistantService implements OnModuleInit, OnModuleDestroy, Voic
     timer.unref?.();
   }
 
+  /** Whether a sensor on the phone of `person` (`person.x`) says they are busy now (the busy switch on, connected). */
+  busy(person: string): boolean {
+    return this.settings.busy && !!this.socket && this.model.personBusy(person);
+  }
+
   /** Tells the memory (the Wyoming user's) these impulses, one at a time. */
   private async tell(list: Impulse[]): Promise<void> {
     const userId = this.status.memoryUserId;
@@ -416,7 +433,9 @@ export class HomeAssistantService implements OnModuleInit, OnModuleDestroy, Voic
         ...(imp.someone ? { someone: imp.someone } : {}),
         ttlSeconds: Math.round((REFRESH_MS * 2) / 1000),
         ...(imp.left ? { left: true } : {}),
+        ...(imp.busy !== undefined ? { busy: imp.busy } : {}),
       }, room ? imp.areaId : undefined);
+      if (imp.busy !== undefined) this.logger.log(`presence busy: ${imp.busy} for ${imp.people.join(', ')} (${imp.areaId ? this.model.areaName(imp.areaId) : imp.channel})`);
     }
   }
 }

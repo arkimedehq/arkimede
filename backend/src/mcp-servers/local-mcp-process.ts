@@ -57,6 +57,8 @@ export interface LocalMcpTool {
   name: string;
   description?: string;
   inputSchema: Record<string, unknown>;
+  /** MCP tool annotations (hints), e.g. readOnlyHint. */
+  annotations?: { readOnlyHint?: boolean };
 }
 
 export type LocalMcpStatus = 'stopped' | 'starting' | 'running' | 'error';
@@ -309,6 +311,7 @@ export class LocalMcpProcess {
         name:        string;
         description?: string;
         inputSchema?: Record<string, unknown>;
+        annotations?: { readOnlyHint?: boolean };
       }>;
     };
 
@@ -316,6 +319,7 @@ export class LocalMcpProcess {
       name:        t.name,
       description: t.description,
       inputSchema: t.inputSchema ?? {},
+      ...(t.annotations ? { annotations: t.annotations } : {}),
     }));
   }
 
