@@ -20,7 +20,7 @@
  */
 import {
   Controller, Get, Post, Put, Patch, Delete,
-  Body, Param, UseGuards, HttpCode, HttpStatus,
+  Body, Param, UseGuards, HttpCode, HttpStatus, ForbiddenException,
 } from '@nestjs/common';
 import {
   ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiParam,
@@ -95,6 +95,7 @@ export class FlowsController {
   async update(@Param('id') id: string, @Body() dto: UpsertFlowDto, @CurrentUser() user: any) {
     const existing = await this.service.findById(id);
     await this.service.assertCanManage(user, existing.scope, existing.teamId, existing.userId);
+    if (existing.pluginId) throw new ForbiddenException('flows.pluginReadOnly');
     if (dto.scope !== undefined && dto.scope !== existing.scope) {
       await this.service.assertCanManage(user, dto.scope, dto.teamId ?? existing.teamId, existing.userId);
     }
@@ -115,7 +116,14 @@ export class FlowsController {
   async remove(@Param('id') id: string, @CurrentUser() user: any) {
     const existing = await this.service.findById(id);
     await this.service.assertCanManage(user, existing.scope, existing.teamId, existing.userId);
+    if (existing.pluginId) throw new ForbiddenException('flows.pluginReadOnly');
     await this.service.remove(id, user.id);
+  }
+
+  @Post(':id/duplicate')
+  @ApiOperation({ summary: 'Copy an accessible flow into a new personal flow of the user (switched off)' })
+  duplicate(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.service.duplicate(id, user.id);
   }
 
   @Post(':id/run')

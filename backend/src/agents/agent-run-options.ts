@@ -30,3 +30,11 @@ export function agentRunOptions(
     ...(agent.maxIterations ? { maxIterations: agent.maxIterations * 2 + 1 } : {}),
   };
 }
+
+/**
+ * The LangGraph recursion limit of an agent's run: its maxIterations (ReAct TOOL ROUNDS: each is agent + tool, plus the
+ * final agent step), else the platform's default (AGENT_RECURSION_LIMIT, 100, at least 10) — never LangGraph's own 25.
+ */
+export function recursionLimitOf(maxIterations: number | null | undefined): number {
+  return maxIterations ? maxIterations * 2 + 1 : Math.max(10, parseInt(process.env.AGENT_RECURSION_LIMIT ?? '', 10) || 100);
+}

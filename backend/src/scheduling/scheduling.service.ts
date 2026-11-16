@@ -12,7 +12,9 @@
  * - Scheduler on **BullMQ + Redis** (recurring cron / one-shot), like Flows.
  * - On fire, a **headless runner** re-runs the agent with `instruction`
  *   (`AgentService.invoke`, resolved via ModuleRef to avoid cycles) and delivers
- *   the outcome via a **notification** (persisted + WebSocket push).
+ *   the outcome in a chat with a **notification** (persisted + WebSocket push) and,
+ *   for a `voice` automation, **by voice** where the user is confirmed present
+ *   (VoiceDeliveryService). The run is told so (AUTOMATION_RUN_NOTE).
  *
  * Model B of the design (see "Auto-Scheduling (Design)" in PROJECT.md): the agent
  * re-reasons on each fire with all its tools → "schedule anything".
@@ -29,16 +31,21 @@ import { Queue, Worker, Job, ConnectionOptions } from 'bullmq';
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { parseExpression } from 'cron-parser';
-import { SCHEDULE_TASK_DESC, CONFIRM_SCHEDULED_TASK_DESC } from '../prompts/prompts';
+import { SCHEDULE_TASK_DESC, CONFIRM_SCHEDULED_TASK_DESC, AUTOMATION_RUN_NOTE } from '../prompts/prompts';
 
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
+import { VoiceDeliveryService } from '../notifications/voice-delivery.service';
+import { getLlmCallContext } from '../usage/llm-call-context';
 import { ScheduledTask } from './scheduled-task.entity';
 import { Chat } from '../chats/chats.entity';
 import { Message } from '../messages/messages.entity';
 
 const QUEUE_NAME = 'auto-scheduler';
 const schedId = (id: string) => `task:${id}`;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** The chats of a voice entry point (ExternalChatsService source): an automation asked for there is said aloud too. */
+const VOICE_SOURCES = new Set(['wyoming']);
 const onceId = (id: string) => `task:${id}:once`;
 
 // Cost/abuse guardrail — DEFAULTS, overridable via env
@@ -63,6 +70,10 @@ export interface CreateTaskInput {
   /** Origin chat: for one-shot tasks it becomes the outcome delivery chat. */
   chatId?: string | null;
   toolFilter?: { mode: 'all' | 'names' | 'none'; names?: string[] };
+  /** Also by voice; absent = on when asked for by voice (`fromVoice`, or the origin chat is a voice conversation). */
+  voice?: boolean;
+  /** Asked for in a voice turn (the run's origin). */
+  fromVoice?: boolean;
 }
 
 /** Editable fields of an automation (all optional: absent = unchanged). */
@@ -75,6 +86,7 @@ export interface UpdateTaskInput {
   toolFilter?: { mode: 'all' | 'names' | 'none'; names?: string[] };
   /** null = back to the global default; 0 = no cap (admin only). */
   maxTokensPerRun?: number | null;
+  voice?: boolean;
 }
 
 @Injectable()
@@ -98,6 +110,7 @@ export class SchedulingService implements OnModuleInit, OnModuleDestroy {
     @InjectRepository(Message) private readonly messageRepo: Repository<Message>,
     private readonly notifications: NotificationsService,
     private readonly gateway: NotificationsGateway,
+    private readonly voiceDelivery: VoiceDeliveryService,
   ) {
     this.connection = this.parseRedisUrl(this.config.get<string>('REDIS_URL', 'redis://localhost:6379'));
     this.maxTasksPerUser = Number(this.config.get('SCHED_MAX_TASKS_PER_USER')) || DEFAULT_MAX_TASKS_PER_USER;
@@ -167,6 +180,7 @@ export class SchedulingService implements OnModuleInit, OnModuleDestroy {
         runAt: z.string().optional().describe('ISO 8601 date/time (for one-time execution).'),
         timezone: z.string().optional().describe('IANA timezone, e.g. "Europe/Rome".'),
         tools: z.array(z.string()).optional().describe('Exact names of the tools the automation may use at fire time. Omit if no tool is needed (default).'),
+        voice: z.boolean().optional().describe('Also say the outcome aloud on the user\'s voice satellite, where they are confirmed present. Omit for the default (on when the user is talking by voice).'),
       }),
       func: async (args: any) => {
         if (!args.cron && !args.runAt) return 'Error: specify "cron" (recurring) or "runAt" (one-time).';
@@ -191,11 +205,14 @@ export class SchedulingService implements OnModuleInit, OnModuleDestroy {
           const task = await this.createTask(userId, {
             instruction: args.instruction, title: args.title, cron: args.cron,
             runAt: args.runAt, timezone: args.timezone, projectId: projectId ?? null,
-            chatId: chatId ?? null, toolFilter,
+            chatId: chatId ?? null, toolFilter, voice: args.voice,
+            // A voice turn (Wyoming, the OpenAI shim's voice): its chat may not exist yet on the first turn.
+            fromVoice: getLlmCallContext().origin === 'voice',
           });
-          const when = task.scheduleType === 'cron' ? `cron "${task.cron}"` : `on ${task.runAt?.toISOString()}`;
+          const when = whenOf(task);
           const tools = toolFilter.mode === 'none' ? 'no tools' : `tools: ${toolFilter.names.join(', ')}`;
-          return `PREPARED (awaiting confirmation) — id=${task.id} · "${task.title}" · ${when} · ${tools}. ` +
+          const delivery = task.voice ? 'delivered in chat and said aloud where the user is' : 'delivered in chat';
+          return `PREPARED (awaiting confirmation) — id=${task.id} · "${task.title}" · ${when} · ${tools} · ${delivery}. ` +
             `Summarize for the user (including which tools it will have access to) and ask for confirmation, then call confirm_scheduled_task with taskId="${task.id}".`;
         } catch (err: any) {
           return `Unable to prepare the automation: ${err?.message ?? err}`;
@@ -215,9 +232,11 @@ export class SchedulingService implements OnModuleInit, OnModuleDestroy {
           await this.remove(args.taskId, userId);
           return 'Automation cancelled.';
         }
-        const task = await this.activate(args.taskId, userId);
+        // The origin chat, if the task has none yet: a voice conversation is saved after its first turn.
+        const task = await this.activate(args.taskId, userId, chatId);
         if (!task) return 'Automation not found.';
-        return `Automation ACTIVATED (id=${task.id}). I will run it and notify you of the outcome.`;
+        // When, again: the confirmation is said from this, not from the summary turns back.
+        return `Automation ACTIVATED (id=${task.id}) · "${task.title}" · ${whenOf(task)}. I will run it and notify you of the outcome.`;
       },
     });
 
@@ -234,6 +253,7 @@ export class SchedulingService implements OnModuleInit, OnModuleDestroy {
       throw new Error(`Limit of ${this.maxTasksPerUser} automations per user reached. Delete the ones you no longer need.`);
     }
     const scheduleType = data.cron ? 'cron' : 'scheduled';
+    const origin = await this.originChat(userId, data.chatId);
     const task = this.repo.create({
       userId,
       instruction: data.instruction,
@@ -245,18 +265,29 @@ export class SchedulingService implements OnModuleInit, OnModuleDestroy {
       projectId: data.projectId ?? null,
       // Outcome delivery: one-shot → origin chat (a single message, doesn't grow);
       // recurring → null ⇒ DEDICATED chat created on the first run (origin untouched).
-      chatId: scheduleType === 'scheduled' ? (data.chatId ?? null) : null,
+      chatId: scheduleType === 'scheduled' ? (origin?.id ?? null) : null,
       toolFilter: data.toolFilter ?? { mode: 'none' },
+      voice: data.voice ?? (!!data.fromVoice || VOICE_SOURCES.has(origin?.externalSource ?? '')),
       enabled: true,
       status: 'pending', // awaits confirmation
     });
     return this.repo.save(task);
   }
 
-  /** Activates a pending task: registers the BullMQ job (with recurring guardrail). */
-  async activate(id: string, userId: string): Promise<ScheduledTask | null> {
+  /** The origin chat if it is a chat of this user (an entry point may pass its own conversation key instead): id + source. */
+  private async originChat(userId: string, chatId?: string | null): Promise<Pick<Chat, 'id' | 'externalSource'> | null> {
+    if (!chatId || !UUID_RE.test(chatId)) return null;
+    return this.chatRepo.findOne({ where: { id: chatId, userId }, select: { id: true, externalSource: true } });
+  }
+
+  /**
+   * Activates a pending task: registers the BullMQ job (with recurring guardrail). `chatId` = the chat it is confirmed
+   * in: a one-shot with no origin chat yet delivers there.
+   */
+  async activate(id: string, userId: string, chatId?: string | null): Promise<ScheduledTask | null> {
     const task = await this.repo.findOne({ where: { id, userId } });
     if (!task) return null;
+    if (task.scheduleType === 'scheduled' && !task.chatId) task.chatId = (await this.originChat(userId, chatId))?.id ?? null;
     if (task.scheduleType === 'cron') {
       const activeCron = await this.repo.count({ where: { userId, scheduleType: 'cron', status: 'active' } });
       if (activeCron >= this.maxActiveRecurring) {
@@ -310,6 +341,7 @@ export class SchedulingService implements OnModuleInit, OnModuleDestroy {
       task.instruction = data.instruction;
     }
     if (data.title !== undefined) task.title = data.title.trim() || task.instruction.slice(0, 120);
+    if (data.voice !== undefined) task.voice = data.voice;
     if (data.timezone !== undefined) task.timezone = data.timezone?.trim() || null;
 
     if (task.scheduleType === 'cron') {
@@ -445,11 +477,10 @@ export class SchedulingService implements OnModuleInit, OnModuleDestroy {
     let outTok: number | null = null;
     let failed = false;
     try {
-      // AgentService resolved at runtime (dynamic require) → no module cycle.
-      const { AgentService } = require('../agent/agent.service');
-      const agent = this.moduleRef.get(AgentService, { strict: false });
+      const agent = this.agentService();
       // Tool-subset decided at scheduling time (default: none → cheap run).
-      const r = await agent.invokeWithUsage(task.instruction, [], task.userId, task.projectId ?? undefined, task.toolFilter);
+      // Told first that its reply is the delivery (chat, notification, voice): it writes the message, never "I can't".
+      const r = await agent.invokeWithUsage(`${AUTOMATION_RUN_NOTE(task.voice)}\n\n${task.instruction}`, [], task.userId, task.projectId ?? undefined, task.toolFilter);
       result = r.text;
       inTok = r.usage?.inputTokens ?? null;
       outTok = r.usage?.outputTokens ?? null;
@@ -495,9 +526,17 @@ export class SchedulingService implements OnModuleInit, OnModuleDestroy {
     }
     await this.repo.save(task);
 
+    // By voice too (a voice automation that ran): said where the user is confirmed present, else not at all — the chat
+    // and the notification below carry it anyway. The satellite is bound to the chat, so a spoken reply lands there.
+    let spokenOn: string | null = null;
+    if (task.voice && chatId && !failed && !disabledByCost) {
+      spokenOn = await this.voiceDelivery.deliver(task.userId, result, chatId);
+      this.logger.log(`Automation ${task.id}: ${spokenOn ? `said on ${spokenOn}` : 'not said by voice (nobody confirmed present)'}`);
+    }
+
     // Delivery: persisted notification + WebSocket push (with chatId to open the chat).
     const eventType = disabledByCost ? 'scheduled_task_disabled' : 'scheduled_task';
-    const payload = { title, result, taskId: task.id, chatId, tokens: runTokens, disabledByCost };
+    const payload = { title, result, taskId: task.id, chatId, tokens: runTokens, disabledByCost, spoken: !!spokenOn };
     if (disabledByCost) {
       payload.result = `⚠️ Automation disabled: the run exceeded the limit of ${tokenCap} tokens (${runTokens}). Outcome: ${result}`;
     }
@@ -506,6 +545,12 @@ export class SchedulingService implements OnModuleInit, OnModuleDestroy {
     });
     // id = notification DB id → the frontend can dismiss/mark-read even live.
     this.gateway.emitToUser(task.userId, 'notification', { id: notif.id, eventType, taskId: task.id, title, ...payload });
+  }
+
+  /** AgentService resolved at runtime (dynamic require) → no module cycle. */
+  private agentService(): any {
+    const { AgentService } = require('../agent/agent.service');
+    return this.moduleRef.get(AgentService, { strict: false });
   }
 
   /**
@@ -550,4 +595,24 @@ export class SchedulingService implements OnModuleInit, OnModuleDestroy {
       return { host: 'localhost', port: 6379 };
     }
   }
+}
+
+/**
+ * When a task runs, for the agent: a cron as is; a time in the task's own zone beside the instant (a bare UTC instant
+ * was turned into the wrong local hour when repeated to the user).
+ */
+export function whenOf(task: Pick<ScheduledTask, 'scheduleType' | 'cron' | 'runAt' | 'timezone'>): string {
+  if (task.scheduleType === 'cron') return `cron "${task.cron}"${task.timezone ? ` (${task.timezone})` : ''}`;
+  if (!task.runAt) return 'no time set';
+  const zone = task.timezone;
+  if (!zone) return `on ${task.runAt.toISOString()} (UTC)`;
+  let local: string;
+  try {
+    local = new Intl.DateTimeFormat('en-GB', {
+      timeZone: zone, weekday: 'short', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).format(task.runAt);
+  } catch {
+    return `on ${task.runAt.toISOString()}`;
+  }
+  return `on ${local} local time (${zone}) = ${task.runAt.toISOString()}`;
 }

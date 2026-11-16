@@ -10,6 +10,8 @@
   "teamNameTakenUpdate": "A team tool named \"{name}\" already exists.",
   "orgForbidden": "Only admins can manage org tools.",
   "teamIdMissing": "teamId missing for team scope.",
-  "teamForbidden": "Only admins or team owners can manage team tools.",
-  "ownerOnly": "This operation is reserved for the tool owner."
+  "teamForbidden": "Only an admin can manage a team's tools.",
+  "ownerOnly": "This operation is reserved for the tool owner.",
+  "mcpPluginManaged": "This MCP server comes from a plugin: manage it from the plugin page.",
+  "personalOnly": "This tool is personal: it cannot be shared with a team or the organization."
 }

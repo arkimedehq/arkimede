@@ -1073,10 +1073,27 @@ Chiedi in chat *«ogni mattina alle 8 controlla la mail e riassumi»* e l'automa
 
 - Il built-in tool **`schedule_task`** interpreta la richiesta, sceglie i tool necessari (default: nessuno → economico) e prepara l'automazione; l'utente la **conferma** (sicuro di default: non scatta finché non confermata).
 - Al fire, un **runner headless** ri-esegue l'agente con l'istruzione e **consegna l'esito** via notifica e/o in un **thread chat** dedicato (con unread badge). Può usare un team di agenti.
+- **A voce**: un'automazione con *«Dilla anche a voce»* (accesa da sola quando la chiedi parlando a un satellite) dice l'esito ad alta voce su un satellite del tuo account, **solo dove la tua presenza è confermata** in quel momento: la stanza in cui si trova la tua persona di Home Assistant (non se sei occupato al telefono), o — per un account senza persona, come un account di casa — una stanza con qualcuno dentro. Un turno al satellite vale come presenza nella sua stanza per 20 minuti (un promemoria chiesto «fra dieci minuti» ti trova ancora lì). Altrimenti niente voce: l'esito resta in chat e nella notifica. Serve Home Assistant con la voce accesa (Impostazioni → Home Assistant).
 - Built-in di supporto: `get_current_datetime` (l'agente non sbaglia data/ora); guard sui `runAt` nel passato.
 - **Guardrail** configurabili (env): `SCHED_MAX_TASKS_PER_USER`, `SCHED_MAX_ACTIVE_RECURRING`, `SCHED_MAX_TOKENS_PER_RUN` (oltre soglia → auto-disattivazione). Token/costo per run visibili in UI.
 
 Gestione: Impostazioni → **Automazioni**. API: `GET /api/scheduled-tasks` · `POST /api/scheduled-tasks/:id/activate` · `PATCH /api/scheduled-tasks/:id/enabled` · `DELETE /api/scheduled-tasks/:id`.
+
+### 15.1 Sequenze — azioni a tempo senza il modello (`run_sequence`)
+
+Chiedi *"accendi e spegni le luci di cucina e soggiorno per 10 secondi"* e l'agente scrive, in **una** chiamata, un piccolo programma di chiamate ai suoi strumenti; Arkimede lo controlla e lo esegue **in background, senza il modello** (zero token per passo, tempi a ~100 ms). L'agente risponde subito ("le faccio lampeggiare per 10 secondi").
+
+- **Generico**: una sequenza chiama qualsiasi strumento che l'agente ha in quel turno (Home Assistant, messaggi, MCP, skill…), con lo stesso utente e gli stessi permessi. Es. tre promemoria a due minuti l'uno dall'altro, tapparelle aperte una alla volta, un'API chiamata ogni 20 s per cinque minuti.
+- **Passi**: `call` (strumento + argomenti) · `wait` (≥ 0,2 s, `jitterSeconds` opzionale) · `repeat` (`count` o `forSeconds`) · `parallel` (fino a 8) · `choose.random` (uno a caso); `finally` gira alla fine, anche se fermata o fallita (rimette le cose a posto).
+- **Sostituzione**: una nuova sequenza con la stessa `key` (o, senza, con le stesse chiamate e gli stessi argomenti) sostituisce quella in corso — "più veloce" funziona da sé.
+- **Mai**: agenti, team, flow, sandbox, pianificazione o memoria dentro una sequenza; mai una conferma al posto dell'utente (`confirmed: true` rifiutato, un risultato che la chiede fa fallire il passo). Una chiamata fallita è registrata e si va avanti; la stessa che fallisce 3 volte di fila la ferma (`stopOnError` si ferma alla prima).
+- **Una procedura della memoria**: quando la sequenza esegue una procedura che Recordare conosce (o un suo passo), il modello passa `procedure: {id, step?}` e Arkimede riporta l'esecuzione a Recordare alla fine — completata con tutte le chiamate riuscite = done; fallita, scaduta o con chiamate fallite = failed con gli errori; fermata dall'utente = niente. Solo se la memoria dell'utente è Recordare; un errore di Recordare non tocca la sequenza.
+- **Limiti** (env): `RUN_SEQUENCE_MAX_SECONDS` (600; oltre → `schedule_task`), `RUN_SEQUENCE_MAX_CALLS` (1000), `RUN_SEQUENCE_MAX_PER_USER` (3).
+- **Stop**: a voce o in chat ("basta", "ferma") tramite `stop_sequences`; nella chat da cui è partita (un riquadro con l'avanzamento e **Ferma**); nel cassetto del pannello a parete.
+- **Fine**: una riga in quella chat (completata / fermata / interrotta, con il motivo); niente voce.
+- In memoria: un riavvio del backend ferma le sequenze in corso. Una sequenza è effimera; un lavoro da salvare e far partire da un trigger va nei Flows (§13).
+
+API: `GET /api/sequences[?chatId=]` · `POST /api/sequences/:id/stop` · `POST /api/sequences/stop` · `GET /api/chat-runs` (il lavoro in corso: `runs` e `sequences`). Socket: `sequence` sulla stanza della chat. Progetto: `specs/RUN_SEQUENCE.md`.
 
 ---
 
@@ -1468,12 +1485,16 @@ cloud). Il Piper interno parla di default con `it_IT-serena-medium` (vince
 `PIPER_VOICE` o una voce impostata nel pannello). Le installazioni che si
 affidavano al default precedente (`it_IT-paola-medium`) passano a serena alla
 prossima ricostruzione dell'immagine; impostare `PIPER_VOICE=it_IT-paola-medium`
-per tenere paola. Scegliendo nella stessa card un **utente di conversazione** (e
-facoltativamente un suo agente) l'hub ottiene anche Arkimede come agente di
-conversazione: l'intera pipeline vocale gira su Arkimede senza componenti
-aggiuntivi sull'hub. Con **Salva conversazioni** attivo, ogni conversazione
-dell'hub (il suo `conversation_id`; chiusa dopo 10 minuti di silenzio) viene
-salvata come chat dell'utente di conversazione. Il protocollo non ha autenticazione: abilitalo solo su
+per tenere paola. Accendendo nella stessa card **Esponi l'agente di
+conversazione** l'hub ottiene anche Arkimede come agente di conversazione:
+l'intera pipeline vocale gira su Arkimede senza componenti aggiuntivi sull'hub.
+Ogni turno gira come l'account a cui è assegnato il satellite (*Integrazioni →
+Home Assistant → Account della voce*; un satellite non assegnato: l'account
+predefinito, il primo admin se non cambiato), con l'**agente per la voce** che
+quell'utente ha scelto nel suo profilo (per un account di servizio lo imposta
+l'admin in *Utenti → Memoria e voce*). Con **Salva conversazioni** attivo, ogni
+conversazione dell'hub (il suo `conversation_id`; chiusa dopo 10 minuti di
+silenzio) viene salvata come chat dell'account del turno. Il protocollo non ha autenticazione: abilitalo solo su
 reti fidate.
 
 ### Chat e messaggi

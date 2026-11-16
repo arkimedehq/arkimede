@@ -29,7 +29,10 @@
     "descTeam": "Visibile ai membri del team selezionato.",
     "descOrg": "Visibile a tutta l'organizzazione (gestione riservata agli admin).",
     "chooseTeam": "Scegli un team…",
-    "noTeams": "Non appartieni a nessun team. Chiedi a un admin di aggiungerti o crearne uno."
+    "noTeams": "Non appartieni a nessun team. Chiedi a un admin di aggiungerti o crearne uno.",
+    "personalOption": "Personale",
+    "personalOptionHint": "Usa il tuo account o i tuoi dati: non si condivide mai con un team o con l'organizzazione.",
+    "adminShares": "Visibile solo a te: solo l'admin condivide con un team o con l'organizzazione."
   },
   "dashboard": {
     "greeting": "Ciao, {{name}} 👋",
@@ -63,7 +66,8 @@
     "unread": "Non letta",
     "chatOf": "Chat di {{name}}",
     "externalWyoming": "Conversazione vocale (Wyoming)",
-    "externalApi": "Conversazione da API esterna"
+    "externalApi": "Conversazione da API esterna",
+    "plugins": "Plugin"
   },
   "theme": {
     "light": "Chiaro",

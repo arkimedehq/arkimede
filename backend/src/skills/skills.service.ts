@@ -45,6 +45,7 @@ import * as path from 'path';
 import { DynamicStructuredTool } from '@langchain/core/tools';
 
 import { Skill, SkillScope, SkillConfigSpec } from './skill.entity';
+import { Audience, parseAudience } from '../common/audience';
 import { SkillScript } from './skill-script.entity';
 import { SkillProjectAssignment } from './skill-project-assignment.entity';
 import { SkillConfigVar } from './skill-config-var.entity';
@@ -116,6 +117,8 @@ interface SkillYaml {
     family?:      'relational' | 'document' | 'keyvalue' | 'fileshare';
   }>;
   userChannel?: UserChannel | null;
+  /** `personal`: it uses one person's account, data or memory — never shared (specs/EXTENSION_AUDIENCE.md). */
+  audience?: Audience;
   scripts?: Array<{
     filename:      string;
     language:      'python' | 'javascript' | 'node';
@@ -138,6 +141,10 @@ const VALID_SKILL_NAME = /^[a-z][a-z0-9-]{0,63}$/;
 
 @Injectable()
 export class SkillsService implements OnModuleInit {
+  /** The plugin configuration of a plugin's skills (settings, token): see setPluginConfigProvider. */
+  private pluginConfig: ((pluginId: string) => Promise<Record<string, string>>) | null = null;
+  /** The hosts active plugins reach (their approved network): see setPluginEgressProvider. */
+  private pluginEgress: (() => Promise<string[]>) | null = null;
   private readonly logger       = new Logger(SkillsService.name);
   private readonly skillsBase:  string;
 
@@ -226,6 +233,7 @@ export class SkillsService implements OnModuleInit {
       nixDeps:     skillYaml.dependencies?.system?.nix   ?? [],
       networkDomains: skillYaml.network                  ?? [],
       configSpec,
+      audience:    skillYaml.audience ?? 'shared',
     });
 
     const saved = await this.skillRepo.save(skill);
@@ -313,6 +321,7 @@ export class SkillsService implements OnModuleInit {
       jsDeps:       source.jsDeps,
       nixDeps:      source.nixDeps ?? [],
       configSpec:   source.configSpec,
+      audience:     source.audience,
       sourceSkillId: source.id,
     });
     const saved = await this.skillRepo.save(skill);
@@ -429,6 +438,10 @@ export class SkillsService implements OnModuleInit {
         I18nContext.current()?.t('skills.zipNameMismatch', { args: { zipName: skillYaml.name, skillName: skill.name } })
         ?? `The skill name in the ZIP ("${skillYaml.name}") does not match the current skill ("${skill.name}")`,
       );
+    }
+    // A version that became personal never lands on a shared copy: the admin makes that copy personal first.
+    if (skillYaml.audience === 'personal' && skill.scope !== 'personal') {
+      throw new BadRequestException('skills.personalOnly');
     }
 
     const skillDir = skill.packagePath ?? path.join(this.skillsBase, skill.id);
@@ -573,6 +586,7 @@ export class SkillsService implements OnModuleInit {
       nixDeps:     skillYaml.dependencies?.system?.nix   ?? [],
       networkDomains: skillYaml.network                  ?? [],
       configSpec,
+      audience:    skillYaml.audience ?? 'shared',
     });
 
     // ── Sync the scripts ─────────────────────────────────────────────────────────
@@ -901,6 +915,15 @@ export class SkillsService implements OnModuleInit {
         if (clean) domains.add(clean);
       }
     }
+    // A plugin's daemons run in the executor behind the proxy: the hosts the admin approved for it (its MCP servers'
+    // URLs, often from a setting) are reachable while it is active.
+    if (this.pluginEgress) {
+      try {
+        for (const h of await this.pluginEgress()) domains.add(h);
+      } catch (err) {
+        this.logger.warn(`Plugin egress hosts not read: ${(err as Error).message}`);
+      }
+    }
     return [...domains].sort();
   }
 
@@ -919,7 +942,7 @@ export class SkillsService implements OnModuleInit {
    * (approve / enable / scope / remove / install ready). Best-effort: it must
    * never make the calling operation fail.
    */
-  private async syncEgress(): Promise<void> {
+  async syncEgress(): Promise<void> {
     try {
       await this.egressSync.sync(await this.getEgressAllowlist());
     } catch (err: any) {
@@ -943,14 +966,20 @@ export class SkillsService implements OnModuleInit {
     });
   }
 
+  /** Every user's skills, any scope or status: the admin's overview (to set a skill's network, review, help). */
+  async findAllForAdmin(): Promise<Skill[]> {
+    return this.skillRepo.find({ relations: { scripts: true }, order: { createdAt: 'DESC' } });
+  }
+
   /**
    * Detail of a single skill:
    *   - own (any scope/status)
    *   - shared approved of other users
+   *   - any, for an admin (`asAdmin`: read only; writes keep their owner checks)
    */
-  async findOne(id: string, userId: string): Promise<Skill> {
-    const teamIds = await this.teamsService.teamIdsForUser(userId);
-    const where: Record<string, unknown>[] = [
+  async findOne(id: string, userId: string, asAdmin = false): Promise<Skill> {
+    const teamIds = asAdmin ? [] : await this.teamsService.teamIdsForUser(userId);
+    const where: Record<string, unknown>[] = asAdmin ? [{ id }] : [
       { id, ownerId: userId },
       { id, scope: 'org', isApproved: true },
     ];
@@ -1004,6 +1033,9 @@ export class SkillsService implements OnModuleInit {
     const teamChanged  = nextScope === 'team' && nextTeamId !== skill.teamId;
 
     if ((scopeChanged || teamChanged) && nextScope !== 'personal') {
+      // A personal skill (an account, data or memory of one person) is never shared; only admins share skills.
+      if (skill.audience === 'personal') throw new BadRequestException('skills.personalOnly');
+      if (!isAdmin) throw new ForbiddenException('skills.onlyAdminCanShare');
       if (skill.status !== 'ready') {
         throw new BadRequestException(
           I18nContext.current()?.t('skills.notReadyForPublish', { args: { status: skill.status } })
@@ -1012,9 +1044,6 @@ export class SkillsService implements OnModuleInit {
       }
       if (nextScope === 'team') {
         if (!nextTeamId) throw new BadRequestException('skills.teamIdRequired');
-        if (!isAdmin && !(await this.teamsService.isOwner(nextTeamId, userId))) {
-          throw new ForbiddenException('skills.onlyAdminOrTeamOwnerCanPublish');
-        }
       }
       await this.assertNameAvailable(userId, skill.name, nextScope, nextTeamId, skill.id);
     }
@@ -1118,6 +1147,12 @@ export class SkillsService implements OnModuleInit {
    * Deletes the skill, its scripts and the files on the volume.
    * Only the owner can delete their own skill.
    */
+  /** A plugin's skill is managed with its plugin (specs/PLUGINS.md §5): not changed or deleted by hand. */
+  async assertNotPluginManaged(id: string): Promise<void> {
+    const skill = await this.skillRepo.findOne({ where: { id }, select: { id: true, pluginId: true } });
+    if (skill?.pluginId) throw new ForbiddenException('skills.pluginManaged');
+  }
+
   async remove(id: string, userId: string): Promise<void> {
     const skill = await this.findOwned(id, userId);
 
@@ -1231,6 +1266,7 @@ export class SkillsService implements OnModuleInit {
       I18nContext.current()?.t('skills.notFound', { args: { id } }) ?? `Skill "${id}" not found`,
     );
     if (skill.scope !== 'org') throw new BadRequestException('skills.onlyOrgSkillsCanBeApproved');
+    if (skill.audience === 'personal') throw new BadRequestException('skills.personalOnly');
 
     await this.skillRepo.update(id, { isApproved: true });
     // Admin approval = trust gate: apply the skill's domains to the egress-proxy.
@@ -1919,6 +1955,16 @@ export class SkillsService implements OnModuleInit {
     };
   }
 
+  /** Registers who gives a plugin's skills the plugin's configuration (PluginsService); null removes it. */
+  setPluginConfigProvider(provider: ((pluginId: string) => Promise<Record<string, string>>) | null): void {
+    this.pluginConfig = provider;
+  }
+
+  /** Registers who gives the hosts active plugins reach, for the egress allowlist (PluginsService); null removes it. */
+  setPluginEgressProvider(provider: (() => Promise<string[]>) | null): void {
+    this.pluginEgress = provider;
+  }
+
   /**
    * Resolves the complete configuration for a skill:
    *   1. Starts from the system variables (always present)
@@ -1931,7 +1977,8 @@ export class SkillsService implements OnModuleInit {
   async resolveConfig(skillId: string): Promise<Record<string, string>> {
     const skill = await this.skillRepo.findOne({ where: { id: skillId } });
     const spec: SkillConfigSpec[] = skill?.configSpec ?? [];
-    const sysVars = this.getSystemVars();
+    // A plugin's skill also gets the plugin's settings and credentials (specs/PLUGINS.md §4).
+    const sysVars = { ...this.getSystemVars(), ...(skill?.pluginId && this.pluginConfig ? await this.pluginConfig(skill.pluginId) : {}) };
 
     if (spec.length === 0) return sysVars;
 
@@ -2393,8 +2440,8 @@ export class SkillsService implements OnModuleInit {
    *
    * @returns { filename, content } — name of the found file and UTF-8 content
    */
-  async getDocs(skillId: string, userId: string): Promise<{ filename: string; content: string }> {
-    const skill = await this.findOne(skillId, userId);
+  async getDocs(skillId: string, userId: string, asAdmin = false): Promise<{ filename: string; content: string }> {
+    const skill = await this.findOne(skillId, userId, asAdmin);
 
     if (!skill.packagePath) {
       throw new NotFoundException('skills.packagePathNotAvailable');
@@ -2504,7 +2551,7 @@ function stripFrontmatter(raw: string): string {
  *   ---
  *   # Title + markdown instructions
  */
-function parseSkillMd(raw: string): { manifest: SkillYaml; body: string } {
+export function parseSkillMd(raw: string): { manifest: SkillYaml; body: string } {
   const fm = extractFrontmatter(raw);
   if (!fm) {
     throw new BadRequestException(
@@ -2535,6 +2582,7 @@ function parseSkillMd(raw: string): { manifest: SkillYaml; body: string } {
     config:       runtime.config,
     scripts:      runtime.scripts,
     userChannel:  parseUserChannel(parsed['user-channel'] ?? runtime['user-channel']),
+    audience:     parseAudience(runtime.audience ?? parsed.audience),
   };
   return { manifest, body: fm.body };
 }

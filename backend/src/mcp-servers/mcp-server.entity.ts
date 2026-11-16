@@ -115,9 +115,20 @@ export class McpServer {
   @Column({ type: 'varchar', length: 16, default: 'personal' })
   scope: McpServerScope;
 
+  /**
+   * Personal: it uses one person's account or data (the "Personal" option, specs/EXTENSION_AUDIENCE.md) — it stays
+   * personal, never shared with a team or the organization.
+   */
+  @Column({ type: 'boolean', default: false })
+  personal: boolean;
+
   /** Reference team when scope='team' (null otherwise). */
   @Column({ type: 'uuid', nullable: true })
   teamId: string | null;
+
+  /** The plugin that contributed it (specs/PLUGINS.md §5): managed with the plugin, not by hand. Null otherwise. */
+  @Column({ type: 'uuid', nullable: true, default: null })
+  pluginId: string | null;
 
   /** Associated encrypted secrets (API key, token, etc.) */
   @OneToMany(() => McpServerSecret, (s) => s.server, { cascade: true, eager: false })

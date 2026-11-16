@@ -26,6 +26,7 @@ import { ExternalChatsService } from '../chats/external-chats.service';
 import { Message, MessageSpeaker } from '../messages/messages.entity';
 import { AgentService } from '../agent/agent.service';
 import { agentRunOptions } from '../agents/agent-run-options';
+import { Agent } from '../agents/agent.entity';
 import { makeToolCollector } from '../invocations/tool-collector';
 import { SkillDaemon } from '../daemons/skill-daemon.entity';
 import { User } from '../users/users.entity';
@@ -97,29 +98,56 @@ export class GuestMessagesService {
     }
   }
 
-  private async turn(userId: string, msg: GuestMessage): Promise<{ answer: string; chatId: string }> {
+  /**
+   * A turn for a person writing through a plugin (specs/PLUGINS.md §9.2, agent.ask): `asUser` — the person is the
+   * Arkimede user `userId` (linked in the plugin's People), the turn is theirs; otherwise a guest of `userId` (the
+   * plugin's owner), with the guests' rule. The conversation is the plugin's (`source`) and its key; `agent` is the
+   * one the admin chose for the plugin (null: the main pipeline). One turn at a time per conversation.
+   */
+  async ask(userId: string, msg: GuestMessage & { conversation: string }, opts: { source: string; agent: Agent | null; asUser: boolean }): Promise<{ answer: string; chatId: string }> {
+    const key = `${userId}\n${opts.source}\n${msg.conversation}`;
+    const run = (this.queues.get(key) ?? Promise.resolve()).catch(() => undefined).then(() => this.turn(userId, msg, opts));
+    this.queues.set(key, run);
+    try {
+      return await run;
+    } finally {
+      if (this.queues.get(key) === run) this.queues.delete(key);
+    }
+  }
+
+  private async turn(
+    userId: string,
+    msg: GuestMessage & { conversation?: string },
+    opts: { source?: string; agent?: Agent | null; asUser?: boolean } = {},
+  ): Promise<{ answer: string; chatId: string }> {
     const name = msg.displayName?.trim().slice(0, 100) || msg.externalId;
     const text = msg.text.trim().slice(0, TEXT_MAX);
     const chatId = await this.externalChats.openChat({
-      userId, source: msg.channel, key: msg.externalId, idleMs: GUEST_IDLE_MS, title: `${name} · ${msg.channel}`,
+      userId, source: opts.source ?? msg.channel, key: msg.conversation ?? msg.externalId, idleMs: GUEST_IDLE_MS, title: `${name} · ${msg.channel}`,
     });
     const history = (await this.externalChats.historyOf(chatId, userId, HISTORY_MAX)) ?? [];
     const speaker: MessageSpeaker = { channel: msg.channel, externalId: msg.externalId, ...(msg.displayName?.trim() ? { displayName: name } : {}) };
     // Saved before the run: the memory reads the conversation (who speaks) when the agent asks it for context.
-    await this.messages.save(this.messages.create({ chatId, role: 'user', content: text, authorId: null, speaker }));
+    await this.messages.save(this.messages.create({
+      chatId, role: 'user', content: text, ...(opts.asUser ? { authorId: userId } : { authorId: null, speaker }),
+    }));
 
     const authorized = msg.authorized === true;
     const owner = (await this.users.findOne({ where: { id: userId }, select: { id: true, name: true } }))?.name?.trim() || 'the account owner';
+    const run = agentRunOptions(opts.agent ?? null, 'chat');
+    const guestPrompt = guestInstructions({ name, channel: msg.channel, authorized }, owner);
     const tools = makeToolCollector();
     let answer = '';
     const usage = await this.agent.streamResponse(
       text, userId, undefined, undefined, history as any[], [], [], [],
       (chunk) => { answer += chunk; }, tools.onToolCall, undefined, tools.onToolResult,
-      {
-        ...agentRunOptions(null, 'chat'), conversationId: chatId,
-        agentPromptOverride: guestInstructions({ name, channel: msg.channel, authorized }, owner),
-        ...(authorized ? {} : { textOnly: true }),
-      },
+      opts.asUser
+        ? { ...run, conversationId: chatId }
+        : {
+          ...run, conversationId: chatId,
+          agentPromptOverride: run.agentPromptOverride ? `${run.agentPromptOverride}\n\n${guestPrompt}` : guestPrompt,
+          ...(authorized ? {} : { textOnly: true }),
+        },
     );
     await this.messages.save(this.messages.create({
       chatId, role: 'assistant', content: answer || '_(no response)_',
@@ -128,7 +156,7 @@ export class GuestMessagesService {
       provider: (usage as any)?.provider ?? null, model: (usage as any)?.model ?? null,
     }));
     await this.chats.update(chatId, { updatedAt: new Date(), unread: true });
-    this.logger.log(`guest turn on ${msg.channel} (${authorized ? 'authorized' : 'words only'}, ${text.length} → ${answer.length} chars, chat ${chatId})`);
+    this.logger.log(`${opts.asUser ? 'user' : 'guest'} turn on ${msg.channel} (${opts.asUser ? 'as the user' : authorized ? 'authorized' : 'words only'}, ${text.length} → ${answer.length} chars, chat ${chatId})`);
     return { answer, chatId };
   }
 }

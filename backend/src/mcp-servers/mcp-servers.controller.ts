@@ -63,6 +63,10 @@ class CreateMcpServerDtoValidated implements CreateMcpServerDto {
   @IsOptional() @IsIn(['personal', 'team', 'org'])
   scope?: 'personal' | 'team' | 'org';
 
+  /** Personal: it uses one person's account or data — never shared (the "Personal" option). */
+  @IsOptional() @IsBoolean()
+  personal?: boolean;
+
   @IsOptional() @IsString()
   teamId?: string | null;
 
@@ -105,6 +109,10 @@ class UpdateMcpServerDtoValidated implements UpdateMcpServerDto {
   @IsOptional() @IsIn(['personal', 'team', 'org'])
   scope?: 'personal' | 'team' | 'org';
 
+  /** Personal: it uses one person's account or data — never shared (the "Personal" option). */
+  @IsOptional() @IsBoolean()
+  personal?: boolean;
+
   @IsOptional() @IsString()
   teamId?: string | null;
 
@@ -143,6 +151,7 @@ export class McpServersController {
     @CurrentUser() user: any,
     @Body() dto: UpdateMcpServerDtoValidated,
   ) {
+    await this.service.assertNotPluginManaged(id);
     const result = await this.service.update(id, user.id, dto, user.role === 'admin', user.role);
     // Update the config on the bridge if present
     await this.gateway.pushConfigUpdate(user.id);
@@ -152,6 +161,7 @@ export class McpServersController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Param('id') id: string, @CurrentUser() user: any) {
+    await this.service.assertNotPluginManaged(id);
     await this.service.remove(id, user.id, user.role === 'admin');
     await this.gateway.pushConfigUpdate(user.id);
   }

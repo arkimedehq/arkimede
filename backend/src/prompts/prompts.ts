@@ -137,8 +137,23 @@ export const SCHEDULE_TASK_DESC =
   'For recurring provide "cron" (5 fields, e.g. "0 8 * * *"); for one-time "runAt" (ISO 8601). ' +
   'With "tools" indicate ONLY the tools the task needs (default: none → cheaper); ' +
   'e.g. for "check the mail" pass the name of the mail tool. ' +
+  'The outcome is always written in a chat with a notification; "voice" = also say it aloud on the user\'s voice ' +
+  'satellite, where they are confirmed present at that moment (default: on when the user is talking to you by voice). ' +
+  'Never put the way of delivering it ("tell me aloud", "send me a message") in the instruction as a task to do: ' +
+  'the delivery is already handled; write in the instruction only what to say or do. ' +
+  'Name the person in the instruction only if you know who asked (recognised, or they said so); otherwise no name. ' +
   'AFTER calling this tool, SUMMARIZE for the user what you prepared (what + when + which tools) and ' +
   'ASK for explicit CONFIRMATION; then use confirm_scheduled_task with their response.';
+
+/**
+ * Put before an automation's instruction when it runs (SchedulingService.runTask): the headless run knows that its reply
+ * IS the delivery, so it writes the message instead of answering that it cannot reach the user (or cannot speak).
+ */
+export const AUTOMATION_RUN_NOTE = (voice: boolean): string =>
+  '[A scheduled automation is running now, on its own: nobody is chatting. Your reply is delivered to the user as it is, ' +
+  'written in their chat with a notification' + (voice ? ' and said aloud on their voice satellite if they are there' : '') +
+  '. Carry out the instruction below and write the message for them directly, in their language; never answer that you ' +
+  'cannot deliver it or cannot speak' + (voice ? '. Keep it short and plain, no formatting: it will be spoken' : '') + '.]';
 
 export const CONFIRM_SCHEDULED_TASK_DESC =
   'Confirms or cancels an automation just prepared with schedule_task, based on the user\'s response. ' +
@@ -163,6 +178,30 @@ export const SEARCH_CONVERSATIONS_DESC =
   'Complementary to save_memory/search_memory (which hold curated facts): this is raw episodic recall ' +
   'across the user\'s accessible chats. Returns matching excerpts with the chat title and date. ' +
   'Use it to locate a discussion the curated memory does not cover.';
+
+export const RUN_SEQUENCE_DESC =
+  'Runs a small program of your tool calls in the background, with timing, and without you in the loop: for actions ' +
+  'that are repeated, spaced out, simultaneous or random — e.g. switch lights on and off for 10 seconds, three ' +
+  'reminders two minutes apart, open the blinds one by one, show something for 30 seconds then close it, call an API ' +
+  'every 20 seconds for five minutes. One call starts it and returns at once: then tell the user it started (what and ' +
+  'for how long), do not wait for it. ' +
+  'Prefer a single tool call when the tool does it by itself (a device\'s own flash or transition). Not for work that ' +
+  'needs your judgment between steps, nor longer than the limit (use schedule_task). ' +
+  'Program: "steps" is a list; each step is an object with exactly ONE key: ' +
+  '{"call":{"tool":"<one of your tools>","args":{…}}} · {"wait":{"seconds":1,"jitterSeconds":0.3}} (at least 0.2 s; ' +
+  'jitter = random ± variation) · {"repeat":{"count":5,"steps":[…]}} or {"repeat":{"forSeconds":10,"steps":[…]}} (a ' +
+  'repeat forSeconds needs a wait inside) · {"parallel":[step, …]} (at once, up to 8) · {"choose":{"random":[step, …]}} ' +
+  '(one at random). "finally" (optional steps) runs at the end, also when stopped: use it to leave things as the user ' +
+  'wants them. "key" names what it acts on (e.g. "kitchen-lights"): a new sequence with the same key replaces the ' +
+  'running one, so asking again ("faster", "slower") just works. "title": a few words the user will see. ' +
+  '"procedure" ({"id","step"?}): when the sequence carries out a procedure of your memory (or one of its steps), its id: ' +
+  'how it went is reported to the memory when it ends, so do not report that run yourself. ' +
+  'It cannot call agents, teams, flows, the sandbox, scheduling or memory, and never confirms an action for the user. ' +
+  'If the program is refused, fix it as the errors say and call again.';
+
+export const STOP_SEQUENCES_DESC =
+  'Stops the user\'s running sequences (started with run_sequence) — all of them, or one by its sequenceId. Use it ' +
+  'when the user says to stop ("basta", "ferma", "stop"). Each one runs its "finally" before it ends.';
 
 export const RUN_IN_SANDBOX_DESC =
   'Runs arbitrary code or shell commands in an isolated environment and evaluates them. ' +

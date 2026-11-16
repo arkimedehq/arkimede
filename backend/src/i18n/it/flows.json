@@ -7,5 +7,6 @@
   "teamIdMissing": "teamId mancante per scope team.",
   "teamAdminOnly": "Solo admin o owner del team possono gestire flow del team.",
   "ownerOnly": "Operazione riservata al proprietario del flow.",
-  "accessDenied": "Non hai accesso a questo flow."
+  "accessDenied": "Non hai accesso a questo flow.",
+  "pluginReadOnly": "Questo flow viene da un plugin: è in sola lettura. Duplicalo per modificarlo."
 }

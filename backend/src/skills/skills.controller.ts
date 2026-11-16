@@ -256,6 +256,13 @@ export class SkillsController {
     return this.service.findAll(user.id);
   }
 
+  @Get('all')
+  @UseGuards(AdminGuard)
+  @ApiOperation({ summary: "[ADMIN] Every user's skills, any scope or status" })
+  findAllForAdmin() {
+    return this.service.findAllForAdmin();
+  }
+
   // ── Skills assigned to a project ─────────────────────────────────────────
 
   @Get('project/:projectId')
@@ -306,10 +313,10 @@ export class SkillsController {
   // ── Detail ────────────────────────────────────────────────────────────────
 
   @Get(':id')
-  @ApiOperation({ summary: 'Skill detail (own or shared approved)' })
+  @ApiOperation({ summary: 'Skill detail (own or shared approved; any for an admin)' })
   @ApiParam({ name: 'id', description: 'Skill UUID' })
   findOne(@Param('id') id: string, @CurrentUser() user: any) {
-    return this.service.findOne(id, user.id);
+    return this.service.findOne(id, user.id, user.role === 'admin');
   }
 
   // ── Update ─────────────────────────────────────────────────────────────────
@@ -324,6 +331,7 @@ export class SkillsController {
     @Body() dto: UpdateSkillDto,
     @CurrentUser() user: any,
   ) {
+    await this.service.assertNotPluginManaged(id);
     // org → requires admin review (isApproved=false); team → direct publication
     // if the user is admin or team owner; personal → private.
     // org approval happens via POST /api/skills/:id/approve (admin-only).
@@ -419,6 +427,7 @@ export class SkillsController {
   @ApiOperation({ summary: 'Delete skill and files from the volume (owner or admin only)' })
   @ApiParam({ name: 'id', description: 'Skill UUID' })
   async remove(@Param('id') id: string, @CurrentUser() user: any) {
+    await this.service.assertNotPluginManaged(id);
     // Admins can delete any skill (e.g. for inappropriate content)
     if (user.role === 'admin') {
       const skill = await this.service.findOne(id, user.id);
@@ -474,7 +483,8 @@ export class SkillsController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Apply the confirmed compilation: writes runtime.scripts into SKILL.md and reinstalls (owner only)' })
   @ApiParam({ name: 'id', description: 'Skill UUID' })
-  compile(@Param('id') id: string, @Body() dto: CompileSkillDto, @CurrentUser() user: any) {
+  async compile(@Param('id') id: string, @Body() dto: CompileSkillDto, @CurrentUser() user: any) {
+    await this.service.assertNotPluginManaged(id);
     return this.service.applyCompilation(id, user.id, dto.scripts);
   }
 
@@ -518,6 +528,7 @@ export class SkillsController {
     @CurrentUser() user: any,
   ) {
     if (!file) throw new BadRequestException('skills.noFileUploaded');
+    await this.service.assertNotPluginManaged(id);
     return this.service.updateFromZip(id, user.id, file.buffer);
   }
 
@@ -535,7 +546,8 @@ export class SkillsController {
   @ApiParam({ name: 'id', description: 'UUID of the skill to sync' })
   @ApiResponse({ status: 200, description: 'Skill synced, dependency reinstallation started' })
   @ApiResponse({ status: 400, description: 'Skill without a source or source not available' })
-  syncFromSource(@Param('id') id: string, @CurrentUser() user: any) {
+  async syncFromSource(@Param('id') id: string, @CurrentUser() user: any) {
+    await this.service.assertNotPluginManaged(id);
     return this.service.syncFromSource(id, user.id);
   }
 
@@ -706,7 +718,7 @@ export class SkillsController {
   @ApiResponse({ status: 200, description: '{ filename, content }' })
   @ApiResponse({ status: 404, description: 'No documentation file found' })
   getDocs(@Param('id') id: string, @CurrentUser() user: any) {
-    return this.service.getDocs(id, user.id);
+    return this.service.getDocs(id, user.id, user.role === 'admin');
   }
 
   // ── Config vars ───────────────────────────────────────────────────────────

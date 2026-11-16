@@ -1,0 +1,6 @@
+{
+  "name": "Note added",
+  "description": "Starts when a note is added in the Notes plugin. Duplicate it to add steps.",
+  "trigger": { "type": "plugin-event", "plugin": { "event": "notes-demo/note.added" } },
+  "definition": { "nodes": [], "edges": [] }
+}

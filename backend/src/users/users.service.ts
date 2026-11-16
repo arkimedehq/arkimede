@@ -76,6 +76,9 @@ export class UsersService {
         memoryThreshold: true,
         episodicMemoryEnabled: true,
         recordareCopyCategories: true,
+        voiceAgentId: true,
+        presenceInMyMemory: true,
+        sharedTurnsInMyMemory: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -120,6 +123,10 @@ export class UsersService {
       episodicMemoryEnabled?: boolean;
       episodicMemoryMode?: EpisodicMemoryMode;
       recordareCopyCategories?: string[];
+      /** null = the standard pipeline. */
+      voiceAgentId?: string | null;
+      presenceInMyMemory?: boolean;
+      sharedTurnsInMyMemory?: boolean;
     },
   ): Promise<SafeUser> {
     const user = await this.repo.findOne({ where: { id } });
@@ -145,6 +152,12 @@ export class UsersService {
     if (dto.sharedMemoryEnabled !== undefined) user.sharedMemoryEnabled = dto.sharedMemoryEnabled;
     if (dto.memoryThreshold     !== undefined) user.memoryThreshold     = dto.memoryThreshold ?? null;
     if (dto.episodicMemoryEnabled !== undefined) user.episodicMemoryEnabled = dto.episodicMemoryEnabled;
+    if (dto.voiceAgentId !== undefined) {
+      if (dto.voiceAgentId && !(await this.agentVisible(dto.voiceAgentId, id))) throw new BadRequestException('users.voiceAgentNotFound');
+      user.voiceAgentId = dto.voiceAgentId || null;
+    }
+    if (dto.presenceInMyMemory    !== undefined) user.presenceInMyMemory    = dto.presenceInMyMemory;
+    if (dto.sharedTurnsInMyMemory !== undefined) user.sharedTurnsInMyMemory = dto.sharedTurnsInMyMemory;
     // A category added to the copy rule: follow the Recordare notes feed again from the start, so the notes already
     // there are copied too (copies are never made twice).
     const addedCategory = dto.recordareCopyCategories?.some((c) => !(user.recordareCopyCategories ?? []).includes(c));
@@ -165,6 +178,30 @@ export class UsersService {
       }
     }
     return this.getProfile(id);
+  }
+
+  /** Whether the user sees the agent: their own, the organization's, or a team's they belong to. */
+  /** What a voice turn needs of its account: active or not, and the agent the user chose for the voice. Null = no user. */
+  async voiceSettings(id: string): Promise<{ id: string; email: string; status: UserStatus; voiceAgentId: string | null } | null> {
+    const user = await this.repo.findOne({ where: { id }, select: { id: true, email: true, status: true, voiceAgentId: true } });
+    return user ? { id: user.id, email: user.email, status: user.status, voiceAgentId: user.voiceAgentId ?? null } : null;
+  }
+
+  /** The agents a user may pick for their voice turns: theirs, their teams' and the organization's. */
+  async voiceAgentChoices(userId: string): Promise<Array<{ id: string; name: string }>> {
+    return this.repo.query(
+      `SELECT a."id", a."name" FROM "agents" a WHERE a."userId" = $1 OR a."scope" = 'org'
+         OR (a."scope" = 'team' AND a."teamId" IN (SELECT "teamId" FROM "team_memberships" WHERE "userId" = $1))
+       ORDER BY a."name"`,
+      [userId]);
+  }
+
+  private async agentVisible(agentId: string, userId: string): Promise<boolean> {
+    const rows = await this.repo.query(
+      `SELECT 1 FROM "agents" a WHERE a."id" = $1 AND (a."userId" = $2 OR a."scope" = 'org'
+         OR (a."scope" = 'team' AND a."teamId" IN (SELECT "teamId" FROM "team_memberships" WHERE "userId" = $2)))`,
+      [agentId, userId]);
+    return rows.length > 0;
   }
 
   async changePassword(

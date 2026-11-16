@@ -10,6 +10,7 @@ import { Notification }           from './notification.entity';
 import { NotificationsGateway }   from './notifications.gateway';
 import { NotificationsService }   from './notifications.service';
 import { NotificationsController } from './notifications.controller';
+import { VoiceDeliveryService }   from './voice-delivery.service';
 
 @Module({
   imports: [
@@ -23,8 +24,8 @@ import { NotificationsController } from './notifications.controller';
       }),
     }),
   ],
-  providers:   [NotificationsGateway, NotificationsService],
+  providers:   [NotificationsGateway, NotificationsService, VoiceDeliveryService],
   controllers: [NotificationsController],
-  exports:     [NotificationsGateway, NotificationsService],
+  exports:     [NotificationsGateway, NotificationsService, VoiceDeliveryService],
 })
 export class NotificationsModule {}

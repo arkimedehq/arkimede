@@ -89,11 +89,22 @@ describe('MCP scope gating on create', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('a member can create a team-shared server', async () => {
+  it('only an admin shares a server with a team (a member no longer: specs/EXTENSION_AUDIENCE.md §4.7)', async () => {
+    const member = makeService({ isMember: true });
+    await expect(
+      member.svc.create('user-1', { ...base, scope: 'team', teamId: 'team-x' }, false, 'user'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
     const { svc, serverRepo } = makeService({ isMember: true });
     serverRepo.findOne.mockResolvedValue({ id: 'new-id', name: 'HA', scope: 'team', secrets: [] });
-    await svc.create('user-1', { ...base, scope: 'team', teamId: 'team-x' }, false, 'user');
+    await svc.create('admin-1', { ...base, scope: 'team', teamId: 'team-x' }, true, 'admin');
     expect(serverRepo.save).toHaveBeenCalledWith(expect.objectContaining({ scope: 'team', teamId: 'team-x' }));
+  });
+
+  it('a personal server is never shared, not even by an admin', async () => {
+    const { svc } = makeService({ isMember: true });
+    await expect(
+      svc.create('admin-1', { ...base, scope: 'org', personal: true } as any, true, 'admin'),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('defaults to personal when no scope is given', async () => {
@@ -101,5 +112,26 @@ describe('MCP scope gating on create', () => {
     serverRepo.findOne.mockResolvedValue({ id: 'new-id', name: 'HA', scope: 'personal', secrets: [] });
     await svc.create('user-1', base, false, 'user');
     expect(serverRepo.save).toHaveBeenCalledWith(expect.objectContaining({ scope: 'personal', teamId: null }));
+  });
+});
+
+describe('the "personal" flag is read with the resource (an edit form or a scope check that misses it would share it)', () => {
+  it('MCP servers: the list and detail selects carry it', async () => {
+    const { svc, serverRepo } = makeService();
+    await svc.findAll('user-1');
+    expect(serverRepo.find.mock.calls[0][0].select).toMatchObject({ personal: true });
+  });
+
+  it('custom tools: every select of a tool carries it', async () => {
+    const { CustomToolsService } = await import('../../src/custom-tools/custom-tools.service');
+    const toolRepo = { find: vi.fn().mockResolvedValue([]), findOne: vi.fn().mockResolvedValue({ id: 't', userId: 'user-1', scope: 'personal' }) };
+    const teams = { teamIdsForUser: vi.fn().mockResolvedValue([]) };
+    const svc = new (CustomToolsService as any)(toolRepo, {}, {}, {}, {}, {}, {}, {}, teams);
+    await svc.findAll('user-1');
+    await svc.findOne('t', 'user-1').catch(() => undefined);
+    await svc.findOneAccessible('t', 'user-1').catch(() => undefined);
+    const selects = [...toolRepo.find.mock.calls, ...toolRepo.findOne.mock.calls].map((c: any[]) => c[0]?.select).filter(Boolean);
+    expect(selects.length).toBeGreaterThanOrEqual(3);
+    for (const s of selects) expect(s).toMatchObject({ personal: true });
   });
 });

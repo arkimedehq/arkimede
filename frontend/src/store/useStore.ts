@@ -147,8 +147,10 @@ interface AppStore {
   sidebarOpen:     boolean;
   activeProjectId: string | null;
   activeChatId:    string | null;
-  /** Current view: 'chat' (default) or 'settings'. */
-  activeView:      'chat' | 'settings';
+  /** Current view: 'chat' (default), 'settings', or a plugin's page. */
+  activeView:      'chat' | 'settings' | 'plugin';
+  /** The plugin page shown when activeView is 'plugin'. */
+  activePluginPage: { name: string; page: string; title: string } | null;
   /** Files panel open in the current chat. */
   filesPanelOpen:  boolean;
 
@@ -162,6 +164,8 @@ interface AppStore {
    * When switching back to 'chat', activeChatId stays unchanged (undefined = no change).
    */
   setActiveView:      (v: 'chat' | 'settings') => void;
+  /** Shows a plugin's page (its iframe) in the main area. */
+  openPluginPage:     (p: { name: string; page: string; title: string }) => void;
   setFilesPanelOpen:  (v: boolean) => void;
 
   // ── Chat control (GlobalHeader → ChatWindow) ─────────────────────────────────
@@ -230,6 +234,7 @@ export const useStore = create<AppStore>()(
       activeProjectId: null,
       activeChatId:    null,
       activeView:      'chat',
+      activePluginPage: null,
       filesPanelOpen:  false,
 
       setSidebarOpen:   (v)  => set({ sidebarOpen: v }),
@@ -240,6 +245,7 @@ export const useStore = create<AppStore>()(
         // undefined = does not change activeChatId; null = clears activeChatId
         activeChatId: v === 'settings' ? null : undefined,
       }),
+      openPluginPage:   (p) => set({ activeView: 'plugin', activePluginPage: p, activeChatId: null }),
       setFilesPanelOpen: (v) => set({ filesPanelOpen: v }),
 
       // ── Chat control ────────────────────────────────────────────────────────

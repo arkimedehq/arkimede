@@ -150,6 +150,14 @@ export class RecordareIdentityService implements OnModuleInit {
     return { mode: p?.mode ?? null, atlasUrl: p?.atlasUrl ?? null };
   }
 
+  /** The memory's mode: the cached one, else asked now; null when Recordare is off or cannot be reached. */
+  async mode(userId: string): Promise<EpisodicMemoryMode | null> {
+    const people = this.people();
+    if (!people) return null;
+    const p = people.peek(userId) ?? (await people.refresh(userId).catch(() => undefined));
+    return p?.mode ?? null;
+  }
+
   /** The user's choice of memory mode; Recordare accepts it only while the memory is empty (MemoryNotEmptyError). */
   async setMode(userId: string, mode: EpisodicMemoryMode): Promise<void> {
     const client = recordareClient();

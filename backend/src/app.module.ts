@@ -25,6 +25,10 @@ import { TranscriptionModule } from './transcription/transcription.module';
 import { TtsModule } from './tts/tts.module';
 import { WyomingModule } from './wyoming/wyoming.module';
 import { GuestsModule } from './guests/guests.module';
+import { PluginsModule } from './plugins/plugins.module';
+import { VoiceIdModule } from './voice-id/voice-id.module';
+import { VoiceProfile } from './voice-id/voice-profile.entity';
+import { Plugin, PluginEvent, PluginIdentity, PluginKv, PluginSetting, PluginTrustedKey } from './plugins/plugin.entity';
 import { HomeAssistantModule } from './home-assistant/home-assistant.module';
 import { RecordareModule } from './recordare/recordare.module';
 import { DatabaseChecksModule } from './database/database-checks.module';
@@ -111,7 +115,7 @@ import { I18nModule, AcceptLanguageResolver, QueryResolver } from 'nestjs-i18n';
         username: cfg.get('DB_USER', 'postgres'),
         password: cfg.get('DB_PASSWORD', 'postgres'),
         database: cfg.get('DB_NAME', 'arkimede'),
-        entities: [User, Project, ProjectTeam, Chat, Message, FileEntity, CustomTool, ToolSecret, McpServer, McpServerSecret, DataSourceEntity, AppConfigEntity, LlmConfigEntity, VectorDbConfigEntity, VectorCollectionEntity, Skill, SkillScript, SkillProjectAssignment, SkillConfigVar, SkillDaemon, Notification, Feedback, UserMemory, Team, TeamMembership, Flow, FlowRun, Agent, AgentTeam, AgentTeamMember, ScheduledTask, AuditLog, LlmCall, ApiKey, AgentInvocation],
+        entities: [User, Project, ProjectTeam, Chat, Message, FileEntity, CustomTool, ToolSecret, McpServer, McpServerSecret, DataSourceEntity, AppConfigEntity, LlmConfigEntity, VectorDbConfigEntity, VectorCollectionEntity, Skill, SkillScript, SkillProjectAssignment, SkillConfigVar, SkillDaemon, Notification, Feedback, UserMemory, Team, TeamMembership, Flow, FlowRun, Agent, AgentTeam, AgentTeamMember, ScheduledTask, AuditLog, LlmCall, ApiKey, AgentInvocation, Plugin, PluginSetting, PluginEvent, PluginKv, PluginIdentity, PluginTrustedKey, VoiceProfile],
         // Automatic migrations at startup — never use synchronize alongside
         synchronize: false,
         migrations: [join(__dirname, 'database/migrations/*.{ts,js}')],
@@ -139,6 +143,8 @@ import { I18nModule, AcceptLanguageResolver, QueryResolver } from 'nestjs-i18n';
     DatabaseChecksModule, // Postgres collation-version warning at start-up
     RecordareModule,      // Recordare episodic memory (opt-in: RECORDARE_URL + RECORDARE_API_KEY)
     GuestsModule,         // contacts writing on a skill's messaging channel (Telegram), answered as the account
+    PluginsModule,        // installable plugins: primitives, routes, pages, events, services (specs/PLUGINS.md)
+    VoiceIdModule,        // who spoke to a satellite, from the voice (opt-in)
     HomeAssistantModule,  // presence and voice at home for the memory (opt-in, admin settings)
     InvocationsModule,
     VectorDbModule,

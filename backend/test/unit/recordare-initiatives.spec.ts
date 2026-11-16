@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createHmac } from 'crypto';
 import type { Initiative } from '@arkimedehq/recordare-client';
 import { RecordareInitiativesService, sharedWords, names, CHAT_SOURCE, EVENT_TYPE, ANSWER_WINDOW_MS } from '../../src/recordare/recordare-initiatives.service';
+import { VoiceDeliveryService } from '../../src/notifications/voice-delivery.service';
 import { RecordareWebhookController } from '../../src/recordare/recordare-webhook.controller';
 import { Chat } from '../../src/chats/chats.entity';
 import { Message } from '../../src/messages/messages.entity';
@@ -30,7 +31,7 @@ function initiative(over: Partial<Initiative> = {}): Initiative {
 /** A fake database: users, notifications, scheduled tasks, chats and messages in memory. */
 function fakeDb() {
   const state = {
-    users: [{ id: 'u1', episodicMemoryEnabled: true, recordareMemoryId: 'mem-1' }, { id: 'u2', episodicMemoryEnabled: false, recordareMemoryId: 'mem-2' }],
+    users: [{ id: 'u1', episodicMemoryEnabled: true, recordareMemoryId: 'mem-1' }, { id: 'u2', episodicMemoryEnabled: false, recordareMemoryId: 'mem-2' }] as any[],
     notifications: [] as Array<{ id?: string; userId: string; source: string; sourceId: string; eventType?: string; payload?: any; createdAt?: Date }>,
     tasks: [] as Array<{ userId: string; chatId: string | null; runAt: Date | null; title: string | null; instruction: string; status?: string; lastRunAt?: Date | null }>,
     chats: [] as any[],
@@ -44,6 +45,7 @@ function fakeDb() {
   });
   const ds = {
     query: async (sql: string, p: any[] = []) => {
+      if (/"sharedTurnsInMyMemory" = true/.test(sql)) return state.users.filter((u: any) => u.id === p[0] && u.episodicMemoryEnabled && u.sharedTurnsInMyMemory);
       if (/FROM "users" WHERE "id" = \$1/.test(sql)) return state.users.filter((u) => u.id === p[0] && u.episodicMemoryEnabled);
       if (/FROM "users"/.test(sql)) return state.users.filter((u) => u.episodicMemoryEnabled && u.recordareMemoryId);
       if (/FROM "notifications"/.test(sql) && /'kind' = 'ask'/.test(sql)) {
@@ -82,6 +84,8 @@ function setup() {
     reportInitiative: vi.fn(async () => ({})),
     presence: vi.fn(async () => ({ person: null, initiative: null, askWho: null })),
     initiatives: vi.fn(async () => ({ items: [] as Initiative[], next: 0, more: false })),
+    perceive: vi.fn(async (): Promise<any> => ({ episodeId: 'e1', duplicate: false, people: [], expiresAt: null })),
+    ingest: vi.fn(async (): Promise<any> => ({ conversationId: 'c', accepted: 2, duplicates: 0, conflicts: [] })),
   };
   // The skills a user may use with a user channel (none by default), and what running one answers.
   const skills = {
@@ -89,11 +93,13 @@ function setup() {
     userChannels: vi.fn(async () => skills.channels),
     invoke: vi.fn(async (..._a: unknown[]): Promise<any> => ({ success: true, output: { success: true }, raw: '', duration_ms: 1, exit_code: 0 })),
   };
-  const svc = new RecordareInitiativesService(db.ds, notifications as any, gateway as any, skills as any);
+  // The one voice channel, real, over the fake DB: a test registers a speaker (the channel) on it.
+  const voice = new VoiceDeliveryService(db.ds);
+  const svc = new RecordareInitiativesService(db.ds, notifications as any, gateway as any, skills as any, voice);
   svc.client = () => client as any;
   /** What a webhook `initiative.deliver` does: true when a message was written. */
   const deliver = (user: string, i: Initiative) => svc.handleEvent({ type: 'initiative.deliver', timestamp: '', data: { ...i, user, memoryId: 'm' } });
-  return { svc, db, client, pushed, notifications, listeners, deliver, skills };
+  return { svc, db, client, pushed, notifications, listeners, deliver, skills, voice };
 }
 
 describe('RecordareInitiativesService', () => {
@@ -184,26 +190,27 @@ describe('RecordareInitiativesService', () => {
 
   it('by voice first when a voice channel reaches the person: their room, the message in the chat, reported voice', async () => {
     const said: any[] = [];
-    t.svc.setVoice({ say: async (user, text, where, chatId) => { said.push({ user, text, where, chatId }); return where.person === 'person.chloe' ? 'assist_satellite.cucina' : null; } });
+    t.voice.setChannel({ placeArea: () => null, sayWherePresent: async (user, text, chatId, where) => { said.push({ user, text, where, chatId }); return where.person === 'person.chloe' ? 'assist_satellite.cucina' : null; } });
     const forChloe = { personId: 'p', name: 'Chloé', addresses: [{ channel: 'homeassistant', id: 'person.chloe' }] };
     expect(await t.deliver('u1', initiative({ for: forChloe }))).toBe(true);
     expect(said[0]).toMatchObject({ user: 'u1', where: { person: 'person.chloe' }, chatId: 'id-1' });
     expect(t.db.state.messages[0]).toMatchObject({ chatId: 'id-1' });
     expect(t.pushed).toHaveLength(0);
     expect(t.client.reportInitiative).toHaveBeenLastCalledWith('u1', initiative().id, 'said', { channel: 'voice' });
-    // Nobody to reach by voice (no Home Assistant address, no room): the next channel (the chat).
+    // Nobody confirmed present by voice (the user is in no room): the next channel (the chat).
     await t.deliver('u1', initiative({ id: '66666666-6666-4666-8666-666666666666' }));
+    expect(said[1]).toMatchObject({ user: 'u1', where: {} }); // the user's own presence was asked, none confirmed
     expect(t.client.reportInitiative).toHaveBeenLastCalledWith('u1', '66666666-6666-4666-8666-666666666666', 'said', { channel: 'chat' });
   });
 
   it('a room\'s presence: what Recordare answers is said in that room; with others there, only the opening', async () => {
     const said: any[] = [];
-    t.svc.setVoice({ say: async (_u, text, where) => { said.push({ text, where }); return 'assist_satellite.cucina'; } });
+    t.voice.setChannel({ placeArea: () => null, sayWherePresent: async (_u, text, _c, where) => { said.push({ text, where }); return 'assist_satellite.cucina'; } });
     t.client.presence.mockResolvedValueOnce({ person: null, people: [], initiative: initiative({ for: null, channel: 'voice' }), askWho: null, opening: null } as any);
     const impulse = { channel: 'voice' as const, place: 'Cucina', people: [{ identity: { channel: 'homeassistant', externalId: 'person.chloe' } }] };
     await t.svc.roomPresence('u1', impulse, 'cucina');
     expect(t.client.presence).toHaveBeenCalledWith('u1', impulse);
-    expect(said[0]).toEqual({ text: initiative().text, where: { areaId: 'cucina', person: undefined } });
+    expect(said[0]).toEqual({ text: initiative().text, where: { areaId: 'cucina' } });
     const opening = 'Chloé, ho una cosa per te: vuoi sentirla?';
     t.client.presence.mockResolvedValueOnce({ person: null, people: [], initiative: initiative({ id: '77777777-7777-4777-8777-777777777777', status: 'pending' }), askWho: null, opening } as any);
     await t.svc.roomPresence('u1', { ...impulse, someone: 1 }, 'cucina');
@@ -319,5 +326,93 @@ describe('RecordareWebhookController', () => {
     expect(() => ctl.receive({ rawBody: Buffer.from(body) } as any, {})).toThrow(/Not Found/);
     delete process.env.RECORDARE_URL;
     delete process.env.RECORDARE_API_KEY;
+  });
+});
+
+describe('RecordareInitiativesService.perceive', () => {
+  const perception = { text: 'Front door opened', sensor: 'sensor' as const, place: 'Entrance' };
+
+  it('sends a perception to the memory of a user whose memory is on', async () => {
+    const t = setup();
+    expect(await t.svc.perceive('u1', perception)).toMatchObject({ episodeId: 'e1' });
+    expect(t.client.perceive).toHaveBeenCalledWith('u1', perception);
+  });
+
+  it('nothing for a user whose memory is off, or without Recordare; a failure is not thrown', async () => {
+    const t = setup();
+    expect(await t.svc.perceive('u2', perception)).toBeNull();
+    expect(t.client.perceive).not.toHaveBeenCalled();
+    t.client.perceive.mockRejectedValueOnce(new Error('down'));
+    expect(await t.svc.perceive('u1', perception)).toBeNull();
+    t.svc.client = () => null;
+    expect(await t.svc.perceive('u1', perception)).toBeNull();
+  });
+});
+
+describe('RecordareInitiativesService: askWho', () => {
+  it('nobody identified and something waits: asks who is there on that room\'s satellite, naming no one, once in a while', async () => {
+    const t = setup();
+    const voice = { sayWherePresent: vi.fn(async () => 'assist_satellite.cucina'), placeArea: () => null };
+    t.voice.setChannel(voice as any);
+    t.client.presence.mockResolvedValue({ person: null, initiative: null, askWho: { personId: 'p1', name: 'Alex' } } as any);
+    const impulse = { channel: 'voice' as const, place: 'Cucina', someone: 1 };
+    await t.svc.roomPresence('u1', impulse, 'cucina');
+    await t.svc.roomPresence('u1', impulse, 'cucina');
+    expect(voice.sayWherePresent).toHaveBeenCalledTimes(1);
+    const [, text, , where] = voice.sayWherePresent.mock.calls[0] as any[];
+    expect(where).toEqual({ areaId: 'cucina' });
+    expect(text).not.toContain('Alex');
+  });
+
+  it('no askWho, or no room: nothing is asked', async () => {
+    const t = setup();
+    const voice = { sayWherePresent: vi.fn(async () => 'x'), placeArea: () => null };
+    t.voice.setChannel(voice as any);
+    await t.svc.roomPresence('u1', { channel: 'voice', place: 'Cucina' }, 'cucina');
+    t.client.presence.mockResolvedValue({ person: null, initiative: null, askWho: { personId: 'p1', name: 'Alex' } } as any);
+    await t.svc.roomPresence('u1', { channel: 'home' });
+    expect(voice.sayWherePresent).not.toHaveBeenCalled();
+  });
+});
+
+describe('RecordareInitiativesService: a plugin\'s place', () => {
+  it('a presence at a named place speaks in that room; an unknown place is told without a room', async () => {
+    const t = setup();
+    const voice = { sayWherePresent: vi.fn(async () => 'assist_satellite.cucina'), placeArea: vi.fn((p: string) => (p === 'Kitchen' ? 'cucina' : null)) };
+    t.voice.setChannel(voice as any);
+    const spy = vi.spyOn(t.svc, 'roomPresence');
+    await t.svc.placePresence('u1', { channel: 'camera', place: 'Kitchen', someone: 1 });
+    await t.svc.placePresence('u1', { channel: 'camera', place: 'Attic', someone: 1 });
+    expect(spy.mock.calls.map((c) => c[2])).toEqual(['cucina', undefined]);
+  });
+
+  it('announce: on the voice point of the place or of a person\'s room; an unknown place or no voice: nothing', async () => {
+    const t = setup();
+    expect(await t.svc.announce('u1', 'ciao', { place: 'Kitchen' })).toBeNull();
+    const voice = { sayWherePresent: vi.fn(async () => 'assist_satellite.cucina'), placeArea: vi.fn((p: string) => (p === 'Kitchen' ? 'cucina' : null)) };
+    t.voice.setChannel(voice as any);
+    expect(t.svc.capabilities()).toEqual({ memory: true, voice: true });
+    expect(await t.svc.announce('u1', 'ciao', { place: 'Kitchen' })).toBe('assist_satellite.cucina');
+    expect(voice.sayWherePresent.mock.calls[0]).toEqual(['u1', 'ciao', 'id-1', { areaId: 'cucina' }]);
+    expect(await t.svc.announce('u1', 'ciao', { place: 'Attic' })).toBeNull();
+    await t.svc.announce('u1', 'ciao', { person: 'person.alex' });
+    expect((voice.sayWherePresent.mock.calls[1] as any[])[3]).toEqual({ person: 'person.alex' });
+  });
+});
+
+describe('RecordareInitiativesService.sharedTurn', () => {
+  it('a turn on a satellite that is not theirs goes to their memory only with their switch and their memory on', async () => {
+    const t = setup();
+    const turn = { conversation: 'wyoming:conv-1', text: 'che tempo fa domani?', answer: 'Sole.' };
+    expect(await t.svc.sharedTurn('u1', turn)).toBe(false);          // switch off
+    expect(t.client.ingest).not.toHaveBeenCalled();
+    Object.assign(t.db.state.users[0], { sharedTurnsInMyMemory: true, name: 'Sam' });
+    Object.assign(t.db.state.users[1], { sharedTurnsInMyMemory: true });
+    expect(await t.svc.sharedTurn('u2', turn)).toBe(false);          // memory off
+    expect(await t.svc.sharedTurn('u1', turn)).toBe(true);
+    const [user, body] = t.client.ingest.mock.calls[0] as any[];
+    expect(user).toBe('u1');
+    expect(body.conversation).toMatchObject({ externalId: 'wyoming:conv-1', source: 'voice', channel: 'arkimede-wyoming' });
+    expect(body.messages.map((m: any) => [m.role, m.authorRef, m.content])).toEqual([['user', 'holder', turn.text], ['assistant', 'assistant', 'Sole.']]);
   });
 });

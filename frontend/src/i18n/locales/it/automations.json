@@ -16,7 +16,8 @@
     "toolAll": "tutti",
     "runStarted": "Esecuzione avviata: riceverai una notifica al termine, con l'esito anche in chat.",
     "cap": "limite {{count}} token/esecuzione",
-    "capOff": "nessun limite token"
+    "capOff": "nessun limite token",
+    "voice": "a voce"
   },
   "actions": {
     "activate": "Attiva",
@@ -50,6 +51,8 @@
     "capHintUser": "Se un'esecuzione supera il limite, l'automazione viene disattivata. Puoi solo abbassare il limite rispetto al predefinito.",
     "capHintAdmin": "Se un'esecuzione supera il limite, l'automazione viene disattivata. 0 = nessun limite.",
     "capInvalid": "Inserisci un numero intero ≥ 0.",
-    "capAdminOnly": "Solo un amministratore può superare il limite predefinito o rimuoverlo."
+    "capAdminOnly": "Solo un amministratore può superare il limite predefinito o rimuoverlo.",
+    "voice": "Dilla anche a voce",
+    "voiceHint": "L'esito viene detto ad alta voce su un tuo satellite vocale, solo se in quel momento la tua presenza è confermata nella stanza (altrimenti resta in chat e nella notifica, come sempre)."
   }
 }

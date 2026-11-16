@@ -1360,6 +1360,9 @@ SERVICE_API_KEY=<secret>    # openssl rand -hex 32
 SKILLS_REGISTRY_URL=https://...              # default: official community registry
 SKILLS_REGISTRY_CACHE_TTL_MS=300000         # cache TTL in ms (default 5 min)
 SKILLS_REGISTRY_ALLOWED_DOMAINS=cdn.com     # extra domains allowed for ZIP download
+PLUGINS_BASE_PATH=/app/uploads/plugins      # where installed plugin packages live (a persisted volume)
+PLUGIN_REGISTRY_URL=https://...              # default: arkimedehq/arkimede-plugins registry.json
+PLUGIN_TRUSTED_KEYS='[{"id":"…","publicKey":"…"}]'   # official ed25519 keys for plugin signatures
 ```
 
 ### Frontend (`frontend/.env`)
@@ -1410,6 +1413,11 @@ as its users' **episodic memory** (what happened and when), next to — not inst
 Recordare's notes into A-MEM, by hand or by category, and the copies follow them (`docs/MEMORY.md`). Code: `backend/src/recordare/`, on
 Recordare's **client library** (the npm package `@arkimedehq/recordare-client`, Recordare's `packages/client`): official MCP SDK, RFC 9457 errors, `Retry-After`, W3C trace context; requests go through
 `safeFetch`.
+
+**End of a conversation** (`recordare-conversations.service.ts`, migration 111 `chats.memoryEndedAt`): a chat quiet for
+30 minutes and fully sent is ended in Recordare once (`endConversation`), so its extraction runs at once; a later
+message reopens it. **Look-ups**: when the agent has tools the context call asks for them (`initiatives: {lookups:
+true}`): the memory may hand it something to find out, which it keeps with `learn_source`.
 
 ```bash
 RECORDARE_URL=http://recordare:8080   # off unless both are set
@@ -1483,6 +1491,8 @@ Recordare becomes configured). An empty setting falls back to the variable.
   Bermuda / ESPresense; occupancy without identity = someone). Every change goes to the **Wyoming user's** memory as
   presence impulses (`channel home | voice`, `place` = the area, people by their `homeassistant` identity `person.x` —
   bind it on their card in Recordare's console), refreshed every 5 min; what Recordare answers is said in that room.
+  **Voice recognition** (opt-in, `voice-id/`, migration 110): who spoke to a satellite, from the voice — see
+  `docs/VOICE_AUDIO_SERVICES.md` Part 5; a recognised voice replaces the guess by elimination in the turn's presence.
   **A satellite spoken to** is a presence in its room too (Wyoming tells `ConversationFocusService.voiceTurn`, 10 s after
   the answer, so what follows never talks over it): the speaker by elimination — the one person the room's sensors place
   there (0.9), else the one person at home (0.6, medium), else someone; Recordare tells a first turn (an arrival: what is
@@ -1500,6 +1510,16 @@ Recordare becomes configured). An empty setting falls back to the variable.
   (`RecordareInitiativesService.setBusy`). `talking` is never sent: the satellites stream only after the wake word, so
   Arkimede does not hear people talking to each other — and neither several people in a room nor a turn spoken to the
   agent is such a conversation. Switch off: the impulses are exactly the ones of before.
+  **Perceptions** (switch `haPerceptionsEnabled` + the entities `haPerceptionEntities`, ids or `*` patterns, default
+  off; migration 109; `ha-perceptions.ts`, `ha-perceptions.service.ts`): an event of a chosen entity — a
+  `binary_sensor` going on, a new `event.*` (the doorbell), a `cover` opening, a `lock` unlocked or jammed, an
+  `alarm_control_panel` triggered, a `siren` on — is sent to the same memory as the presence with Recordare's
+  `perceive`: a fixed sentence in that memory's language with the entity's name ("Front door opened"), its room as
+  `place`, `sensor: camera` when the entity's device has a camera, never a person (Home Assistant recognises nobody
+  here). Never a stream: a change from `unknown`/`unavailable` (a restart) is not an event, one perception per entity
+  every 10 minutes. Serious events (smoke, gas, carbon monoxide, water, safety, tamper, an alarm, a siren, a jammed lock)
+  are kept 365 days (`keepDays`), the others fade with the memory's default. Telling someone at once stays with the
+  flows (trigger `home-assistant`).
   `GET/PATCH /api/admin/config/home-assistant` (settings, live status: entities exposed, voice points, who is home and
   where, who is busy, persons), `POST …/import-mcp`, `PATCH …/people` (a user's person).
 
@@ -1609,7 +1629,7 @@ the admin TTS test. Kind CLIENT (the engines are remote services). Attributes: `
 `gen_ai.provider.name` when known (`whisper` / `piper` for the bundled services, `openai`, `groq`; omitted for
 OpenAI-compatible endpoints); `voice.audio_seconds` (STT input / TTS output length, only when the audio is WAV — read
 from its header); `voice.characters` (TTS input length, a count); `user.id` and `recordare.memory_id` when a user is
-known (Wyoming asr / tts requests from Home Assistant act for the Wyoming conversation user when one is configured,
+known (Wyoming asr / tts requests from Home Assistant act for the satellites' default account when the conversation is on,
 else they carry none). A voice span nests under the active span when there is one;
 the HTTP routes and the Wyoming protocol (one request per connection: asr, handle and tts arrive separately) make
 each voice call its own trace, while the Wyoming `handle` turn is an `invoke_agent` trace of its own.
@@ -1745,6 +1765,7 @@ provider. Editable by admin in "Settings → AI System" without a redeploy.
 | Agent teams         | Everyone   | Team composition (ordered members) + supervisor/sequential/parallel topology                                                |
 | Automations         | Everyone   | Scheduled automations (Auto-Scheduling): status, pending+Activate, token/cost per run, enable/delete                         |
 | Activity            | Everyone   | Read-only dashboard: skill daemons, automations, scheduled flows and latest aggregated runs (auto-refetch every 10s)         |
+| Plugins             | Admin      | Install (ZIP / registry, signatures), review and approve with scope and agent, settings, people, events, enable/disable, uninstall, trusted keys |
 
 ---
 
@@ -1903,6 +1924,18 @@ the other resources.
 | Agent teams | Everyone | Team composition, topology (supervisor/sequential/parallel), member order, scope |
 
 ---
+
+## Plugins
+
+Installable packages that extend Arkimede as a whole (contract and guide: [PLUGINS.md](PLUGINS.md); design:
+`specs/PLUGINS.md`). A plugin bundles existing primitives — skills, MCP servers, daemons, read-only flows — and adds
+routes and event handlers (scripts of its skills, run on demand by the executor in the skills' containers), pages in
+an isolated iframe talking to Arkimede only through a postMessage bridge, events that start flows (trigger
+`plugin-event`) and reach subscribed plugins, and core services behind approved permissions (`notify`, a key-value
+`storage` with a quota, `agent.ask`). Its code never runs in the backend process. Code: `backend/src/plugins/`
+(manifest, trust and tokens, life cycle, runtime, controllers), `frontend/src/pages/PluginsPage.tsx`,
+`frontend/src/components/plugins/PluginPageView.tsx`. Visibility follows the plugin's scope (`personal · team · org`);
+installing is admin-only; ed25519 signatures with trust levels, unsigned packages only when the instance allows them.
 
 ## Flows
 

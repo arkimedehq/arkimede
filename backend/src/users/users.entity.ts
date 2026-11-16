@@ -67,6 +67,18 @@ export class User {
   @Column({ type: 'varchar', length: 5, nullable: true, default: null })
   language: string | null;
 
+  /** The agent the user's voice turns run with (the satellites assigned to them; specs/VOICE_SATELLITES.md). */
+  @Column({ type: 'uuid', nullable: true, default: null })
+  voiceAgentId: string | null;
+
+  /** Their presence (and busy) from Home Assistant also told to their own memory, not only to Home Assistant's. Off. */
+  @Column({ type: 'boolean', default: false })
+  presenceInMyMemory: boolean;
+
+  /** Their turns on satellites that are not theirs (recognised by voice) also into their own memory. Off. */
+  @Column({ type: 'boolean', default: false })
+  sharedTurnsInMyMemory: boolean;
+
   /**
    * Grammatical gender ('masculine' | 'feminine' | 'neutral'). null = not set → masculine.
    * Sent to Recordare as the gender of the memory's first person (its D50, `PATCH /me {gender}`).

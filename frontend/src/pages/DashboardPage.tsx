@@ -6,6 +6,7 @@ import Sidebar from '../components/layout/Sidebar';
 import GlobalHeader from '../components/layout/GlobalHeader';
 import ChatWindow from '../components/chat/ChatWindow';
 import SettingsPage from './SettingsPage';
+import PluginPageView from '../components/plugins/PluginPageView';
 import { NotificationToasts } from '../components/notifications/NotificationToasts';
 import { useStore } from '../store/useStore';
 import { chatsApi } from '../api/chats';
@@ -14,6 +15,7 @@ import { useUserLanguage } from '../hooks/useUserLanguage';
 export default function DashboardPage() {
   const activeChatId = useStore((s) => s.activeChatId);
   const activeView   = useStore((s) => s.activeView);
+  const pluginPage   = useStore((s) => s.activePluginPage);
   useUserLanguage(); // apply the profile language to the whole app after login
 
   return (
@@ -29,6 +31,8 @@ export default function DashboardPage() {
         <main className="flex-1 min-w-0 min-h-0 overflow-hidden flex flex-col">
           {activeView === 'settings' ? (
             <SettingsPage />
+          ) : activeView === 'plugin' && pluginPage ? (
+            <PluginPageView name={pluginPage.name} page={pluginPage.page} title={pluginPage.title} />
           ) : activeChatId ? (
             // One window per chat: leaving a chat detaches it from its stream (the run goes
             // on and is followed again on return), so several chats can be working at once.

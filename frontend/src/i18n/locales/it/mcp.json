@@ -103,5 +103,9 @@
     "modeLegacySse": "SSE legacy",
     "resourcesCount": "{{count}} resource",
     "resourcesTitle": "Resources (l'agente le legge con il tool read_resource del server)"
+  },
+  "plugin": {
+    "badge": "Plugin",
+    "managed": "Questo server MCP viene da un plugin: si modifica, si accende e si elimina dalla pagina del plugin."
   }
 }

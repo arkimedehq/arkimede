@@ -29,7 +29,10 @@
     "descTeam": "Visible to members of the selected team.",
     "descOrg": "Visible to the whole organization (managed by admins only).",
     "chooseTeam": "Choose a team…",
-    "noTeams": "You don't belong to any team. Ask an admin to add you or create one."
+    "noTeams": "You don't belong to any team. Ask an admin to add you or create one.",
+    "personalOption": "Personal",
+    "personalOptionHint": "Uses your account or your data: never shared with a team or the organization.",
+    "adminShares": "Visible to you only: only the admin shares with a team or the organization."
   },
   "dashboard": {
     "greeting": "Hi, {{name}} 👋",
@@ -63,7 +66,8 @@
     "unread": "Unread",
     "chatOf": "{{name}}'s chat",
     "externalWyoming": "Voice conversation (Wyoming)",
-    "externalApi": "Conversation from external API"
+    "externalApi": "Conversation from external API",
+    "plugins": "Plugins"
   },
   "theme": {
     "light": "Light",

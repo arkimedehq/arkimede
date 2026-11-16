@@ -12,12 +12,13 @@ import {
   Save, Eye, EyeOff, KeyRound, Cpu, Wifi, WifiOff, Boxes, Pencil, Plus,
   Star, Server, FileStack, X, Sparkles, Eraser, Zap, Filter, Package, ThumbsUp, BarChart3,
   Users, UsersRound, Workflow, Network, CalendarClock, Activity, ShieldAlert, Mic, Terminal, Check, Copy, DatabaseBackup, Volume2, Radio, Home, AlertTriangle, ScanText, ExternalLink, BookOpen,
+  Puzzle,
 } from 'lucide-react';
 import type { LlmProvider, EmbeddingProvider, EmbeddingConfig, ToolLoadingConfig, ToolLoadingStrategy, ToolSchemaFormat, TranscriptionProvider, TtsProvider, SandboxNetwork, SandboxExecMode, HomeAssistantConfig } from '../api/appConfig';
 import { apiKeysApi } from '../api/apiKeys';
 import ApiKeyPersistToggle from '../components/ApiKeyPersistToggle';
-import { adminUsersApi } from '../api/adminUsers';
 import { filesApi, type FileRecord, type DocScope, type FileScope } from '../api/files';
+import { agentsApi } from '../api/agents';
 import { profileApi, type MemoryMode, type UserGender } from '../api/profile';
 import { appConfigApi } from '../api/appConfig';
 import { userMemoryApi, type UserMemoryItem } from '../api/userMemory';
@@ -36,6 +37,7 @@ import { FeedbackSection } from './FeedbackAdminPage';
 import { UsersSection } from './UsersPage';
 import { TeamsSection } from './TeamsPage';
 import { FlowsSection } from './FlowsPage';
+import { PluginsSection } from './PluginsPage';
 import { AgentsSection, AgentTeamsSection } from './AgentsPage';
 import { AutomationsSection } from './AutomationsPage';
 import { ActivitySection } from './ActivityPage';
@@ -44,6 +46,7 @@ import { DiarySection } from './DiaryPage';
 import { BackupSection } from './BackupPage';
 import { copyText } from '../utils/clipboard';
 import { RecordareConnectionCard, RecordareInitiativesCard } from '../components/settings/RecordareSettingsCards';
+import VoiceIdCard from '../components/settings/VoiceIdCard';
 
 // ── Settings sections ──────────────────────────────────────────────────────────
 // `id` also acts as the i18n key: t(`settings:nav.${id}`)
@@ -51,7 +54,7 @@ const SECTIONS: { id: string; icon: React.ElementType; adminOnly?: boolean; disa
   { id: 'profile',  icon: UserCircle },
   { id: 'memory',   icon: BrainCircuit },
   { id: 'diary',    icon: BookOpen, recordare: true },
-  { id: 'ai',       icon: Bot },
+  { id: 'ai',       icon: Bot, adminOnly: true },
   { id: 'tools',    icon: Wrench },
   { id: 'mcp',      icon: Plug },
   { id: 'skills',   icon: Sparkles },
@@ -66,6 +69,7 @@ const SECTIONS: { id: string; icon: React.ElementType; adminOnly?: boolean; disa
   { id: 'vectordb', icon: Boxes, adminOnly: true },
   { id: 'voice',    icon: Mic, adminOnly: true },
   { id: 'integrations', icon: Home, adminOnly: true },
+  { id: 'plugins',  icon: Puzzle },
   { id: 'feedback', icon: ThumbsUp, adminOnly: true },
   { id: 'users',    icon: Users, adminOnly: true },
   { id: 'teams',    icon: UsersRound, adminOnly: true },
@@ -73,7 +77,7 @@ const SECTIONS: { id: string; icon: React.ElementType; adminOnly?: boolean; disa
   { id: 'backup',   icon: DatabaseBackup, adminOnly: true },
 ];
 
-type SectionId = 'profile' | 'memory' | 'diary' | 'ai' | 'tools' | 'mcp' | 'skills' | 'flows' | 'agents' | 'agentteams' | 'automations' | 'activity' | 'files' | 'database' | 'usage' | 'vectordb' | 'voice' | 'integrations' | 'feedback' | 'users' | 'teams' | 'audit' | 'backup';
+type SectionId = 'profile' | 'memory' | 'diary' | 'ai' | 'tools' | 'mcp' | 'skills' | 'flows' | 'agents' | 'agentteams' | 'automations' | 'activity' | 'files' | 'database' | 'usage' | 'vectordb' | 'voice' | 'integrations' | 'plugins' | 'feedback' | 'users' | 'teams' | 'audit' | 'backup';
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function SettingsPage() {
@@ -117,10 +121,10 @@ export default function SettingsPage() {
           the other sections stay centered at max-w-4xl. */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden min-w-0 min-h-0">
         <div className={activeSection === 'flows' ? 'h-full px-4 py-5' : 'max-w-4xl mx-auto px-4 sm:px-8 py-6 sm:py-8'}>
-        {activeSection === 'profile'  && <div className="space-y-6"><ProfileSection /><ApiKeysCard /></div>}
+        {activeSection === 'profile'  && <div className="space-y-6"><ProfileSection /><VoiceAgentCard /><ApiKeysCard /></div>}
         {activeSection === 'memory'   && <MemorySection />}
         {activeSection === 'diary'    && <DiarySection enabled={profileQuery.data?.episodicMemoryEnabled === true} />}
-        {activeSection === 'ai'       && <AiSection />}
+        {activeSection === 'ai'       && isAdmin && <AiSection />}
         {activeSection === 'tools'    && <ToolsSection />}
         {activeSection === 'mcp'      && <McpSection />}
         {activeSection === 'skills'   && <SkillsSection />}
@@ -135,6 +139,7 @@ export default function SettingsPage() {
         {activeSection === 'vectordb' && isAdmin && <VectorDbSection />}
         {activeSection === 'voice'    && isAdmin && <VoiceSection />}
         {activeSection === 'integrations' && isAdmin && <IntegrationsSection />}
+        {activeSection === 'plugins'  && <PluginsSection />}
         {activeSection === 'feedback' && isAdmin && <FeedbackSection />}
         {activeSection === 'users'    && isAdmin && <UsersSection />}
         {activeSection === 'teams'    && isAdmin && <TeamsSection />}
@@ -678,8 +683,78 @@ function MemorySection() {
           atlasUrl={profileQuery.data.recordareAtlasUrl ?? null}
         />
       )}
+      {profileQuery.data?.episodicMemoryAvailable && profileQuery.data.episodicMemoryEnabled && <VoiceMemoryCard />}
       {isAdmin && <RecordareConnectionCard />}
       {isAdmin && <RecordareInitiativesCard />}
+    </div>
+  );
+}
+
+// ── Voice (satellites) ──────────────────────────────────────────────────────
+// specs/VOICE_SATELLITES.md: the agent of the user's voice turns (on the satellites the admin assigned to them) and,
+// in the memory section, two choices that are off by default — their own presence, and their turns on satellites that
+// are not theirs, also into their own memory.
+function VoiceAgentCard() {
+  const { t } = useTranslation('settings');
+  const qc = useQueryClient();
+  const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: profileApi.get, staleTime: 60_000 });
+  const { data: agents } = useQuery({ queryKey: ['agents'], queryFn: agentsApi.list, staleTime: 60_000 });
+  const save = useMutation({
+    mutationFn: (voiceAgentId: string | null) => profileApi.update({ voiceAgentId }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['profile'] }),
+  });
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-2">
+      <div className="flex items-center gap-2">
+        <Mic size={15} className="text-indigo-400" />
+        <h3 className="text-sm font-semibold text-gray-100">{t('voiceProfile.title')}</h3>
+      </div>
+      <p className="text-xs text-gray-500">{t('voiceProfile.agentHint')}</p>
+      <select
+        value={profile?.voiceAgentId ?? ''} disabled={!profile || save.isPending}
+        onChange={(e) => save.mutate(e.target.value || null)}
+        className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-100 focus:outline-none focus:border-blue-500"
+      >
+        <option value="">{t('voiceProfile.standard')}</option>
+        {(agents ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+      </select>
+    </div>
+  );
+}
+
+function VoiceMemoryCard() {
+  const { t } = useTranslation('settings');
+  const qc = useQueryClient();
+  const { data: profile } = useQuery({ queryKey: ['profile'], queryFn: profileApi.get, staleTime: 60_000 });
+  const save = useMutation({
+    mutationFn: (patch: { presenceInMyMemory?: boolean; sharedTurnsInMyMemory?: boolean }) => profileApi.update(patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['profile'] }),
+  });
+  const row = (key: 'presenceInMyMemory' | 'sharedTurnsInMyMemory') => {
+    const on = !!profile?.[key];
+    return (
+      <div className="flex items-center justify-between py-2 border-t border-gray-800">
+        <div className="pr-4">
+          <p className="text-sm text-gray-200">{t(`voiceProfile.${key}`)}</p>
+          <p className="text-xs text-gray-500 mt-0.5">{t(`voiceProfile.${key}Hint`)}</p>
+        </div>
+        <button
+          role="switch" aria-checked={on} disabled={!profile || save.isPending} onClick={() => save.mutate({ [key]: !on })}
+          className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${on ? 'bg-blue-600' : 'bg-gray-700'}`}
+        >
+          <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${on ? 'translate-x-6' : 'translate-x-1'}`} />
+        </button>
+      </div>
+    );
+  };
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+      <div className="flex items-center gap-2 mb-2">
+        <Mic size={15} className="text-indigo-400" />
+        <h3 className="text-sm font-semibold text-gray-100">{t('voiceProfile.memoryTitle')}</h3>
+      </div>
+      {profile?.episodicMemoryMode === 'personal' && row('presenceInMyMemory')}
+      {row('sharedTurnsInMyMemory')}
     </div>
   );
 }
@@ -1416,10 +1491,9 @@ function UsageTable({
 }
 
 // ── AI System section ────────────────────────────────────────────────────────
+// Admin only: LLM providers, tool loading, isolation and security policies, the system prompt.
 function AiSection() {
   const { t } = useTranslation('settings');
-  const user = useStore((s) => s.user);
-  const isAdmin = user?.role === 'admin';
 
   return (
     <div className="space-y-6">
@@ -1428,13 +1502,13 @@ function AiSection() {
         <p className="text-sm text-gray-500 mt-1">{t('ai.subtitle')}</p>
       </div>
 
-      {isAdmin && <LlmConfigsSection />}
-      {isAdmin && <ToolLoadingAdminCard />}
-      {isAdmin && <IsolationLevelCard />}
-      {isAdmin && <SandboxAdminCard />}
-      {isAdmin && <DataSourceSecurityAdminCard />}
-      {isAdmin && <McpSecurityAdminCard />}
-      {isAdmin && <SystemPromptCard />}
+      <LlmConfigsSection />
+      <ToolLoadingAdminCard />
+      <IsolationLevelCard />
+      <SandboxAdminCard />
+      <DataSourceSecurityAdminCard />
+      <McpSecurityAdminCard />
+      <SystemPromptCard />
     </div>
   );
 }
@@ -3882,6 +3956,7 @@ function VoiceSection() {
       <TranscriptionConfigCard />
       <TtsConfigCard />
       <WyomingConfigCard />
+      <VoiceIdCard />
     </div>
   );
 }
@@ -5853,6 +5928,11 @@ function HomeAssistantCard() {
   const [voice, setVoice]       = useState(false);
   const [tools, setTools]       = useState(false);
   const [toolUsers, setToolUsers] = useState<string[]>([]);
+  const [perceptions, setPerceptions] = useState(false);
+  const [perceptionEntities, setPerceptionEntities] = useState('');
+  const [memoryUser, setMemoryUser] = useState('');
+  const [defaultVoiceUser, setDefaultVoiceUser] = useState('');
+  const [satellites, setSatellites] = useState<Record<string, string>>({});
   const [importId, setImportId] = useState('');
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -5864,7 +5944,16 @@ function HomeAssistantCard() {
     setVoice(data.haVoiceEnabled);
     setTools(data.haToolsEnabled);
     setToolUsers(data.haToolsUserIds ?? []);
-  }, [data?.haUrl, data?.haPresenceEnabled, data?.haBusyEnabled, data?.haVoiceEnabled, data?.haToolsEnabled, (data?.haToolsUserIds ?? []).join(',')]);
+    setPerceptions(!!data.haPerceptionsEnabled);
+    setPerceptionEntities((data.haPerceptionEntities ?? []).join('\n'));
+    setMemoryUser(data.haMemoryUserId ?? '');
+    setDefaultVoiceUser(data.haDefaultVoiceUserId ?? '');
+    setSatellites(data.haSatelliteUsers ?? {});
+  }, [data?.haUrl, data?.haPresenceEnabled, data?.haBusyEnabled, data?.haVoiceEnabled, data?.haToolsEnabled, (data?.haToolsUserIds ?? []).join(','),
+    data?.haPerceptionsEnabled, (data?.haPerceptionEntities ?? []).join(','), data?.haMemoryUserId, data?.haDefaultVoiceUserId, JSON.stringify(data?.haSatelliteUsers ?? {})]);
+  const sameMap = (a: Record<string, string>, b: Record<string, string>) =>
+    JSON.stringify(Object.entries(a).filter(([, v]) => v).sort()) === JSON.stringify(Object.entries(b).filter(([, v]) => v).sort());
+  const perceptionList = perceptionEntities.split(/[\n,]/).map((e) => e.trim()).filter(Boolean);
 
   const done = (res: HomeAssistantConfig) => {
     qc.setQueryData(['home-assistant-config'], res);
@@ -5878,6 +5967,9 @@ function HomeAssistantCard() {
     mutationFn: () => appConfigApi.updateHomeAssistantConfig({
       haUrl: url.trim() || null, ...(token.trim() ? { haToken: token.trim() } : {}),
       haPresenceEnabled: presence, haBusyEnabled: busy, haVoiceEnabled: voice, haToolsEnabled: tools, haToolsUserIds: toolUsers.length ? toolUsers : null,
+      haPerceptionsEnabled: perceptions, haPerceptionEntities: perceptionList,
+      haMemoryUserId: memoryUser || null, haDefaultVoiceUserId: defaultVoiceUser || null,
+      haSatelliteUsers: Object.fromEntries(Object.entries(satellites).filter(([, v]) => v)),
     }),
     onSuccess: done, onError: fail,
   });
@@ -5891,7 +5983,11 @@ function HomeAssistantCard() {
   });
 
   const dirty = !!data && (url.trim() !== (data.haUrl ?? '') || !!token.trim() || presence !== data.haPresenceEnabled || busy !== data.haBusyEnabled
-    || voice !== data.haVoiceEnabled || tools !== data.haToolsEnabled || toolUsers.join(',') !== (data.haToolsUserIds ?? []).join(','));
+    || voice !== data.haVoiceEnabled || tools !== data.haToolsEnabled || toolUsers.join(',') !== (data.haToolsUserIds ?? []).join(',')
+    || perceptions !== !!data.haPerceptionsEnabled || perceptionList.join(',') !== (data.haPerceptionEntities ?? []).join(',')
+    || memoryUser !== (data.haMemoryUserId ?? '') || defaultVoiceUser !== (data.haDefaultVoiceUserId ?? '') || !sameMap(satellites, data.haSatelliteUsers ?? {}));
+  const activeUsers = (data?.users ?? []).filter((u) => u.active);
+  const userName = (id: string | null | undefined) => (data?.users ?? []).find((u) => u.id === id)?.name ?? '—';
   const s = data?.status;
   const badge = s?.state === 'connected' ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10'
     : s?.state === 'error' ? 'text-red-400 border-red-500/30 bg-red-500/10' : 'text-gray-400 border-gray-700 bg-gray-800';
@@ -5976,6 +6072,60 @@ function HomeAssistantCard() {
       {row(t('homeAssistant.presenceLabel'), t('homeAssistant.presenceHint'), toggle(presence, setPresence))}
       {presence && row(t('homeAssistant.busyLabel'), t('homeAssistant.busyHint'), toggle(busy, setBusy))}
       {row(t('homeAssistant.voiceLabel'), t('homeAssistant.voiceHint'), toggle(voice, setVoice))}
+      {row(t('homeAssistant.perceptionsLabel'), t('homeAssistant.perceptionsHint'), toggle(perceptions, setPerceptions))}
+      {perceptions && (
+        <div className="space-y-1">
+          <textarea
+            value={perceptionEntities} onChange={(e) => setPerceptionEntities(e.target.value)} rows={3}
+            placeholder={t('homeAssistant.perceptionsPlaceholder')}
+            className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-xs font-mono text-gray-100 focus:outline-none focus:border-blue-500"
+          />
+          <p className="text-xs text-gray-500">{t('homeAssistant.perceptionsEntitiesHint')}</p>
+        </div>
+      )}
+
+      {/* ── Voice accounts: Home Assistant's memory, the default account, each satellite's account ── */}
+      <div className="border-t border-gray-800 pt-3 space-y-3">
+        <p className="text-sm text-gray-200">{t('homeAssistant.accountsLabel')}</p>
+        <p className="text-xs text-gray-500">{t('homeAssistant.accountsHint')}</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-400 mb-1">{t('homeAssistant.memoryLabel')}</label>
+            <select value={memoryUser} onChange={(e) => setMemoryUser(e.target.value)} className={input}>
+              <option value="">{t('homeAssistant.firstAdmin', { name: memoryUser ? '' : userName(data?.resolved?.memoryUserId) })}</option>
+              {activeUsers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-400 mb-1">{t('homeAssistant.defaultVoiceLabel')}</label>
+            <select value={defaultVoiceUser} onChange={(e) => setDefaultVoiceUser(e.target.value)} className={input}>
+              <option value="">{t('homeAssistant.firstAdmin', { name: defaultVoiceUser ? '' : userName(data?.resolved?.defaultUserId) })}</option>
+              {activeUsers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </select>
+          </div>
+        </div>
+        {s?.state === 'connected' && (
+          <div className="space-y-2">
+            <label className="block text-xs font-medium text-gray-400">{t('homeAssistant.satellitesLabel')}</label>
+            {!s.voicePoints.length && <p className="text-xs text-gray-500">{t('homeAssistant.none')}</p>}
+            {s.voicePoints.map((p) => (
+              <div key={p.entityId} className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
+                <span className="text-xs text-gray-300 sm:w-64 truncate">{p.area} <span className="text-gray-500 font-mono">{p.entityId}</span></span>
+                <select
+                  value={satellites[p.entityId] ?? ''} onChange={(e) => setSatellites((m) => ({ ...m, [p.entityId]: e.target.value }))}
+                  className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-xs text-gray-200"
+                >
+                  <option value="">{t('homeAssistant.satelliteDefault')}</option>
+                  {activeUsers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              </div>
+            ))}
+            {tools && toolUsers.length > 0 && Object.values(satellites).some((id) => id && !toolUsers.includes(id)) && (
+              <p className="text-xs text-amber-400">{t('homeAssistant.satelliteNoTools')}</p>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* ── Users ↔ persons ── */}
       {s?.state === 'connected' && (
@@ -6014,7 +6164,7 @@ function HomeAssistantCard() {
               : t('homeAssistant.noRooms')}
           </p>
           {data?.haBusyEnabled && <p><span className="text-gray-300 font-medium">{t('homeAssistant.busy')}: </span>{s.busy?.length ? s.busy.join(', ') : t('homeAssistant.none')}</p>}
-          {(presence || voice) && !s.memoryUserId && <p className="text-amber-400">{t('homeAssistant.noWyomingUser')}</p>}
+          {(presence || voice) && !s.memoryUserId && <p className="text-amber-400">{t('homeAssistant.noMemoryUser')}</p>}
         </div>
       )}
       {s?.state === 'error' && s.error && <p className="text-xs text-red-400">{s.error}</p>}
@@ -6056,8 +6206,7 @@ function WyomingConfigCard() {
 
   const [enabled, setEnabled] = useState(false);
   const [cidrs,   setCidrs]   = useState('');
-  const [handleUserId,  setHandleUserId]  = useState('');
-  const [handleAgentId, setHandleAgentId] = useState('');
+  const [conversation, setConversation] = useState(false);
   const [persist, setPersist] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -6065,30 +6214,15 @@ function WyomingConfigCard() {
     if (!data) return;
     setEnabled(data.wyomingEnabled);
     setCidrs(data.wyomingAllowedCidrs ?? '');
-    setHandleUserId(data.wyomingHandleUserId ?? '');
-    setHandleAgentId(data.wyomingHandleAgentId ?? '');
+    setConversation(data.wyomingConversationEnabled);
     setPersist(data.wyomingPersistConversations);
   }, [data]);
-
-  // Conversation identity pickers: active users, then the agents visible to the chosen user.
-  const { data: usersPage } = useQuery({
-    queryKey: ['wyoming-users'],
-    queryFn:  () => adminUsersApi.list({ status: 'active', pageSize: 100 }),
-    staleTime: 60_000,
-  });
-  const { data: handleAgents } = useQuery({
-    queryKey: ['wyoming-agents', handleUserId],
-    queryFn:  () => appConfigApi.listWyomingAgents(handleUserId),
-    enabled:  !!handleUserId,
-    staleTime: 60_000,
-  });
 
   const saveMutation = useMutation({
     mutationFn: () => appConfigApi.updateWyomingConfig({
       wyomingEnabled:       enabled,
       wyomingAllowedCidrs:  cidrs.trim() || null,
-      wyomingHandleUserId:  handleUserId || null,
-      wyomingHandleAgentId: handleUserId ? (handleAgentId || null) : null,
+      wyomingConversationEnabled: conversation,
       wyomingPersistConversations: persist,
     }),
     onSuccess: (res) => {
@@ -6104,8 +6238,7 @@ function WyomingConfigCard() {
   const dirty = !!data && (
     enabled !== data.wyomingEnabled
     || cidrs.trim() !== (data.wyomingAllowedCidrs ?? '')
-    || handleUserId !== (data.wyomingHandleUserId ?? '')
-    || (handleUserId ? handleAgentId : '') !== (data.wyomingHandleAgentId ?? '')
+    || conversation !== data.wyomingConversationEnabled
     || persist !== data.wyomingPersistConversations
   );
   const hostHint = window.location.hostname;
@@ -6168,36 +6301,19 @@ function WyomingConfigCard() {
           <p className="text-sm text-gray-200">{t('wyoming.handleTitle')}</p>
           <p className="text-xs text-gray-500 mt-0.5">{t('wyoming.handleHint')}</p>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-medium text-gray-400 mb-1">{t('wyoming.handleUserLabel')}</label>
-            <select
-              value={handleUserId}
-              onChange={(e) => { setHandleUserId(e.target.value); setHandleAgentId(''); }}
-              className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm
-                text-gray-100 focus:outline-none focus:border-blue-500 transition-colors"
-            >
-              <option value="">{t('wyoming.handleUserNone')}</option>
-              {(usersPage?.items ?? []).map((u) => (
-                <option key={u.id} value={u.id}>{u.name ? `${u.name} — ${u.email}` : u.email}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-400 mb-1">{t('wyoming.handleAgentLabel')}</label>
-            <select
-              value={handleAgentId}
-              disabled={!handleUserId}
-              onChange={(e) => setHandleAgentId(e.target.value)}
-              className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm
-                text-gray-100 focus:outline-none focus:border-blue-500 transition-colors disabled:opacity-50"
-            >
-              <option value="">{t('wyoming.handleAgentNone')}</option>
-              {(handleAgents ?? []).map((a) => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
-            </select>
-          </div>
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-gray-300 pr-4">{t('wyoming.conversationLabel')}</p>
+          <button
+            role="switch"
+            aria-checked={conversation}
+            disabled={isLoading}
+            onClick={() => setConversation((v) => !v)}
+            className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors
+              disabled:opacity-50 focus:outline-none ${conversation ? 'bg-blue-600' : 'bg-gray-700'}`}
+          >
+            <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform
+              ${conversation ? 'translate-x-6' : 'translate-x-1'}`} />
+          </button>
         </div>
         {data?.handle && (
           <p className="text-xs text-gray-500">
@@ -6212,7 +6328,7 @@ function WyomingConfigCard() {
           <button
             role="switch"
             aria-checked={persist}
-            disabled={isLoading || !handleUserId}
+            disabled={isLoading || !conversation}
             onClick={() => setPersist((v) => !v)}
             className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors
               disabled:opacity-50 focus:outline-none ${persist ? 'bg-blue-600' : 'bg-gray-700'}`}

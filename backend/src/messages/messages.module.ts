@@ -13,13 +13,14 @@ import { FilesModule } from '../files/files.module';
 import { UserMemoryModule } from '../user-memory/user-memory.module';
 import { UsersModule } from '../users/users.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { SequencesModule } from '../sequences/sequences.module';
 import { ChatRunsService } from './chat-runs.service';
-import { ChatRunsController } from './chat-runs.controller';
+import { ActiveChatRunsController, ChatRunsController } from './chat-runs.controller';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Message]), ChatsModule, AgentModule, AgentsModule, FilesModule, UserMemoryModule, UsersModule, NotificationsModule],
+  imports: [TypeOrmModule.forFeature([Message]), ChatsModule, AgentModule, AgentsModule, FilesModule, UserMemoryModule, UsersModule, NotificationsModule, SequencesModule],
   providers: [MessagesService, ChatRunsService],
-  controllers: [MessagesController, ChatRunsController],
+  controllers: [MessagesController, ChatRunsController, ActiveChatRunsController],
   exports: [MessagesService, ChatRunsService],
 })
 export class MessagesModule {}

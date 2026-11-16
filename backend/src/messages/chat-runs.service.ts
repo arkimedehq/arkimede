@@ -186,6 +186,11 @@ export class ChatRunsService implements OnModuleInit {
     return true;
   }
 
+  /** Every run in progress (callers filter them by access to their chat). */
+  list(): ChatRunState[] {
+    return [...this.runs.values()].map((run) => this.snapshot(run.state));
+  }
+
   get(chatId: string): ChatRunState | null {
     const run = this.runs.get(chatId);
     return run ? this.snapshot(run.state) : null;

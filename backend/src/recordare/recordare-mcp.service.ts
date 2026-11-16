@@ -113,7 +113,7 @@ export class RecordareMcpService {
    * block this turn, still reachable (its tools stay). An error, or TIMEOUTS_DOWN timeouts in a row, is
    * `reachable: false` and marks Recordare down for DOWN_MS.
    */
-  async context(userId: string, conversationId: string, message: string): Promise<RecordareTurnContext> {
+  async context(userId: string, conversationId: string, message: string, opts: { lookups?: boolean } = {}): Promise<RecordareTurnContext> {
     const client = recordareClient();
     if (!client) return { reachable: false, block: null };
     let timer: NodeJS.Timeout | undefined;
@@ -121,7 +121,8 @@ export class RecordareMcpService {
       const res = await Promise.race([
         (async () => {
           await this.outbox.flushChat(conversationId, 1_500);
-          return { reachable: true, block: (await client.context(userId, conversationId, message, { card: true })).block };
+          // `lookups`: the agent has tools, so the memory may give it something to find out (it keeps the answer with learn_source).
+          return { reachable: true, block: (await client.context(userId, conversationId, message, { card: true, ...(opts.lookups ? { initiatives: { lookups: true } } : {}) })).block };
         })(),
         new Promise<null>((r) => { timer = setTimeout(() => r(null), CONTEXT_TIMEOUT_MS); }),
       ]);

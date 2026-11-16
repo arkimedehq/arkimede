@@ -20,6 +20,9 @@ import { ChatRunsService, type ChatRunPatch } from './chat-runs.service';
 import type { AgentProgressEvent } from '../agent/agent.service';
 import {runWithLlmCallContext} from '../usage/llm-call-context';
 
+/** Keepalive comments on a message's SSE stream while its run lasts. */
+const SSE_KEEPALIVE_MS = 15_000;
+
 class SendMessageDto {
   @IsString() content: string;
   @IsOptional() @IsArray() attachments?: { name: string; fileId: string; mimeType: string; mode?: 'embed' | 'inline' | 'attachment' }[];
@@ -121,6 +124,14 @@ export class MessagesController {
 
     // Immediate heartbeat — confirms that the SSE channel is open
     send({ type: 'connected' });
+    // Then an SSE comment every SSE_KEEPALIVE_MS while the run lasts: a long one (an app written file by file, a long
+    // search) is silent for minutes while the model writes, and a client's idle timeout (Node's fetch: 300 s) would
+    // drop the answer it waits for. Comments are no events: clients that parse `data:` lines ignore them.
+    const keepalive = setInterval(() => {
+      if (!clientOpen) return;
+      res.write(': keepalive\n\n');
+      (res as any).flush?.();
+    }, SSE_KEEPALIVE_MS);
 
     try {
       // Write: the chat's author OR a collaborator/owner of the project
@@ -537,6 +548,7 @@ export class MessagesController {
         send({ type: 'done',  messageId: null });
       }
     } finally {
+      clearInterval(keepalive);
       if (run) this.runs.finish(chatId, run.runId, savedMessageId);
       if (clientOpen) res.end();
     }

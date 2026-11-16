@@ -32,6 +32,34 @@ export interface ChatRunEvent {
   messageId?: string | null;
 }
 
+/** A running sequence (run_sequence): timed tool calls going on without the model. */
+export interface SequenceState {
+  kind: 'sequence';
+  sequenceId: string;
+  chatId: string | null;
+  title: string;
+  startedAt: string;
+  plannedSeconds: number;
+  maxCalls: number;
+  tools: string[];
+  progress: { calls: number; failures: number; elapsedMs: number };
+}
+
+/** `sequence: null` = it ended (its line was written in the chat: messageId). */
+export interface SequenceEvent {
+  chatId: string;
+  sequenceId: string;
+  sequence: SequenceState | null;
+  messageId?: string | null;
+}
+
+export const sequencesApi = {
+  list: (chatId: string) =>
+    api.get<{ sequences: SequenceState[] }>('/sequences', { params: { chatId } }).then((r) => r.data.sequences),
+  stop: (sequenceId: string) =>
+    api.post<{ stopped: string[] }>(`/sequences/${sequenceId}/stop`).then((r) => r.data.stopped),
+};
+
 export const chatRunsApi = {
   get: (chatId: string) =>
     api.get<{ run: ChatRunState | null }>(`/chats/${chatId}/run`).then((r) => r.data.run),
@@ -47,11 +75,22 @@ export const chatRunsApi = {
 let socket: Socket | null = null;
 const listeners = new Map<string, Set<(event: ChatRunEvent) => void>>();
 const memoryListeners = new Map<string, Set<(proposals: { id: string; content: string }[]) => void>>();
+const sequenceListeners = new Map<string, Set<(event: SequenceEvent) => void>>();
 
 const watch = (chatId: string) => socket?.connected && socket.emit('watch', { kind: 'chat', id: chatId });
+/** The chat's room is left only when nothing follows it any more (its run nor its sequences). */
+const unwatchIfIdle = (chatId: string) => {
+  if (!listeners.has(chatId) && !sequenceListeners.has(chatId) && socket?.connected) {
+    socket.emit('unwatch', { kind: 'chat', id: chatId });
+  }
+};
 
 function onConnect() {
-  for (const chatId of listeners.keys()) watch(chatId);
+  for (const chatId of new Set([...listeners.keys(), ...sequenceListeners.keys()])) watch(chatId);
+}
+
+function onSequence(event: SequenceEvent) {
+  sequenceListeners.get(event?.chatId)?.forEach((cb) => cb(event));
 }
 
 function onRun(event: ChatRunEvent) {
@@ -68,11 +107,13 @@ export function attachChatRunSocket(s: Socket): () => void {
   s.on('connect', onConnect);
   s.on('chat_run', onRun);
   s.on('memory_proposal', onMemory);
+  s.on('sequence', onSequence);
   if (s.connected) onConnect();
   return () => {
     s.off('connect', onConnect);
     s.off('chat_run', onRun);
     s.off('memory_proposal', onMemory);
+    s.off('sequence', onSequence);
     if (socket === s) socket = null;
   };
 }
@@ -90,7 +131,25 @@ export function watchChatRun(chatId: string, cb: (event: ChatRunEvent) => void):
     set!.delete(cb);
     if (set!.size === 0) {
       listeners.delete(chatId);
-      if (socket?.connected) socket.emit('unwatch', { kind: 'chat', id: chatId });
+      unwatchIfIdle(chatId);
+    }
+  };
+}
+
+/** Follows the sequences started from CHAT_ID; returns the function that stops following them. */
+export function watchChatSequences(chatId: string, cb: (event: SequenceEvent) => void): () => void {
+  let set = sequenceListeners.get(chatId);
+  if (!set) {
+    set = new Set();
+    sequenceListeners.set(chatId, set);
+    watch(chatId);
+  }
+  set.add(cb);
+  return () => {
+    set!.delete(cb);
+    if (set!.size === 0) {
+      sequenceListeners.delete(chatId);
+      unwatchIfIdle(chatId);
     }
   };
 }

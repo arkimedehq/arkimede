@@ -63,5 +63,8 @@
   "downloadHttpsRequired": "Downloads must use HTTPS.",
   "internalConfigNotObject": "The \"config\" field must be a key-value object",
   "internalSkillNotFound": "Skill {id} not found",
-  "internalExecutorUnavailable": "skill-executor not reachable: {message}"
+  "internalExecutorUnavailable": "skill-executor not reachable: {message}",
+  "pluginManaged": "This skill comes from a plugin: manage it from the plugin page.",
+  "personalOnly": "This skill is personal (it uses one person's account, data or memory): it cannot be shared with a team or the organization.",
+  "onlyAdminCanShare": "Only an admin can share a skill with a team or the organization."
 }

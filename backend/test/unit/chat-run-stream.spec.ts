@@ -198,3 +198,26 @@ describe('the run behind the SSE stream', () => {
     await first;
   });
 });
+
+describe('a long run keeps its stream alive', () => {
+  it('writes an SSE comment every 15 s while the run lasts (a client idle timeout would drop it), none after', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      const { agent, send } = setup();
+      const res = fakeRes();
+      const raw: string[] = [];
+      res.write = vi.fn((s: string) => { raw.push(s); if (s.startsWith('data: ')) res.events.push(JSON.parse(s.slice(6))); return true; });
+      const done = send(res);
+      await agent.running;
+      vi.advanceTimersByTime(31_000);
+      expect(raw.filter((s) => s === ': keepalive\n\n')).toHaveLength(2);
+      agent.release();
+      await done;
+      vi.advanceTimersByTime(60_000);
+      expect(raw.filter((s) => s === ': keepalive\n\n')).toHaveLength(2);
+      expect(res.events.at(-1)).toMatchObject({ type: 'done' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

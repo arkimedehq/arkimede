@@ -89,3 +89,28 @@ describe('GuestMessagesService', () => {
     expect(t.order).toEqual(['save:user', 'run:uno', 'save:assistant', 'save:user', 'run:due', 'save:assistant']);
   });
 });
+
+describe('GuestMessagesService.ask (a person writing through a plugin)', () => {
+  const agentRecord = { id: 'a1', systemPrompt: 'You answer for the records plugin.' } as any;
+
+  it('a linked person runs as their user, in the plugin\'s conversation, with the chosen agent and no guest rule', async () => {
+    const t = setup();
+    const r = await t.svc.ask('u1', { channel: 'Records', externalId: '@alex', text: 'ciao', conversation: 'room-1' }, { source: 'plugin:records', agent: agentRecord, asUser: true });
+    expect(r.chatId).toBe('chat:plugin:records:room-1');
+    expect(t.saved[0]).toMatchObject({ role: 'user', authorId: 'u1' });
+    expect(t.saved[0].speaker).toBeUndefined();
+    const opts = t.agent.streamResponse.mock.calls[0][12] as any;
+    expect(t.agent.streamResponse.mock.calls[0][1]).toBe('u1');
+    expect(opts.agentPromptOverride).toBe('You answer for the records plugin.');
+    expect(opts.textOnly).toBeUndefined();
+  });
+
+  it('anyone else is a guest of the owner: words only, the agent\'s prompt followed by the guest rule', async () => {
+    const t = setup();
+    await t.svc.ask('agent', { channel: 'Records', externalId: '@sam', displayName: 'Sam', text: 'ciao', conversation: 'room-1' }, { source: 'plugin:records', agent: agentRecord, asUser: false });
+    expect(t.saved[0]).toMatchObject({ authorId: null, speaker: { channel: 'Records', externalId: '@sam', displayName: 'Sam' } });
+    const opts = t.agent.streamResponse.mock.calls[0][12] as any;
+    expect(opts.textOnly).toBe(true);
+    expect(opts.agentPromptOverride.startsWith('You answer for the records plugin.\n\nYou are talking with Sam')).toBe(true);
+  });
+});

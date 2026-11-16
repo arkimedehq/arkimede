@@ -1367,6 +1367,9 @@ SERVICE_API_KEY=<secret>    # openssl rand -hex 32
 SKILLS_REGISTRY_URL=https://...              # default: registry community ufficiale
 SKILLS_REGISTRY_CACHE_TTL_MS=300000         # TTL cache in ms (default 5 min)
 SKILLS_REGISTRY_ALLOWED_DOMAINS=cdn.com     # domini extra ammessi per download ZIP
+PLUGINS_BASE_PATH=/app/uploads/plugins      # dove stanno i pacchetti dei plugin installati (un volume persistente)
+PLUGIN_REGISTRY_URL=https://...              # default: registry.json di arkimedehq/arkimede-plugins
+PLUGIN_TRUSTED_KEYS='[{"id":"…","publicKey":"…"}]'   # chiavi ed25519 ufficiali per le firme dei plugin
 ```
 
 ### Frontend (`frontend/.env`)
@@ -1420,6 +1423,11 @@ seguono (`docs/MEMORY.md`). Codice:
 `backend/src/recordare/`, sulla **libreria client** di Recordare (il pacchetto npm `@arkimedehq/recordare-client`, il
 `packages/client` di Recordare): SDK MCP ufficiale, errori RFC 9457, `Retry-After`, contesto
 di traccia W3C; le richieste passano da `safeFetch`.
+
+**Fine della conversazione** (`recordare-conversations.service.ts`, migration 111 `chats.memoryEndedAt`): una chat
+ferma da 30 minuti e tutta inviata viene chiusa in Recordare una volta (`endConversation`), così l'estrazione parte
+subito; un messaggio successivo la riapre. **Ricerche (lookup)**: quando l'agente ha i tool, la chiamata di contesto le
+chiede (`initiatives: {lookups: true}`): la memoria può dargli qualcosa da scoprire, che conserva con `learn_source`.
 
 ```bash
 RECORDARE_URL=http://recordare:8080   # spento finché non sono impostati entrambi
@@ -1495,7 +1503,7 @@ le iniziative partono quando Recordare risulta configurato). Un campo vuoto rica
   che nomina un'area — Bermuda / ESPresense; occupazione senza identità = qualcuno). Ogni cambio va alla memoria
   dell'**utente Wyoming** come impulsi di presenza (`channel home | voice`, `place` = l'area, le persone con la loro
   identità `homeassistant` `person.x` — da collegare sulla loro scheda nella console di Recordare), rinnovati ogni 5
-  min; ciò che Recordare risponde viene detto in quella stanza. **Un satellite a cui si parla** è anch'esso una presenza
+  min; ciò che Recordare risponde viene detto in quella stanza. **Riconoscimento della voce** (opzionale, `voice-id/`, migration 110: chi ha parlato a un satellite, dalla voce — vedi `docs/VOICE_AUDIO_SERVICES_it.md` Parte 5; una voce riconosciuta sostituisce la deduzione per esclusione nella presenza del turno). **Un satellite a cui si parla** è anch'esso una presenza
   nella sua stanza (Wyoming lo dice a `ConversationFocusService.voiceTurn`, 10 s dopo la risposta, così ciò che segue
   non le parla sopra): chi parla per esclusione — l'unica persona che i sensori della stanza mettono lì (0,9), altrimenti
   l'unica persona in casa (0,6, media), altrimenti qualcuno; Recordare distingue un primo turno (un arrivo: può seguire
@@ -1513,7 +1521,16 @@ le iniziative partono quando Recordare risulta configurato). Un campo vuoto rica
   occupata (`RecordareInitiativesService.setBusy`). `talking` non viene mai mandato: i satelliti trasmettono solo dopo la
   parola di attivazione, quindi Arkimede non sente persone che parlano tra loro — e né più persone in una stanza né un
   turno rivolto all'agente sono una conversazione del genere. Interruttore spento: gli impulsi sono esattamente quelli
-  di prima. `GET/PATCH
+  di prima. **Percezioni** (interruttore `haPerceptionsEnabled` + le entità `haPerceptionEntities`, id o pattern con
+  `*`, default spento; migration 109; `ha-perceptions.ts`, `ha-perceptions.service.ts`): un evento di un'entità scelta
+  — un `binary_sensor` che si accende, un nuovo `event.*` (il campanello), una `cover` che si apre, una `lock` sbloccata
+  o bloccata male, un `alarm_control_panel` che scatta, una `siren` accesa — va nella stessa memoria della presenza con
+  `perceive` di Recordare: una frase fissa nella lingua di quella memoria con il nome dell'entità ("Apertura: Porta
+  d'ingresso"), la sua stanza come `place`, `sensor: camera` se il dispositivo dell'entità ha una telecamera, mai una
+  persona (qui Home Assistant non riconosce nessuno). Mai uno stream: un cambio da `unknown`/`unavailable` (un riavvio)
+  non è un evento, una percezione per entità ogni 10 minuti. Gli eventi gravi (fumo, gas, monossido, acqua, sicurezza,
+  manomissione, allarme, sirena, serratura bloccata) restano 365 giorni (`keepDays`), gli altri svaniscono con il
+  default della memoria. Avvisare subito resta dei flow (trigger `home-assistant`). `GET/PATCH
   /api/admin/config/home-assistant` (impostazioni, stato dal vivo: entità esposte, punti voce, chi è in casa e dove,
   chi è occupato, persone), `POST …/import-mcp`, `PATCH …/people` (la persona di un utente).
 
@@ -1630,7 +1647,7 @@ della voce per il Piper interno); `gen_ai.provider.name` quando noto (`whisper` 
 `openai`, `groq`; omesso per gli endpoint OpenAI-compatible); `voice.audio_seconds` (durata dell'audio in ingresso
 STT / in uscita TTS, solo se l'audio è WAV — letta dall'header); `voice.characters` (lunghezza del testo TTS, un
 conteggio); `user.id` e `recordare.memory_id` quando l'utente è noto (le richieste Wyoming asr / tts da Home Assistant
-agiscono per l'utente di conversazione Wyoming quando è configurato, altrimenti nessuno). Uno span vocale si annida sotto lo span attivo quando c'è; le rotte HTTP e il protocollo Wyoming (una
+agiscono per l'account predefinito dei satelliti quando la conversazione è accesa, altrimenti nessuno). Uno span vocale si annida sotto lo span attivo quando c'è; le rotte HTTP e il protocollo Wyoming (una
 richiesta per connessione: asr, handle e tts arrivano separati) rendono ogni chiamata vocale una traccia a sé, mentre
 il turno `handle` di Wyoming è una traccia `invoke_agent` propria.
 
@@ -1766,6 +1783,7 @@ Anthropic. Modificabile da admin in "Impostazioni → Sistema AI" senza redeploy
 | Team agenti         | Tutti      | Composizione team (membri ordinati) + topologia supervisor/sequential/parallel                                              |
 | Automazioni         | Tutti      | Automazioni programmate (Auto-Scheduling): stato, pending+Attiva, token/costo per run, abilita/elimina                       |
 | Attività            | Tutti      | Cruscotto sola-lettura: daemon skill, automazioni, flow schedulati e ultimi run aggregati (refetch auto ogni 10s)            |
+| Plugin              | Admin      | Installazione (ZIP / registro, firme), revisione e approvazione con ambito e agente, impostazioni, persone, eventi, attiva/disattiva, disinstalla, chiavi fidate |
 
 ---
 
@@ -1924,6 +1942,19 @@ le altre risorse.
 | Team di agenti | Tutti | Composizione team, topologia (supervisor/sequential/parallel), ordine membri, scope |
 
 ---
+
+## Plugin
+
+Pacchetti installabili che estendono Arkimede nel suo insieme (contratto e guida: [PLUGINS_it.md](PLUGINS_it.md);
+design: `specs/PLUGINS.md`). Un plugin impacchetta primitive che esistono già — skill, server MCP, daemon, flow in sola
+lettura — e aggiunge rotte e gestori di eventi (script delle sue skill, eseguiti a richiesta dall'executor nei
+container delle skill), pagine in un iframe isolato che parlano con Arkimede solo attraverso un ponte postMessage,
+eventi che avviano flow (trigger `plugin-event`) e raggiungono i plugin iscritti, e servizi del nucleo dietro permessi
+approvati (`notify`, `storage` chiave-valore con quota, `agent.ask`). Il suo codice non gira mai nel processo del
+backend. Codice: `backend/src/plugins/` (manifest, fiducia e token, ciclo di vita, runtime, controller),
+`frontend/src/pages/PluginsPage.tsx`, `frontend/src/components/plugins/PluginPageView.tsx`. La visibilità segue
+l'ambito del plugin (`personal · team · org`); installare è solo per l'admin; firme ed25519 con livelli di fiducia, i
+pacchetti non firmati solo se l'istanza lo permette.
 
 ## Flows
 

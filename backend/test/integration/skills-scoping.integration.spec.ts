@@ -4,8 +4,9 @@
 /**
  * T1 — Integration with real DB: scoping + skill REVIEW workflow.
  * Beyond personal|team|org, an `org` skill is visible to others ONLY after
- * admin approval (`isApproved`), and publishing to a team requires
- * status ready + team admin/owner. reject brings it back to personal.
+ * admin approval (`isApproved`), and sharing with a team or the organization
+ * is the admin's (team owners included: specs/EXTENSION_AUDIENCE.md) and requires
+ * status ready. reject brings it back to personal.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
@@ -84,26 +85,24 @@ describe('visibility', () => {
 });
 
 describe('publishing to the team', () => {
-  it('team owner + status ready → published', async () => {
+  it('admin + status ready → published', async () => {
     const sk = await seed({ ownerId: B, name: 'sk_pub_ok', status: 'ready', scope: 'personal' });
-    teamOwners.add(B);
-    const updated = await service.update(sk.id, B, { scope: 'team', teamId: TEAM }, false);
+    const updated = await service.update(sk.id, B, { scope: 'team', teamId: TEAM }, true);
     expect(updated.scope).toBe('team');
-    teamOwners.delete(B);
   });
 
-  it('not the team owner → denied', async () => {
+  it('not an admin, even the team owner → denied', async () => {
     const sk = await seed({ ownerId: B, name: 'sk_pub_noowner', status: 'ready', scope: 'personal' });
+    teamOwners.add(B);
     await expect(service.update(sk.id, B, { scope: 'team', teamId: TEAM }, false))
-      .rejects.toThrow(/skills\.onlyAdminOrTeamOwnerCanPublish/);
+      .rejects.toThrow(/skills\.onlyAdminCanShare/);
+    teamOwners.delete(B);
   });
 
   it('status not ready → denied', async () => {
     const sk = await seed({ ownerId: B, name: 'sk_pub_notready', status: 'pending', scope: 'personal' });
-    teamOwners.add(B);
-    await expect(service.update(sk.id, B, { scope: 'team', teamId: TEAM }, false))
+    await expect(service.update(sk.id, B, { scope: 'team', teamId: TEAM }, true))
       .rejects.toThrow(/status "ready"/);
-    teamOwners.delete(B);
   });
 });
 
@@ -111,7 +110,7 @@ describe('org publishing → review → approval', () => {
   it('org publish starts unapproved, hidden until an admin approves', async () => {
     const sk = await seed({ ownerId: B, name: 'sk_review', status: 'ready', scope: 'personal' });
 
-    await service.update(sk.id, B, { scope: 'org' }, false);
+    await service.update(sk.id, B, { scope: 'org' }, true);
     // not approved → C does not see it, neither by list nor by id
     expect((await service.findAll(C)).map((s) => s.name)).not.toContain('sk_review');
     await expect(service.findOne(sk.id, C)).rejects.toThrow(/not found/);

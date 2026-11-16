@@ -22,12 +22,14 @@ import {
   Settings2, Eye, EyeOff, RotateCcw, Share2, Search, FolderOpen, Download,
   Activity, Play, Square, RotateCw, Cpu, Zap, WifiOff, Power,
   Terminal, Paperclip, Timer, Copy, Check, BookOpen, Database, Users, Wand2,
-  Network, ArrowLeft,
+  Network, ArrowLeft, UsersRound,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { skillsApi, type Skill, type SkillStatus, type SkillScope, type SkillScript, type RegistrySkill, type RegistryIndex, type ExecuteScriptResult, type CompiledScript } from '../api/skills';
 import { ScopeSelector } from '../components/ScopeSelector';
+import PluginBadge from '../components/plugins/PluginBadge';
+import { adminUsersApi } from '../api/adminUsers';
 import { daemonsApi, type SkillDaemon, type DaemonStatus } from '../api/daemons';
 import { projectsApi } from '../api/projects';
 import { dataSourcesApi, engineFamily, type DataSource } from '../api/dataSources';
@@ -73,6 +75,16 @@ function ScopeControl({ current, pending, isAdmin, onApply }: {
   const dirty = scope !== current.scope || (scope === 'team' && teamId !== current.teamId);
   const notReady = current.status !== 'ready' && scope !== 'personal';
   const teamMissing = scope === 'team' && !teamId;
+
+  // A personal skill is never shared; sharing with a team or the organization is the admin's (specs/EXTENSION_AUDIENCE.md).
+  if (current.audience === 'personal' || (!isAdmin && current.scope === 'personal')) {
+    return (
+      <div className="w-full border border-gray-800 rounded-lg p-3">
+        <p className="text-xs font-medium text-gray-400 mb-1">{t('scope.visibility')}</p>
+        <p className="text-xs text-gray-500">{t(current.audience === 'personal' ? 'scope.personalOnly' : 'scope.adminShares')}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full border border-gray-800 rounded-lg p-3">
@@ -339,6 +351,8 @@ function SkillDrawer({
   });
 
   const current = fresh ?? skill;
+  // A plugin's skill is managed with its plugin (specs/PLUGINS.md §5): the backend refuses changing, sharing or deleting it here.
+  const fromPlugin = !!current.pluginId;
 
   const [reinstallOk, setReinstallOk] = useState(false);
 
@@ -435,6 +449,10 @@ function SkillDrawer({
               <StatusBadge status={current.status} />
               <EnabledBadge enabled={current.enabled} />
               <ScopeBadge scope={current.scope} />
+              {current.audience === 'personal' && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-md border border-purple-700/40 bg-purple-900/20 text-purple-300 text-xs" title={t('scope.personalOnly')}>{t('scope.personalBadge')}</span>
+              )}
+              {fromPlugin && <PluginBadge label={t('plugin.badge')} title={t('plugin.managed')} />}
               {current.scope === 'org' && !current.isApproved && (
                 <span className="px-2 py-0.5 rounded-md border border-amber-700/50 bg-amber-900/30 text-amber-300 text-xs">
                   Awaiting review
@@ -450,6 +468,7 @@ function SkillDrawer({
           {current.description && (
             <p className="text-sm text-gray-400 leading-relaxed">{current.description}</p>
           )}
+          {fromPlugin && <p className="text-xs text-blue-400">{t('plugin.managed')}</p>}
 
           {/* Skill ID — useful for the inter-skill bus */}
           <div className="flex items-center gap-2 px-3 py-2 bg-gray-800/60 rounded-lg border border-gray-700/40">
@@ -602,8 +621,8 @@ function SkillDrawer({
               <SkillToggle skill={current} />
             </div>
 
-            {/* loadOnFirst row: load in chat vs only via agent */}
-            <div className="flex items-center justify-between">
+            {/* loadOnFirst row: load in chat vs only via agent (a plugin's skill: set by its plugin) */}
+            {!fromPlugin && <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="text-xs text-gray-400">
                   {current.loadOnFirst !== false ? t('toggle.inChat') : t('toggle.viaAgentOnly')}
@@ -625,10 +644,10 @@ function SkillDrawer({
                 <div className="w-9 h-5 bg-gray-700 rounded-full peer-checked:bg-indigo-600 transition-colors" />
                 <div className="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4" />
               </label>
-            </div>
+            </div>}
 
-            {/* Update from ZIP / Sync from marketplace */}
-            <div className="flex items-center gap-2">
+            {/* Update from ZIP / Sync from marketplace (a plugin's skill: updated with its plugin) */}
+            {!fromPlugin && <div className="flex items-center gap-2">
               {/* hidden file input for ZIP upload */}
               <input
                 ref={updateZipRef}
@@ -667,7 +686,7 @@ function SkillDrawer({
                   {t('actions.sync')}
                 </button>
               )}
-            </div>
+            </div>}
 
             <div className="flex flex-wrap items-center gap-2">
               {confirmDel ? (
@@ -705,7 +724,7 @@ function SkillDrawer({
                   </button>
 
                   {/* S3: descriptive skills only → compile to typed tool (AI proposes) */}
-                  {current.kind === 'descriptive' && (
+                  {current.kind === 'descriptive' && !fromPlugin && (
                     <button
                       onClick={() => proposeMutation.mutate()}
                       disabled={proposeMutation.isPending || current.status === 'installing'}
@@ -717,7 +736,7 @@ function SkillDrawer({
                     </button>
                   )}
                   {/* Suggestion badge: ≥5 successful sandbox runs (threshold mirrored from the backend). */}
-                  {current.kind === 'descriptive' && (current.sandboxRuns ?? 0) >= 5 && (
+                  {current.kind === 'descriptive' && !fromPlugin && (current.sandboxRuns ?? 0) >= 5 && (
                     <span
                       title={t('compile.suggestHint')}
                       className="flex items-center gap-1 px-2 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[11px]"
@@ -727,20 +746,24 @@ function SkillDrawer({
                     </span>
                   )}
 
-                  {/* Visibility: personal / team (direct publication) / org (admin review) */}
-                  <ScopeControl
-                    current={current}
-                    pending={scopeMutation.isPending}
-                    isAdmin={isAdmin}
-                    onApply={(scope, teamId) => scopeMutation.mutate({ scope, teamId })}
-                  />
+                  {/* Visibility: personal / team (direct publication) / org (admin review); a plugin's skill: its plugin's */}
+                  {!fromPlugin && (
+                    <ScopeControl
+                      current={current}
+                      pending={scopeMutation.isPending}
+                      isAdmin={isAdmin}
+                      onApply={(scope, teamId) => scopeMutation.mutate({ scope, teamId })}
+                    />
+                  )}
 
-                  <button
-                    onClick={() => setConfDel(true)}
-                    className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-red-400 hover:text-red-300 text-xs rounded-lg transition-colors border border-red-900/40 hover:border-red-800"
-                  >
-                    <Trash2 size={12} /> {t('actions.delete')}
-                  </button>
+                  {!fromPlugin && (
+                    <button
+                      onClick={() => setConfDel(true)}
+                      className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-red-400 hover:text-red-300 text-xs rounded-lg transition-colors border border-red-900/40 hover:border-red-800"
+                    >
+                      <Trash2 size={12} /> {t('actions.delete')}
+                    </button>
+                  )}
                 </>
               )}
             </div>
@@ -2270,10 +2293,13 @@ function SkillCard({
   skill,
   onClick,
   isOwn = false,
+  owner,
 }: {
   skill: Skill;
   onClick: () => void;
   isOwn?: boolean;
+  /** Whose skill it is, in the admin's list of every user's skills. */
+  owner?: string;
 }) {
   const { t } = useTranslation('skills');
   const isEnabled = skill.enabled !== false;
@@ -2314,11 +2340,20 @@ function SkillCard({
               <StatusBadge status={skill.status} />
               {!isOwn && <EnabledBadge enabled={skill.enabled} />}
               <ScopeBadge scope={skill.scope} />
+              {skill.audience === 'personal' && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-md border border-purple-700/40 bg-purple-900/20 text-purple-300 text-xs" title={t('scope.personalOnly')}>{t('scope.personalBadge')}</span>
+              )}
+              {skill.pluginId && <PluginBadge label={t('plugin.badge')} title={t('plugin.managed')} />}
             </div>
           </div>
         </div>
       </div>
       <div className="flex items-center gap-3 mt-2 text-xs text-gray-600">
+        {owner && (
+          <span className="flex items-center gap-1 text-gray-400">
+            <UsersRound size={11} /> {owner}
+          </span>
+        )}
         {skill.scripts.length > 0 && (
           <span className="flex items-center gap-1">
             <Code2 size={11} /> {t('marketplace.scripts', { count: skill.scripts.length })}
@@ -2334,6 +2369,43 @@ function SkillCard({
             <FileText size={11} /> {t('shared.jsDeps', { count: skill.jsDeps.length })}
           </span>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ── Admin tab: every user's skills ─────────────────────────────────────────
+
+function AllSkillsTab({ onOpen }: { onOpen: (s: Skill) => void }) {
+  const { t } = useTranslation('skills');
+  const [search, setSearch] = useState('');
+  const { data: skills = [], isLoading } = useQuery({ queryKey: ['skills', 'all'], queryFn: skillsApi.listAll, staleTime: 30_000 });
+  const { data: users = [] } = useQuery({ queryKey: ['admin-users-all'], queryFn: adminUsersApi.listAll });
+  const ownerName = (id: string) => users.find((u) => u.id === id)?.name ?? id;
+  const q = search.trim().toLowerCase();
+  const shown = q
+    ? skills.filter((s) => s.name.toLowerCase().includes(q) || ownerName(s.ownerId).toLowerCase().includes(q))
+    : skills;
+
+  return (
+    <div className="space-y-4">
+      <div className="px-4 py-3 bg-indigo-900/30 border border-indigo-700/50 rounded-xl text-xs text-indigo-300 leading-relaxed">
+        <UsersRound size={12} className="inline mr-1.5 text-indigo-400" />
+        {t('all.info')}
+      </div>
+      <div className="relative">
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t('all.search')}
+          className="w-full pl-9 pr-3 py-2 bg-gray-900 border border-gray-800 rounded-lg text-sm text-gray-200 focus:outline-none focus:border-gray-700" />
+      </div>
+      {isLoading && (
+        <div className="flex items-center gap-2 text-gray-500 text-sm py-4">
+          <Loader2 size={14} className="animate-spin" /> {t('common:actions.loading')}
+        </div>
+      )}
+      {!isLoading && shown.length === 0 && <p className="text-center py-12 text-sm text-gray-600">{t('all.empty')}</p>}
+      <div className="space-y-2">
+        {shown.map((s) => <SkillCard key={s.id} skill={s} owner={ownerName(s.ownerId)} onClick={() => onOpen(s)} />)}
       </div>
     </div>
   );
@@ -3503,7 +3575,7 @@ function SharedSkillsBadge({ userId }: { userId: string }) {
 
 // ── SkillsSection (main export) ────────────────────────────────────────
 
-type Tab = 'mine' | 'shared' | 'public' | 'review' | 'daemons';
+type Tab = 'mine' | 'shared' | 'all' | 'public' | 'review' | 'daemons';
 
 export function SkillsSection() {
   const { t } = useTranslation('skills');
@@ -3514,6 +3586,7 @@ export function SkillsSection() {
   const tabs: { id: Tab; icon: React.ElementType; adminOnly?: boolean }[] = [
     { id: 'mine',    icon: Package },
     { id: 'shared',  icon: Globe },
+    { id: 'all',     icon: UsersRound, adminOnly: true },
     { id: 'public',  icon: Sparkles },
     { id: 'daemons', icon: Activity },
     { id: 'review',  icon: Shield, adminOnly: true },
@@ -3574,6 +3647,7 @@ export function SkillsSection() {
       <div>
         {activeTab === 'mine'    && <MySkillsTab userId={user.id} onOpen={setSelectedSkill} />}
         {activeTab === 'shared'  && <SharedSkillsTab userId={user.id} onOpen={setSelectedSkill} />}
+        {activeTab === 'all'     && isAdmin && <AllSkillsTab onOpen={setSelectedSkill} />}
         {activeTab === 'public'  && <PublicSkillsTab userId={user.id} />}
         {activeTab === 'daemons' && <DaemonsTab />}
         {activeTab === 'review'  && isAdmin && <ReviewTab onOpen={setSelectedSkill} />}

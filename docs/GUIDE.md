@@ -1072,10 +1072,27 @@ Ask in chat *"every morning at 8 check the mail and summarize it"* and the autom
 
 - The built-in tool **`schedule_task`** interprets the request, picks the needed tools (default: none → cheap) and prepares the automation; the user **confirms** it (safe by default: it doesn't fire until confirmed).
 - On fire, a **headless runner** re-runs the agent with the instruction and **delivers the outcome** via notification and/or in a dedicated **chat thread** (with an unread badge). It can use a team of agents.
+- **By voice**: an automation with *"Also say it aloud"* (on by itself when you ask for it talking to a satellite) says the outcome aloud on a satellite of your account, **only where your presence is confirmed** at that moment: the room your Home Assistant person is in (not while you are busy on the phone), or — for an account with no person, such as a household account — a room with someone in it. A turn on the satellite counts as presence in its room for 20 minutes (a reminder asked "in ten minutes" still finds you there). Otherwise no voice: the outcome stays in the chat and the notification. Needs Home Assistant with the voice on (Settings → Home Assistant).
 - Supporting built-ins: `get_current_datetime` (the agent doesn't get the date/time wrong); guard on `runAt` in the past.
 - Configurable **guardrails** (env): `SCHED_MAX_TASKS_PER_USER`, `SCHED_MAX_ACTIVE_RECURRING`, `SCHED_MAX_TOKENS_PER_RUN` (over threshold → auto-disable). Token/cost per run visible in the UI.
 
 Management: Settings → **Automations**. API: `GET /api/scheduled-tasks` · `POST /api/scheduled-tasks/:id/activate` · `PATCH /api/scheduled-tasks/:id/enabled` · `DELETE /api/scheduled-tasks/:id`.
+
+### 15.1 Sequences — timed actions without the model (`run_sequence`)
+
+Ask *"switch the kitchen and living-room lights on and off for 10 seconds"* and the agent writes, in **one** tool call, a small program of its own tools' calls; Arkimede checks it and runs it **in the background, without the model** (no tokens per step, timing to ~100 ms). The agent answers at once ("blinking them for 10 seconds").
+
+- **Domain-free**: a sequence calls any tool the agent has in that turn (Home Assistant, messaging, MCP, skills…), with the same user and authorization. E.g. three reminders two minutes apart, blinds opened one by one, an API called every 20 s for five minutes.
+- **Steps**: `call` (a tool + args) · `wait` (≥ 0.2 s, optional `jitterSeconds`) · `repeat` (`count` or `forSeconds`) · `parallel` (up to 8) · `choose.random` (one at random); `finally` runs at the end, also when stopped or failed (put things back).
+- **Replace**: a new sequence with the same `key` (or, without one, the same calls with the same arguments) replaces the running one — "faster" just works.
+- **Never**: agents, teams, flows, the sandbox, scheduling or memory inside a sequence; never a confirmation on the user's behalf (`confirmed: true` refused, a result asking for one fails the step). A failed call is recorded and the sequence goes on; the same call failing 3 times in a row stops it (`stopOnError` stops at the first).
+- **A procedure of the memory**: when the sequence carries out a procedure Recordare holds (or one step of it), the model passes `procedure: {id, step?}` and Arkimede reports the run to Recordare when it ends — completed with every call succeeding = done; failed, timed out or with failed calls = failed with the errors; stopped by the user = nothing. Only when the user's memory is Recordare; a Recordare error never touches the sequence.
+- **Bounds** (env): `RUN_SEQUENCE_MAX_SECONDS` (600; longer → `schedule_task`), `RUN_SEQUENCE_MAX_CALLS` (1000), `RUN_SEQUENCE_MAX_PER_USER` (3).
+- **Stop**: by voice/chat ("stop", "basta") through `stop_sequences`; in the chat it came from (a box with its progress and **Stop**); on the wall panel's drawer.
+- **End**: one line in that chat (completed / stopped / failed, with why); no voice.
+- In memory: a backend restart ends the running sequences. A sequence is ephemeral; work saved and triggered belongs in Flows (§13).
+
+API: `GET /api/sequences[?chatId=]` · `POST /api/sequences/:id/stop` · `POST /api/sequences/stop` · `GET /api/chat-runs` (the work in progress: `runs` and `sequences`). Socket: `sequence` on the chat's room. Design: `specs/RUN_SEQUENCE.md`.
 
 ---
 
@@ -1464,11 +1481,15 @@ The internal Piper speaks with `it_IT-serena-medium` by default (`PIPER_VOICE`, 
 voice set in the panel, wins). Installs that relied on the previous default
 (`it_IT-paola-medium`) switch to serena at the next image rebuild; set
 `PIPER_VOICE=it_IT-paola-medium` to keep paola.
-Pick a **conversation user** (and optionally one of their agents) in the same
-card and the hub also gets Arkimede as its conversation agent: the whole voice
-pipeline runs on Arkimede with no extra component on the hub.
+Turn on **Expose the conversation agent** in the same card and the hub also gets
+Arkimede as its conversation agent: the whole voice pipeline runs on Arkimede
+with no extra component on the hub. Each turn runs as the account its satellite
+is assigned to (*Integrations → Home Assistant → Voice accounts*; an unassigned
+satellite: the default account, the first admin unless changed), with the
+**voice agent** that user chose in their profile (for a service account, the admin
+sets it in *Users → Memory and voice*).
 With **Save conversations** on, each hub conversation (its `conversation_id`;
-closed after 10 minutes of silence) is saved as a chat of the conversation user.
+closed after 10 minutes of silence) is saved as a chat of the turn's account.
 The protocol has no authentication: enable it on trusted networks only.
 
 ### Chat and messages

@@ -10,24 +10,31 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as net from 'node:net';
-import { WyomingService, expectsReply, spokenFailure } from '../../src/wyoming/wyoming.service';
+import { WyomingService, expectsReply, spokenFailure, voiceBlocks, workingOn, keepTalking, stoppedWork } from '../../src/wyoming/wyoming.service';
 import { ConversationFocusService } from '../../src/chats/conversation-focus.service';
 import { WyomingDecoder, WyomingEvent, encodeEvent, parseWav, pcmToWav } from '../../src/wyoming/wyoming.protocol';
 
 const VOICE_USER = 'a1a1a1a1-0000-4000-8000-000000000001';
 const VOICE_AGENT = 'b2b2b2b2-0000-4000-8000-000000000002';
+const OTHER_USER = 'e5e5e5e5-0000-4000-8000-000000000005';
 
-function makeService(opts: { enabled?: boolean; cidrs?: string | null; sttEnabled?: boolean; ttsEnabled?: boolean; handleUser?: string | null; handleAgent?: string | null } = {}) {
+function makeService(opts: { enabled?: boolean; cidrs?: string | null; sttEnabled?: boolean; ttsEnabled?: boolean; handleUser?: string | null; handleAgent?: string | null; persist?: boolean; voiceId?: any; satellites?: Record<string, string>; initiatives?: any; runMs?: number; runFails?: boolean; noRuns?: boolean } = {}) {
+  // `handleUser`: the conversation on, with that user as the satellites' default account; `handleAgent`: their voice agent.
   const appConfig = {
     getWyomingConfig: vi.fn(async () => ({
       wyomingEnabled: opts.enabled ?? true, wyomingAllowedCidrs: opts.cidrs ?? null,
-      wyomingHandleUserId: opts.handleUser ?? null, wyomingHandleAgentId: opts.handleAgent ?? null,
+      wyomingConversationEnabled: !!opts.handleUser,
+      wyomingPersistConversations: opts.persist ?? false,
     })),
+    voiceAccounts: vi.fn(async () => ({ memoryUserId: opts.handleUser ?? null, defaultUserId: opts.handleUser ?? null, satellites: opts.satellites ?? {} })),
   };
   const agent = { id: VOICE_AGENT, name: 'Voce Casa', systemPrompt: 'Rispondi in una frase.', toolFilter: { mode: 'names', names: ['mcp_home_assistant_*'] }, maxIterations: 3, llmConfigId: null };
   const agentService = {
     // Echoes the input plus how many history messages it received; emits one tool event.
-    streamResponse: vi.fn(async (input: string, _userId: string, _p: any, _c: any, history: any[], _a: any, _i: any, _b: any, onChunk: (s: string) => void, onToolCall: any, _signal: any, onToolResult: any) => {
+    streamResponse: vi.fn(async (input: string, _userId: string, _p: any, _c: any, history: any[], _a: any, _i: any, _b: any, onChunk: (s: string) => void, onToolCall: any, signal: AbortSignal, onToolResult: any) => {
+      if (opts.runMs) await new Promise((r) => setTimeout(r, opts.runMs));
+      if (signal?.aborted) return null;   // as AgentService: a stopped run returns no usage
+      if (opts.runFails) throw new Error('Recursion limit of 101 reached');
       onToolCall({ name: 'mcp_home_assistant_GetLiveContext', input: {} });
       onToolResult('mcp_home_assistant_GetLiveContext', 'ok', 'success', {});
       onChunk(`risposta a "${input}" (history=${history.length})`);
@@ -35,12 +42,14 @@ function makeService(opts: { enabled?: boolean; cidrs?: string | null; sttEnable
     }),
   };
   const agentsService = {
-    findAll:  vi.fn(async (userId: string) => (userId === VOICE_USER ? [agent] : [])),
+    findAll:  vi.fn(async (userId: string) => (userId === VOICE_USER || userId === OTHER_USER ? [agent] : [])),
     findById: vi.fn(async (id: string) => { if (id !== VOICE_AGENT) throw new Error('not found'); return agent; }),
   };
   const usersService = {
-    getById: vi.fn(async (id: string) => { if (id !== VOICE_USER) throw new Error("not found"); return { id, email: "voice@internal.com", status: "active" }; }),
+    voiceSettings: vi.fn(async (id: string) => (id === VOICE_USER ? { id, email: 'voice@internal.com', status: 'active', voiceAgentId: opts.handleAgent ?? null }
+      : id === OTHER_USER ? { id, email: 'other@example.com', status: 'active', voiceAgentId: null } : null)),
   };
+  const homeAssistant = { satelliteEntity: (s: string | null) => (s?.startsWith('assist_satellite.') ? s : null) };
   const invocations = { record: vi.fn(async () => undefined) };
   const focus = new ConversationFocusService();
   // One stored chat of the voice user, for focused turns.
@@ -49,6 +58,8 @@ function makeService(opts: { enabled?: boolean; cidrs?: string | null; sttEnable
       ? [{ role: 'user', content: 'prima' }, { role: 'assistant', content: 'ok' }, { role: 'user', content: 'poi' }, { role: 'assistant', content: 'ok' }]
       : null)),
     recordTurn: vi.fn(async () => 'chat-1'),
+    recordUserMessage: vi.fn(async () => 'chat-9'),
+    recordAnswer: vi.fn(async () => undefined),
     memoryConversationId: vi.fn(async (turn: any) => turn.chatId ?? `${turn.source}:${turn.key}`),
   };
   const transcription = {
@@ -61,9 +72,19 @@ function makeService(opts: { enabled?: boolean; cidrs?: string | null; sttEnable
   };
   const env = { get: (k: string, d?: string) => (k === 'WYOMING_PORT' ? '0' : k === 'WYOMING_BIND' ? '127.0.0.1' : d) };
   // ModuleRef stand-in: the service resolves the conversation dependencies lazily by class token.
-  const moduleRef = { get: (token: any) => ({ AgentService: agentService, AgentsService: agentsService, UsersService: usersService, InvocationsService: invocations, ConversationFocusService: focus, ExternalChatsService: externalChats } as any)[token.name] };
+  const voiceDelivery = { deliver: vi.fn(async () => 'assist_satellite.soggiorno') };
+  const notifications = { create: vi.fn(async () => ({ id: 'n-1' })) };
+  const gateway = { emitToUser: vi.fn() };
+  // The chats' runs: a detached turn's work registered there (stoppable); `stop()` stops the last one started.
+  const controllers: AbortController[] = [];
+  const chatRuns = {
+    start: vi.fn(() => { const c = new AbortController(); controllers.push(c); return { runId: `run-${controllers.length}`, signal: c.signal }; }),
+    update: vi.fn(), toolDone: vi.fn(), finish: vi.fn(),
+    stop: () => controllers.at(-1)?.abort(),
+  };
+  const moduleRef = { get: (token: any) => ({ ChatRunsService: opts.noRuns ? undefined : chatRuns, VoiceDeliveryService: voiceDelivery, NotificationsService: notifications, NotificationsGateway: gateway, AgentService: agentService, AgentsService: agentsService, UsersService: usersService, InvocationsService: invocations, ConversationFocusService: focus, ExternalChatsService: externalChats, VoiceIdService: opts.voiceId, HomeAssistantService: homeAssistant, RecordareInitiativesService: opts.initiatives } as any)[token.name] };
   const svc = new WyomingService(appConfig as any, transcription as any, tts as any, env as any, moduleRef as any);
-  return { svc, appConfig, transcription, tts, agentService, agentsService, usersService, invocations, focus, externalChats };
+  return { svc, appConfig, transcription, tts, agentService, agentsService, usersService, invocations, focus, externalChats, voiceDelivery, notifications, gateway, chatRuns };
 }
 
 /** Sends events on a fresh connection and collects the replies until the socket idles. */
@@ -264,7 +285,7 @@ describe('WyomingService — conversation (handle program)', () => {
     const replayed = ctx.agentService.streamResponse.mock.calls[1][4];
     expect(replayed[1]).toMatchObject({ role: 'assistant', id: expect.any(String), toolCalls: [expect.objectContaining({ name: 'mcp_home_assistant_GetLiveContext' })] });
     // Standard pipeline (no agent): the origin, and the conversation for the memory
-    expect(ctx.agentService.streamResponse.mock.calls[0][12]).toEqual({ origin: 'voice', conversationId: 'wyoming:A' });
+    expect(ctx.agentService.streamResponse.mock.calls[0][12]).toEqual({ origin: 'voice', conversationId: 'wyoming:A', onProgress: expect.any(Function) });
     await ctx.svc.onModuleDestroy();
   });
 
@@ -326,12 +347,276 @@ describe('WyomingService — conversation (handle program)', () => {
     await fallback.svc.onModuleDestroy();
   });
 
-  it('validateHandleConfig rejects unknown users and agents not visible to the user', async () => {
-    const { svc } = makeService();
-    await expect(svc.validateHandleConfig('c3c3c3c3-0000-4000-8000-000000000003', null)).rejects.toThrow('wyoming.handleUserInvalid');
-    await expect(svc.validateHandleConfig(VOICE_USER, 'd4d4d4d4-0000-4000-8000-000000000004')).rejects.toThrow('wyoming.handleAgentInvalid');
-    await expect(svc.validateHandleConfig(VOICE_USER, VOICE_AGENT)).resolves.toBeUndefined();
-    await expect(svc.validateHandleConfig(null, VOICE_AGENT)).resolves.toBeUndefined();
-    expect(await svc.listHandleAgents(VOICE_USER)).toEqual([{ id: VOICE_AGENT, name: 'Voce Casa' }]);
+  it('runs a turn as the account its satellite is assigned to, with that user\'s voice agent; the rest as the default account', async () => {
+    const ctx = makeService({ handleUser: VOICE_USER, handleAgent: VOICE_AGENT, satellites: { 'assist_satellite.study': OTHER_USER } });
+    await ctx.svc.applyConfig();
+    const port = ctx.svc.getStatus().port;
+    await exchange(port, [{ type: 'transcript', data: { text: 'studio', context: { conversation_id: 'S', satellite_id: 'assist_satellite.study' } } }]);
+    await exchange(port, [{ type: 'transcript', data: { text: 'sala', context: { conversation_id: 'L', satellite_id: 'assist_satellite.living' } } }]);
+    const [study, living] = ctx.agentService.streamResponse.mock.calls;
+    expect(study[1]).toBe(OTHER_USER);
+    expect(study[12]).toEqual({ origin: 'voice', conversationId: 'wyoming:S', onProgress: expect.any(Function) });     // no voice agent: the standard pipeline
+    expect(living[1]).toBe(VOICE_USER);
+    expect(living[12]).toMatchObject({ agentPromptOverride: 'Rispondi in una frase.' });
+    expect(ctx.invocations.record).toHaveBeenCalledWith(expect.objectContaining({ userId: OTHER_USER, model: 'wyoming:arkimede' }));
+    // The advertised model stays the default account's.
+    expect(ctx.svc.getStatus().handle?.model).toBe('voce-casa');
+    await ctx.svc.onModuleDestroy();
+  });
+
+  it('does not handle a turn whose account is not active', async () => {
+    const ctx = makeService({ handleUser: VOICE_USER, satellites: { 'assist_satellite.gone': 'c3c3c3c3-0000-4000-8000-000000000003' } });
+    await ctx.svc.applyConfig();
+    const [nh] = await exchange(ctx.svc.getStatus().port, [{ type: 'transcript', data: { text: 'ciao', language: 'it', context: { satellite_id: 'assist_satellite.gone' } } }]);
+    expect(nh).toMatchObject({ type: 'not-handled', data: { text: spokenFailure('it') } });
+    expect(ctx.agentService.streamResponse).not.toHaveBeenCalled();
+    await ctx.svc.onModuleDestroy();
+  });
+});
+
+describe('WyomingService — who is speaking (voice recognition)', () => {
+  const fmt = { rate: 16000, width: 2, channels: 1 };
+  const audio = (language = 'it'): WyomingEvent[] => [
+    { type: 'transcribe', data: { language } }, { type: 'audio-start', data: fmt },
+    { type: 'audio-chunk', data: fmt, payload: Buffer.alloc(32000, 1) }, { type: 'audio-stop', data: {} },
+  ];
+
+  it('voiceprints the audio alongside the transcription, tells the agent and the memory who speaks, before the run', async () => {
+    const speaker = { holder: false, identity: { channel: 'voice', externalId: 'v-alex' }, displayName: 'Alex', profileId: 'v-alex', userId: null, confidence: 0.8, score: 0.7 };
+    const voiceId = {
+      active: vi.fn(async () => true),
+      embed: vi.fn(async () => [0.1, 0.2]),
+      remember: vi.fn(),
+      forTurn: vi.fn(async () => ({ kind: 'speaker', speaker })),
+    };
+    const ctx = makeService({ handleUser: VOICE_USER, persist: true, voiceId });
+    await ctx.svc.applyConfig();
+    const port = ctx.svc.getStatus().port;
+    const [transcript] = await exchange(port, audio());
+    expect(voiceId.embed).toHaveBeenCalledWith(expect.any(Buffer));
+    expect(voiceId.remember).toHaveBeenCalledWith(transcript.data.text, expect.any(Promise));
+    const heard: any[] = [];
+    ctx.focus.setVoiceTurnListener((t) => heard.push(t));
+    const context = { conversation_id: 'A', satellite_id: 'assist_satellite.living' };
+    await exchange(port, [{ type: 'transcript', data: { text: transcript.data.text, context } }]);
+    expect(voiceId.forTurn).toHaveBeenCalledWith(transcript.data.text, 'assist_satellite.living', VOICE_USER);
+    // The user's message with its speaker is saved before the run, and the run's memory conversation is that chat.
+    expect(ctx.externalChats.recordUserMessage).toHaveBeenCalledWith(expect.objectContaining({
+      userId: VOICE_USER, satellite: 'assist_satellite.living', speaker: { channel: 'voice', externalId: 'v-alex', displayName: 'Alex' },
+    }));
+    const opts = ctx.agentService.streamResponse.mock.calls[0][12];
+    expect(opts.conversationId).toBe('chat-9');
+    expect(opts.turnBlocks[0]).toContain('The person speaking is Alex');
+    expect(ctx.externalChats.recordAnswer).toHaveBeenCalledWith('chat-9', expect.objectContaining({ answer: expect.stringContaining('risposta') }));
+    expect(ctx.externalChats.recordTurn).not.toHaveBeenCalled();
+    // The presence of the turn carries who spoke.
+    expect(heard[0]).toMatchObject({ satelliteId: 'assist_satellite.living', speaker: { identity: { channel: 'voice', externalId: 'v-alex' }, confidence: 0.8 } });
+    await ctx.svc.onModuleDestroy();
+  });
+
+  it('off (or nobody recognised): no voiceprint, the turn as before', async () => {
+    const voiceId = { active: vi.fn(async () => false), embed: vi.fn(), remember: vi.fn(), forTurn: vi.fn(async () => ({ kind: 'unknown' })) };
+    const ctx = makeService({ handleUser: VOICE_USER, persist: true, voiceId });
+    await ctx.svc.applyConfig();
+    const port = ctx.svc.getStatus().port;
+    await exchange(port, audio());
+    expect(voiceId.embed).not.toHaveBeenCalled();
+    await exchange(port, [{ type: 'transcript', data: { text: 'ciao', context: { conversation_id: 'A' } } }]);
+    expect(ctx.agentService.streamResponse.mock.calls[0][12]).toEqual({ origin: 'voice', conversationId: 'wyoming:A', onProgress: expect.any(Function) });
+    expect(ctx.externalChats.recordUserMessage).not.toHaveBeenCalled();
+    expect(ctx.externalChats.recordTurn).toHaveBeenCalled();
+    await ctx.svc.onModuleDestroy();
+  });
+
+  it('a person recognised on a satellite that is not theirs: the turn to their own memory too (sharedTurn decides)', async () => {
+    const speaker = { holder: false, identity: { channel: 'voice', externalId: 'v-sam' }, displayName: 'Sam', profileId: 'v-sam', userId: OTHER_USER, confidence: 0.8, score: 0.7 };
+    const voiceId = { active: vi.fn(async () => false), embed: vi.fn(), remember: vi.fn(), forTurn: vi.fn(async () => ({ kind: 'speaker', speaker })) };
+    const initiatives = { sharedTurn: vi.fn(async () => true) };
+    const ctx = makeService({ handleUser: VOICE_USER, voiceId, initiatives });
+    await ctx.svc.applyConfig();
+    const port = ctx.svc.getStatus().port;
+    await exchange(port, [{ type: 'transcript', data: { text: 'che tempo fa', context: { conversation_id: 'A', satellite_id: 'assist_satellite.living' } } }]);
+    expect(initiatives.sharedTurn).toHaveBeenCalledWith(OTHER_USER, { conversation: 'wyoming:A', text: 'che tempo fa', answer: expect.stringContaining('risposta') });
+    // On their own satellite the turn is already theirs: nothing more.
+    initiatives.sharedTurn.mockClear();
+    speaker.userId = VOICE_USER;
+    await exchange(port, [{ type: 'transcript', data: { text: 'ancora', context: { conversation_id: 'A', satellite_id: 'assist_satellite.living' } } }]);
+    expect(initiatives.sharedTurn).not.toHaveBeenCalled();
+    await ctx.svc.onModuleDestroy();
+  });
+
+  it('voiceBlocks: who speaks (the holder named as the account\'s own user), a voice being learned, nothing when unknown', () => {
+    expect(voiceBlocks({ kind: 'unknown' })).toEqual([]);
+    expect(voiceBlocks({ kind: 'rejected', profileId: 'p', name: 'Sam', rejection: { reason: 'other', name: 'Alex', score: 0.7 }, left: 3 })[0])
+      .toMatch(/not taken \(it sounded like Alex's voice\); 3 still to go/);
+    // An entity's account (the assistant's own identity): an unknown voice is never called by the account's name.
+    expect(voiceBlocks({ kind: 'unknown' }, true)[0]).toContain("never call them by the account's name");
+    expect(voiceBlocks({ kind: 'speaker', speaker: { holder: false, identity: null, displayName: 'Sam', profileId: 'p', userId: null, confidence: 0.8, score: 0.7 } }, true)[0]).toContain('The person speaking is Sam');
+    expect(voiceBlocks({ kind: 'speaker', speaker: { holder: true, identity: null, displayName: 'Sam', profileId: 'p', userId: null, confidence: 0.8, score: 0.7 } })[0]).toContain("Sam (the account's own user)");
+    expect(voiceBlocks({ kind: 'enrolled', profileId: 'p', name: 'Sam', samples: 5, of: 5 })[0]).toContain('done, from now on you recognise it');
+  });
+});
+
+describe('WyomingService — a long turn is detached', () => {
+  const previous = process.env.WYOMING_DETACH_MS;
+  beforeEach(() => { process.env.WYOMING_DETACH_MS = '60'; });
+  afterEach(() => { if (previous === undefined) delete process.env.WYOMING_DETACH_MS; else process.env.WYOMING_DETACH_MS = previous; });
+  const until = async (check: () => boolean) => { for (let i = 0; i < 100 && !check(); i++) await new Promise((r) => setTimeout(r, 20)); };
+
+  it('the hub hears the work goes on and hangs up; the run is not cancelled, its answer is saved, said and notified', async () => {
+    const ctx = makeService({ handleUser: VOICE_USER, handleAgent: VOICE_AGENT, runMs: 300 });
+    await ctx.svc.applyConfig();
+    const context = { conversation_id: 'conv-9', satellite_id: 'assist_satellite.soggiorno' };
+    const replies = await exchange(ctx.svc.getStatus().port, [{ type: 'transcript', data: { text: 'costruisci una scacchiera', language: 'it', context } }], 100);
+    expect(replies).toEqual([expect.objectContaining({ type: 'handled', data: expect.objectContaining({ text: workingOn('it'), continue_conversation: false }) })]);
+    await until(() => ctx.notifications.create.mock.calls.length > 0);
+    const answer = 'risposta a "costruisci una scacchiera" (history=0)';
+    // Its chat at the detach (persistence off too: the answer is delivered from it), the work registered there.
+    expect(ctx.externalChats.recordUserMessage).toHaveBeenCalledWith(expect.objectContaining({ userText: 'costruisci una scacchiera' }));
+    expect(ctx.chatRuns.start).toHaveBeenCalledWith('chat-9');
+    expect(ctx.externalChats.recordAnswer).toHaveBeenCalledWith('chat-9', expect.objectContaining({ answer }));
+    expect(ctx.chatRuns.toolDone).toHaveBeenCalledWith('chat-9', 'run-1', expect.objectContaining({ tool: 'mcp_home_assistant_GetLiveContext', ok: true }));
+    expect(ctx.chatRuns.finish).toHaveBeenCalledWith('chat-9', 'run-1', null);
+    expect(ctx.voiceDelivery.deliver).toHaveBeenCalledWith(VOICE_USER, answer, 'chat-9');
+    expect(ctx.notifications.create).toHaveBeenCalledWith(expect.objectContaining({
+      userId: VOICE_USER, eventType: 'voice_work_done', payload: expect.objectContaining({ chatId: 'chat-9', message: answer, spoken: true }),
+    }));
+    expect(ctx.gateway.emitToUser).toHaveBeenCalledWith(VOICE_USER, 'notification', expect.objectContaining({ eventType: 'voice_work_done' }));
+    expect(ctx.invocations.record).toHaveBeenCalledWith(expect.objectContaining({ status: 'ok', outputPreview: answer }));
+    await ctx.svc.onModuleDestroy();
+  });
+
+  it('a detached run that fails: the failure is said and written in the chat, never the error', async () => {
+    const ctx = makeService({ handleUser: VOICE_USER, handleAgent: VOICE_AGENT, runMs: 200, runFails: true });
+    await ctx.svc.applyConfig();
+    await exchange(ctx.svc.getStatus().port, [{ type: 'transcript', data: { text: 'scrivi un gioco enorme', language: 'it', context: { conversation_id: 'c' } } }], 100);
+    await until(() => ctx.voiceDelivery.deliver.mock.calls.length > 0);
+    expect(ctx.voiceDelivery.deliver).toHaveBeenCalledWith(VOICE_USER, spokenFailure('it'), 'chat-9');
+    expect(ctx.externalChats.recordAnswer).toHaveBeenCalledWith('chat-9', expect.objectContaining({ answer: spokenFailure('it') }));
+    expect(ctx.chatRuns.finish).toHaveBeenCalledWith('chat-9', 'run-1', null);
+    expect(ctx.invocations.record).toHaveBeenCalledWith(expect.objectContaining({ status: 'error', error: 'Recursion limit of 101 reached' }));
+    await ctx.svc.onModuleDestroy();
+  });
+
+  it('stopped from its chat: the work ends, the satellite says it stopped, the chat keeps it', async () => {
+    const ctx = makeService({ handleUser: VOICE_USER, handleAgent: VOICE_AGENT, runMs: 400 });
+    await ctx.svc.applyConfig();
+    await exchange(ctx.svc.getStatus().port, [{ type: 'transcript', data: { text: 'scrivi un gioco', language: 'it', context: { conversation_id: 'c' } } }], 100);
+    await until(() => ctx.chatRuns.start.mock.calls.length > 0);
+    ctx.chatRuns.stop();
+    await until(() => ctx.voiceDelivery.deliver.mock.calls.length > 0);
+    expect(ctx.voiceDelivery.deliver).toHaveBeenCalledWith(VOICE_USER, stoppedWork('it'), 'chat-9');
+    expect(ctx.externalChats.recordAnswer).toHaveBeenCalledWith('chat-9', expect.objectContaining({ answer: stoppedWork('it') }));
+    expect(ctx.chatRuns.finish).toHaveBeenCalledWith('chat-9', 'run-1', null);
+    await ctx.svc.onModuleDestroy();
+  });
+
+  it('without the chats\' runs (another app) a detached turn still ends and is delivered', async () => {
+    const ctx = makeService({ handleUser: VOICE_USER, handleAgent: VOICE_AGENT, runMs: 200, noRuns: true });
+    await ctx.svc.applyConfig();
+    await exchange(ctx.svc.getStatus().port, [{ type: 'transcript', data: { text: 'costruisci', language: 'it', context: { conversation_id: 'c' } } }], 100);
+    await until(() => ctx.voiceDelivery.deliver.mock.calls.length > 0);
+    expect(ctx.voiceDelivery.deliver).toHaveBeenCalledWith(VOICE_USER, expect.stringContaining('risposta a'), 'chat-9');
+    await ctx.svc.onModuleDestroy();
+  });
+
+  it('its answer waits while another turn is going on (an announcement would cut it), then is said', async () => {
+    const ctx = makeService({ handleUser: VOICE_USER, handleAgent: VOICE_AGENT, runMs: 150 });
+    await ctx.svc.applyConfig();
+    (ctx.svc as any).turnsInProgress = 1;   // another turn waiting for its answer on the satellite
+    await exchange(ctx.svc.getStatus().port, [{ type: 'transcript', data: { text: 'costruisci', language: 'it', context: { conversation_id: 'c' } } }], 100);
+    await new Promise((r) => setTimeout(r, 600));
+    expect(ctx.voiceDelivery.deliver).not.toHaveBeenCalled();
+    (ctx.svc as any).turnsInProgress -= 1;   // that turn answered
+    await until(() => ctx.voiceDelivery.deliver.mock.calls.length > 0);
+    expect((ctx.svc as any).turnsInProgress).toBe(0);   // the detached turn counted itself out at the detach
+    await ctx.svc.onModuleDestroy();
+  });
+
+  it('a sentence being played holds an announcement for as long as its synthesis lasts', async () => {
+    const ctx = makeService({ handleUser: VOICE_USER });
+    await ctx.svc.applyConfig();
+    await exchange(ctx.svc.getStatus().port, [{ type: 'synthesize', data: { text: 'x'.repeat(10) } }]);
+    // 1000 bytes of 22050 Hz 16-bit mono ≈ 23 ms, plus the tail: quiet within a few seconds, not at once
+    const t0 = Date.now();
+    const waited = await ctx.svc.quiet(5000, 50);
+    expect(waited).toBeGreaterThan(1000);
+    expect(Date.now() - t0).toBeLessThan(4000);
+    await ctx.svc.onModuleDestroy();
+  });
+
+  it('a turn that ends in time is answered as before, nothing delivered later', async () => {
+    const ctx = makeService({ handleUser: VOICE_USER, handleAgent: VOICE_AGENT, runMs: 5 });
+    await ctx.svc.applyConfig();
+    const [handled] = await exchange(ctx.svc.getStatus().port, [{ type: 'transcript', data: { text: 'che ore sono', language: 'it', context: { conversation_id: 'c' } } }]);
+    expect(handled.data.text).toBe('risposta a "che ore sono" (history=0)');
+    expect(ctx.voiceDelivery.deliver).not.toHaveBeenCalled();
+    expect(ctx.notifications.create).not.toHaveBeenCalled();
+    expect(ctx.externalChats.recordTurn).not.toHaveBeenCalled();   // persistence off, as before
+    expect(ctx.chatRuns.start).not.toHaveBeenCalled();
+    await ctx.svc.onModuleDestroy();
+  });
+
+  it('workingOn speaks the turn language', () => {
+    expect(workingOn('it-IT')).toMatch(/^Ci sto lavorando/);
+    expect(workingOn('en')).toMatch(/^I'm working on it/);
+    expect(workingOn()).toMatch(/^I'm working on it/);
+  });
+});
+
+describe('WyomingService — a command longer than the hub lets it be', () => {
+  const fmt = { rate: 16000, width: 2, channels: 1 };
+  // seconds of PCM in one chunk: 15 s is Home Assistant's command limit
+  const speech = (seconds: number): WyomingEvent[] => [
+    { type: 'transcribe', data: { language: 'it' } },
+    { type: 'audio-start', data: fmt },
+    { type: 'audio-chunk', data: fmt, payload: Buffer.alloc(Math.round(seconds * 32000), 1) },
+    { type: 'audio-stop', data: {} },
+  ];
+  const turn = (text: string): WyomingEvent => ({ type: 'transcript', data: { text, language: 'it', context: { conversation_id: 'conv-long' } } });
+
+  it('a transcription cut at the limit waits for the rest: "go on", listening again, then one request', async () => {
+    const ctx = makeService({ handleUser: VOICE_USER, handleAgent: VOICE_AGENT });
+    await ctx.svc.applyConfig();
+    const port = ctx.svc.getStatus().port;
+    const [stt] = await exchange(port, speech(15));
+    expect(stt.data.text).toBe('heard 480000 bytes');
+    const [wait] = await exchange(port, [turn('heard 480000 bytes')]);
+    expect(wait).toMatchObject({ type: 'handled', data: { text: keepTalking('it'), continue_conversation: true } });
+    expect(ctx.agentService.streamResponse).not.toHaveBeenCalled();
+    const [answer] = await exchange(port, [turn('e quattro nemici')]);
+    expect(answer.type).toBe('handled');
+    expect(ctx.agentService.streamResponse).toHaveBeenCalledTimes(1);
+    expect(ctx.agentService.streamResponse.mock.calls[0][0]).toBe('heard 480000 bytes e quattro nemici');
+    await ctx.svc.onModuleDestroy();
+  });
+
+  it('cut twice: the three parts make one request', async () => {
+    const ctx = makeService({ handleUser: VOICE_USER, handleAgent: VOICE_AGENT });
+    await ctx.svc.applyConfig();
+    const port = ctx.svc.getStatus().port;
+    await exchange(port, speech(15));
+    await exchange(port, [turn('heard 480000 bytes')]);
+    await exchange(port, speech(14.9));
+    const [wait] = await exchange(port, [turn('heard 476800 bytes')]);
+    expect(wait.data.text).toBe(keepTalking('it'));
+    await exchange(port, [turn('fine')]);
+    expect(ctx.agentService.streamResponse.mock.calls.map((c: any[]) => c[0])).toEqual(['heard 480000 bytes heard 476800 bytes fine']);
+    await ctx.svc.onModuleDestroy();
+  });
+
+  it('a shorter command runs at once, as before', async () => {
+    const ctx = makeService({ handleUser: VOICE_USER, handleAgent: VOICE_AGENT });
+    await ctx.svc.applyConfig();
+    const port = ctx.svc.getStatus().port;
+    await exchange(port, speech(6));
+    const [answer] = await exchange(port, [turn('heard 192000 bytes')]);
+    expect(answer.data.text).toBe('risposta a "heard 192000 bytes" (history=0)');
+    await ctx.svc.onModuleDestroy();
+  });
+
+  it('keepTalking speaks the turn language', () => {
+    expect(keepTalking('it')).toBe('Continua, ti ascolto.');
+    expect(keepTalking('en')).toMatch(/^Go on/);
   });
 });

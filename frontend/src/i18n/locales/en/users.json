@@ -30,7 +30,8 @@
     "enable": "Enable",
     "resetPassword": "Reset password",
     "delete": "Delete",
-    "apiKeys": "API keys"
+    "apiKeys": "API keys",
+    "memory": "Memory and voice"
   },
   "confirm": {
     "deleteUser": "Permanently delete \"{{name}}\"?"
@@ -81,5 +82,21 @@
     "fieldExpiry": "Expiry",
     "days": "days",
     "create": "Create key"
+  },
+  "memory": {
+    "title": "Memory and voice of {{name}}",
+    "autoMemoryEnabled": "Automatic memory",
+    "autoMemoryEnabledHint": "Extracts durable facts from the conversations.",
+    "sharedMemoryEnabled": "Team and organization notes",
+    "sharedMemoryEnabledHint": "Also uses the shared notes, besides the personal ones.",
+    "episodicMemoryEnabled": "Episodic memory (Recordare)",
+    "episodicMemoryEnabledHint": "Remembers what happens and takes initiatives.",
+    "mode": "Memory mode",
+    "modePersonal": "Personal (the user's words are theirs)",
+    "modeEntity": "Entity (a shared agent, e.g. the house)",
+    "modeHint": "It can be chosen only while the memory is empty.",
+    "voiceAgent": "Voice agent",
+    "voiceStandard": "Standard pipeline (no agent)",
+    "voiceAgentHint": "The agent the satellites assigned to this account answer with (and the unassigned ones, if it is the default account). Only its own agents, its teams' or the organization's."
   }
 }

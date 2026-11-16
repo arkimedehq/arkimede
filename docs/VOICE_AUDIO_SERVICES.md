@@ -279,15 +279,18 @@ Design (mirrors the rest of the platform: one feature, admin-configured):
   PCM in its native format), `ping → pong`. Unknown events are ignored.
 - Guards: 16 MB max frame, ~5 min max audio per transcription, 120 s idle
   timeout per socket, provider failures reported as a Wyoming `error` event.
-- **Conversation agent** ("handle" program, migration 085): when the admin picks
-  a user (`wyomingHandleUserId`) and optionally one of their agents
-  (`wyomingHandleAgentId`), the `info` also advertises a `handle` program and
+- **Conversation agent** ("handle" program, migrations 085 and 114): when the
+  admin turns it on (`wyomingConversationEnabled`), the `info` also advertises a
+  `handle` program (its model: the default account's voice agent) and
   the hub can use Arkimede as its *conversation agent* — the whole Assist
   pipeline (STT → conversation → TTS) then runs on this single Wyoming
   endpoint, with no HACS component and no API key on the hub. The hub sends a
   `transcript` event (`text`, `language`, `context.conversation_id`); the
-  server runs `AgentService.streamResponse` as that user with the agent's
-  overrides (`agentRunOptions`, shared with the OpenAI shim), keeps a
+  server resolves the turn's account from the satellite (`context.satellite_id`
+  / `device_id` → the Home Assistant voice point → `haSatelliteUsers`, else
+  `haDefaultVoiceUserId`, else the first active admin; specs/VOICE_SATELLITES.md)
+  and runs `AgentService.streamResponse` as that user with the overrides of
+  their voice agent (`users.voiceAgentId`) (`agentRunOptions`, shared with the OpenAI shim), keeps a
   per-`conversation_id` window (20 messages, 10 min TTL) for multi-turn
   context — the hub only sends the current text — and answers `handled`
   (or `not-handled` with a sentence for people in the turn's language,
@@ -305,11 +308,30 @@ Design (mirrors the rest of the platform: one feature, admin-configured):
   Home Assistant runs that change as a copy of the `wyoming` integration in
   `custom_components/`, to be removed when the official release has it. Hubs
   that don't know the field ignore it.
+- **Long turns are detached** (2026-11-13): a turn still running after
+  `WYOMING_DETACH_MS` (25 s; 0 = never) answers the hub at once ("Ci sto
+  lavorando: te lo dico appena ho finito.") and goes on without it — the hub
+  may hang up, the run is no longer cancelled. When it ends, the turn is saved
+  in its chat (also with persistence off), the answer is said where the user is
+  (the one voice channel, `VoiceDeliveryService`: the turn put presence in the
+  satellite's room) and a `voice_work_done` notification opens that chat. A
+  failure is said the same way (`spokenFailure`). The answer waits while a voice exchange is going on (audio
+  coming in, a turn waiting for its answer, a sentence being played: as long as its synthesis lasts), at most 2 min:
+  an announcement on a satellite cuts the pipeline running on it. The work is the chat's run meanwhile (its chat
+  made at the detach): its step and tools shown, `POST /api/chats/:id/run/cancel` stops it ("Ho fermato il lavoro"),
+  also a delegated agent's. For work that takes minutes:
+  an app written file by file, a long search or report.
+- **Commands longer than the hub allows** (2026-11-13): Home Assistant's pipeline stops listening after 15 s
+  (`VoiceCommandSegmenter.timeout_seconds`, not configurable), whatever is being said. A transcription that long
+  (`WYOMING_DICTATION_CUT_S`, 14.8 s; 0 = off) is taken as cut: its turn does not run, the satellite says "Continua,
+  ti ascolto." and listens again (`continue_conversation`), and the next part of that conversation is joined to it —
+  up to 6 parts, each within 60 s — before the agent runs the whole request. Voice recognition uses the last part's
+  voiceprint.
 - Not in scope: streaming `synthesize-*`, wake-word, intent recognition.
 
 Home Assistant setup: Settings → Devices & services → Add integration →
 *Wyoming Protocol* → host = Arkimede's IP, port = 10300 → the STT, TTS (and,
-with a conversation user configured, the conversation agent) entities appear;
+with the conversation on, the conversation agent) entities appear;
 select them in the Assist pipeline. Satellites (Voice PE, Companion app) then
 use Arkimede end-to-end through the hub.
 
@@ -346,3 +368,31 @@ nothing of the client, only satellites and chats.
 - **After a focus** (cleared or expired) the satellite's next unfocused turn
   starts a new conversation even inside the idle window: the Wyoming window is
   emptied and persistence opens a new chat.
+
+## Part 5 — Who is speaking: voice recognition (2026-11-09)
+
+Opt-in (Settings → Voice & audio → Recognised voices; `app_config.voiceIdEnabled`, migration 110). The voice account
+is one many people talk to: the house's people have **voices** (`voice_profiles`), not accounts — each optionally the
+same person as a Home Assistant person and an Arkimede user.
+
+- **Voiceprint**: whisper-service `POST /v1/speaker/embed` (sherpa-onnx, `SPEAKER_MODEL`, default CAM++
+  `3dspeaker_speech_campplus_sv_en_voxceleb_16k`, ~30 MB, downloaded on first use into the models volume, loaded on the
+  first request). It answers `{embedding, model, seconds}`; `embedding` is null under `SPEAKER_MIN_SECONDS` (1 s).
+- **Per turn** (`wyoming.service.ts`, `voice-id/`): on `audio-stop` the voiceprint is computed alongside the
+  transcription (no added wait) and kept under the transcript's text; when the hub hands that text to the
+  conversation, the voice is either learned (a voice being enrolled on that satellite: its next 5 turns, within 10
+  minutes — a sentence of fewer than 3 words, one another voice would claim as surely as this one (or strongly, before
+  it has a sample), or one unlike its own samples once it has 3 is not learned and does not count; the agent asks
+  for another sentence) or recognised (cosine with each voice's centroid: at least 0.5 and 0.08 above the next voice; confidence
+  0.8 from 0.65, else 0.65 — never 0.85, the level of a private message).
+- **What a recognised voice changes**: the agent is told who is speaking (a per-turn block, outside the cached
+  prefix); the user's message is saved before the run with its `speaker` (the memory reads who is talking when asked
+  for context — Recordare's guidance), as the voice's Home Assistant person when linked, else `voice/<id>` with its
+  name; in a personal memory the voice of its holder (linked to the account's own user) is the holder. The satellite
+  turn's presence carries that identity and confidence instead of the guess by elimination. Recordare's `askWho`
+  (nobody identified, something waits for someone) is asked on the room's satellite, naming no one, at most every 30
+  minutes per room.
+- **Privacy**: no audio kept; samples (at most 20 per voice) encrypted at rest; removing a voice forgets it. The admin
+  sees the latest recognitions with their scores, to calibrate the thresholds, and each voice's samples scored against
+  its other samples and the closest other voice: a suspect one (another voice, noise) is removed alone
+  (`GET`/`DELETE /api/admin/voice-id/voices/:id/samples[/:index]`).

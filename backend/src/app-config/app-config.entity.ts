@@ -299,18 +299,13 @@ export class AppConfigEntity {
   wyomingAllowedCidrs: string | null;
 
   /**
-   * Wyoming conversation agent: the user the voice hub acts as when it sends a
-   * text to handle (its tools, MCP servers, memory, cost attribution). Null =
-   * the server exposes STT/TTS only.
+   * Expose the conversation ("handle") program: a satellite's text runs as the account the satellite is assigned to
+   * (Home Assistant settings, haSatelliteUsers / haDefaultVoiceUserId) with that user's voice agent. Off = STT/TTS only.
    */
-  @Column({ type: 'uuid', nullable: true })
-  wyomingHandleUserId: string | null;
+  @Column({ type: 'boolean', default: false })
+  wyomingConversationEnabled: boolean;
 
-  /** Agent of that user whose instructions/tool filter/model apply (null = standard pipeline). */
-  @Column({ type: 'uuid', nullable: true })
-  wyomingHandleAgentId: string | null;
-
-  /** Save the conversation agent's turns as chats of the handle user (default off). */
+  /** Save the conversation agent's turns as chats of the turn's account (default off). */
   @Column({ type: 'boolean', default: false })
   wyomingPersistConversations: boolean;
 
@@ -326,7 +321,7 @@ export class AppConfigEntity {
 
   /**
    * Read who is home and in which room from Home Assistant (over its WebSocket API) and tell the memory (Recordare
-   * presence impulses, for the Wyoming user's memory). Default off.
+   * presence impulses, for the Home Assistant memory, haMemoryUserId). Default off.
    */
   @Column({ type: 'boolean', default: false })
   haPresenceEnabled: boolean;
@@ -337,6 +332,25 @@ export class AppConfigEntity {
    */
   @Column({ type: 'boolean', default: false })
   haBusyEnabled: boolean;
+
+  /**
+   * Remember what the house noticed: a chosen entity's event (a sensor on, the doorbell, a door opened, an alarm) is
+   * sent to the memory as a perception (Recordare `perceive`). Default off.
+   */
+  @Column({ type: 'boolean', default: false })
+  haPerceptionsEnabled: boolean;
+
+  /** The entities whose events are perceptions (ids, `*` allowed); null or empty = none. */
+  @Column({ type: 'jsonb', nullable: true, default: null })
+  haPerceptionEntities: string[] | null;
+
+  /** Recognise who speaks to the satellites by their voice (voice-id/). Default off. */
+  @Column({ type: 'boolean', default: false })
+  voiceIdEnabled: boolean;
+
+  /** Plugins with no valid signature from a trusted key may be installed (specs/PLUGINS.md §11). Default off. */
+  @Column({ type: 'boolean', default: false })
+  pluginsAllowUnsigned: boolean;
 
   /** Speak the memory's initiatives on Home Assistant's voice satellites (the one in the person's room). Default off. */
   @Column({ type: 'boolean', default: false })
@@ -349,6 +363,21 @@ export class AppConfigEntity {
   /** Who may use the `ha_*` tools; null = every user. */
   @Column({ type: 'uuid', array: true, nullable: true })
   haToolsUserIds: string[] | null;
+
+  /**
+   * Whose memory hears Home Assistant (presence, busy, perceptions, the satellites' turns as presence); null = the first
+   * active admin.
+   */
+  @Column({ type: 'uuid', nullable: true })
+  haMemoryUserId: string | null;
+
+  /** The account an unassigned satellite (or a hub that sends none) runs as; null = the first active admin. */
+  @Column({ type: 'uuid', nullable: true })
+  haDefaultVoiceUserId: string | null;
+
+  /** Satellite (`assist_satellite.*` entity id) → the account its turns run as; missing = the default account. */
+  @Column({ type: 'jsonb', nullable: true, default: null })
+  haSatelliteUsers: Record<string, string> | null;
 
   // ── Tool loading configuration ──────────────────────────────────────────────
 

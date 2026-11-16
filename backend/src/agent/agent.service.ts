@@ -50,6 +50,7 @@ import {
 import {MultiAgentService} from '../agents/multi-agent.service';
 import {SchedulingService} from '../scheduling/scheduling.service';
 import {SandboxService} from '../sandbox/sandbox.service';
+import { SequencesService } from '../sequences/sequences.service';
 import {LlmUsage, sumUsageFromMessages} from '../common/llm-usage.util';
 import {runWithLlmCallContext} from '../usage/llm-call-context';
 import {withAgentSpan} from '../observability/genai-tracing';
@@ -99,6 +100,11 @@ export interface StreamResponseOptions {
    * the calls, no extra model call (agent/action-replies.ts). The text of each step is held until the step is known.
    */
   actionReplies?: boolean;
+  /**
+   * Lines of context for this turn only (who is speaking, recognised by voice — wyoming.service.ts): they go with the
+   * other per-request blocks, outside the cached prefix.
+   */
+  turnBlocks?: string[];
 }
 
 export type AgentProgressEvent =
@@ -161,6 +167,7 @@ export class AgentService implements OnModuleInit {
     @Inject(SchedulingService)          private readonly schedulingService:  SchedulingService,
     @Inject(SandboxService)             private readonly sandboxService:     SandboxService,
     @Inject(ToolSourcesRegistry)        private readonly nativeTools:        ToolSourcesRegistry,
+    @Inject(SequencesService)           private readonly sequences:          SequencesService,
     @Optional() @Inject(forwardRef(() => TranscriptionService)) private readonly transcription: TranscriptionService | null = null,
   ) {}
 
@@ -244,7 +251,7 @@ export class AgentService implements OnModuleInit {
     // Words only: the history's tool calls are not replayed (no tool is defined for this turn, and some providers refuse
     // a tool call in the history without one — Anthropic).
     if (opts?.textOnly) history = history.map(({ toolCalls: _omit, ...m }) => m as Message);
-    const { agent, contextBreakdown, effectiveMaxHistoryTokens, model, effectiveHistory, provider, modelName, actionTools } = await this.resolveAgent(userId, projectId, userInput, history, chatId, opts?.toolOverride, opts?.agentPromptOverride, opts?.llmConfigId, opts?.memoryContext, conversationId, opts?.textOnly, opts?.actionReplies);
+    const { agent, contextBreakdown, effectiveMaxHistoryTokens, model, effectiveHistory, provider, modelName, actionTools } = await this.resolveAgent(userId, projectId, userInput, history, chatId, opts?.toolOverride, opts?.agentPromptOverride, opts?.llmConfigId, opts?.memoryContext, conversationId, opts?.textOnly, opts?.actionReplies, opts?.turnBlocks);
     // Action replies: only when the option is on and the turn has action tools (else the stream is untouched).
     const gate = actionTools?.size ? new ActionReplyGate(actionTools) : null;
     const emit = gate ? (chunk: string) => gate.text(chunk) : onChunk;
@@ -530,7 +537,7 @@ export class AgentService implements OnModuleInit {
    */
   async buildToolCatalog(userId: string, projectId?: string): Promise<{
     groups: Array<{
-      source: 'mcp' | 'skill' | 'integration' | 'flow' | 'agent' | 'custom';
+      source: 'mcp' | 'skill' | 'integration' | 'flow' | 'agent' | 'custom' | 'builtin';
       label: string;
       wildcard: string | null;
       tools: Array<{ name: string; description: string }>;
@@ -567,7 +574,7 @@ export class AgentService implements OnModuleInit {
       label: s.name,
     }));
 
-    type Group = { source: 'mcp' | 'skill' | 'integration' | 'flow' | 'agent' | 'custom'; label: string; wildcard: string | null; tools: Array<{ name: string; description: string }> };
+    type Group = { source: 'mcp' | 'skill' | 'integration' | 'flow' | 'agent' | 'custom' | 'builtin'; label: string; wildcard: string | null; tools: Array<{ name: string; description: string }> };
     const groups: Group[] = [];
     const byWildcard = new Map<string, Group>();
 
@@ -603,6 +610,14 @@ export class AgentService implements OnModuleInit {
     if (flowTools.length) groups.push({ source: 'flow', label: 'Flows', wildcard: null, tools: flowTools.map(toEntry) });
     if (agentTools.length) groups.push({ source: 'agent', label: 'Agents', wildcard: null, tools: agentTools.map(toEntry) });
     if (customTools.length) groups.push({ source: 'custom', label: 'Custom tools', wildcard: null, tools: customTools.map(toEntry) });
+
+    // Gated built-ins an agent's filter can name (an agent run as a tool or in a team gets them only then): the
+    // sandbox, when it is on for this user. The always-present ones (date, scheduling) need no choosing.
+    const user = await this.userRepo.findOne({ where: { id: userId }, select: { id: true, role: true } });
+    if (await this.sandboxService.isEnabledFor(userId, projectId, user?.role === 'admin')) {
+      const [sandbox] = this.sandboxService.buildSandboxTools(userId, projectId, undefined);
+      groups.push({ source: 'builtin', label: 'Built-in', wildcard: null, tools: [toEntry(sandbox)] });
+    }
 
     return { groups };
   }
@@ -1034,6 +1049,8 @@ export class AgentService implements OnModuleInit {
     textOnly?: boolean,
     /** StreamResponseOptions.actionReplies: the reply instructions and the turn's action tools. */
     actionReplies?: boolean,
+    /** StreamResponseOptions.turnBlocks: this turn's own context lines. */
+    turnBlocks?: string[],
   ): Promise<{ agent: any; contextBreakdown: ContextBreakdown; effectiveMaxHistoryTokens: number; model: any; effectiveHistory: Message[]; provider: string; modelName: string | null; actionTools: Set<string> }> {
     // Per-agent model override: resolved once (cached per config id), BEFORE the
     // parallel loads so the bundle is not built twice concurrently.
@@ -1098,6 +1115,7 @@ export class AgentService implements OnModuleInit {
       ? this.agentMemory.forTurn({
           userId, user, conversationId, chatId, query: userInput,
           querySignal: summary?.trim() ? summary.trim().slice(-400) : undefined,
+          lookups: !textOnly && toolOverride?.mode !== 'none',
         })
       : Promise.resolve(null);
 
@@ -1258,7 +1276,7 @@ export class AgentService implements OnModuleInit {
 
     // Extra non-cached blocks (change per request): date/time + summary + feedback + what came to mind (memory).
     // Native integrations' live context (who is home…) changes per request too.
-    const extraBlocks = [nowTextBlock, textOnly ? null : integrationContext, summaryTextBlock, feedbackTextBlock, ...(memory?.turnBlocks ?? [])]
+    const extraBlocks = [nowTextBlock, textOnly ? null : integrationContext, ...(turnBlocks ?? []), summaryTextBlock, feedbackTextBlock, ...(memory?.turnBlocks ?? [])]
       .filter((b): b is string => !!b);
 
     // ── Prompt caching: build the messageModifier based on the provider ───────
@@ -1297,13 +1315,20 @@ export class AgentService implements OnModuleInit {
 
     // Always-available built-in tools: automation scheduling (Auto-Scheduling),
     // with a confirmation flow (schedule_task prepares → confirm_scheduled_task activates).
-    // Origin chatId: for one-shots it becomes the delivery chat of the result.
-    const schedulingTools = userId ? this.schedulingService.buildSchedulingTools(userId, projectId, chatId) : [];
+    // Origin chatId: for one-shots it becomes the delivery chat of the result. An external entry point (a voice turn)
+    // has no chatId but its conversation may be a chat of the user: that one (createTask keeps only a chat of theirs).
+    const schedulingTools = userId ? this.schedulingService.buildSchedulingTools(userId, projectId, chatId ?? conversationId) : [];
 
     // Sandbox (arbitrary code/shell): gated per-request built-in. When enabled
     // for the user/project/team it is always present (bypasses the RAG); otherwise absent.
     const sandboxTools = userId && await this.sandboxService.isEnabledFor(userId, projectId, (user as any)?.role === 'admin')
       ? this.sandboxService.buildSandboxTools(userId, projectId, chatId)
+      : [];
+
+    // Sequences: timed calls of this turn's own tools, run without the model (specs/RUN_SEQUENCE.md). Bound to the
+    // tools as they run (without the action-reply wrapper); absent when none of them may run in a sequence.
+    const sequenceTools = userId && !textOnly
+      ? this.sequences.buildTools(userId, chatId ?? conversationId ?? null, [...this.builtInTools, ...optimizedExtraTools])
       : [];
 
     // The memory tools first (the charter says to search memory before other
@@ -1317,6 +1342,7 @@ export class AgentService implements OnModuleInit {
         ...turnExtraTools,
         ...schedulingTools,
         ...sandboxTools,
+        ...sequenceTools,
         ...(deferredMetaTool ? [deferredMetaTool] : []),
       ].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)),
     ];

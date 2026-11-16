@@ -187,13 +187,9 @@ class UpdateWyomingConfigDto {
   @IsOptional() @IsString()
   wyomingAllowedCidrs?: string | null;
 
-  /** User the voice hub acts as for conversation (null = STT/TTS only). */
-  @IsOptional() @IsUUID()
-  wyomingHandleUserId?: string | null;
-
-  /** Agent of that user to run (null = standard pipeline). */
-  @IsOptional() @IsUUID()
-  wyomingHandleAgentId?: string | null;
+  /** Expose the conversation program (each satellite's account: Home Assistant settings). Omitted = off. */
+  @IsOptional() @IsBoolean()
+  wyomingConversationEnabled?: boolean;
 
   /** Save the conversation turns as chats of the handle user (omitted = unchanged). */
   @IsOptional() @IsBoolean()
@@ -621,29 +617,14 @@ export class AppConfigController {
   @Patch('wyoming')
   @ApiOperation({ summary: 'Update the Wyoming voice server configuration' })
   async updateWyomingConfig(@Body() dto: UpdateWyomingConfigDto, @CurrentUser() user: any) {
-    const handleUserId  = dto.wyomingHandleUserId  ?? null;
-    const handleAgentId = handleUserId ? (dto.wyomingHandleAgentId ?? null) : null;
-    try {
-      await this.wyoming.validateHandleConfig(handleUserId, handleAgentId);
-    } catch (err: any) {
-      throw new BadRequestException(err?.message ?? 'wyoming.handleUserInvalid');
-    }
     const cfg = await this.service.updateWyomingConfig({
       wyomingEnabled:       dto.wyomingEnabled,
       wyomingAllowedCidrs:  dto.wyomingAllowedCidrs ?? null,
-      wyomingHandleUserId:  handleUserId,
-      wyomingHandleAgentId: handleAgentId,
+      wyomingConversationEnabled: dto.wyomingConversationEnabled ?? false,
       wyomingPersistConversations: dto.wyomingPersistConversations,
     }, user?.id);
     await this.wyoming.applyConfig();
     return { ...cfg, ...this.wyoming.getStatus() };
   }
 
-  /** GET /api/admin/config/wyoming/agents?userId= — agents a user can run as conversation agent */
-  @Get('wyoming/agents')
-  @ApiOperation({ summary: 'Agents available to a user for the Wyoming conversation program' })
-  async listWyomingAgents(@Query('userId') userId: string) {
-    if (!userId) return [];
-    return this.wyoming.listHandleAgents(userId);
-  }
 }

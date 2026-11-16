@@ -33,6 +33,10 @@ export interface McpServer {
   /** Visibility scope: personal (owner only) | team | org (everyone). */
   scope: 'personal' | 'team' | 'org';
   teamId: string | null;
+  /** Uses one person's account or data: never shared (specs/EXTENSION_AUDIENCE.md). */
+  personal?: boolean;
+  /** The plugin that contributed it: managed with the plugin, not by hand (specs/PLUGINS.md §5). */
+  pluginId?: string | null;
   secrets: { id: string; serverId: string; keyName: string }[];
   createdAt: string;
   updatedAt: string;
@@ -50,6 +54,7 @@ export interface CreateMcpServerPayload {
   loadOnFirst?: boolean;
   scope?: 'personal' | 'team' | 'org';
   teamId?: string | null;
+  personal?: boolean;
   secrets?: Record<string, string>;
 }
 

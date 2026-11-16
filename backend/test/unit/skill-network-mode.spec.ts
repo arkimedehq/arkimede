@@ -42,3 +42,12 @@ describe('skillNetworkParams — admin override', () => {
     expect(skillNetworkParams({ networkMode: 'internet' })).toEqual({ network: 'internet' });
   });
 });
+
+describe('skillNetworkParams — a plugin\'s skill', () => {
+  it('goes through the proxy (the hosts approved for its plugin), unless the admin chose otherwise', () => {
+    expect(skillNetworkParams({ pluginId: 'p1' })).toEqual({ network: 'internet' });
+    expect(skillNetworkParams({ pluginId: 'p1', networkMode: 'internal' })).toEqual({});
+    expect(skillNetworkParams({ pluginId: 'p1', networkMode: 'open' })).toEqual({ network: 'open' });
+    expect(skillNetworkParams({ pluginId: null })).toEqual({});
+  });
+});

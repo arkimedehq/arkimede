@@ -22,9 +22,9 @@
  *     with no push (it already rang on the phone);
  *   - chat: an assistant message in the user's dedicated chat (externalSource 'recordare'), a notification and the
  *     Socket.IO push, as scheduled automations do;
- *   - voice: on the voice point in the person's room — or in the room whose presence brought it — when a voice channel
- *     is registered (`setVoice`: Home Assistant, home-assistant.service.ts); the message is written in the dedicated
- *     chat and the satellite bound to it, so the spoken reply lands there.
+ *   - voice: through the one voice channel (VoiceDeliveryService) — in the room whose presence brought it, else where the
+ *     person it is for is, else where the user (or, for an account with no person, anyone) is confirmed present; the
+ *     message is written in the dedicated chat and the satellite bound to it, so the spoken reply lands there.
  * With others in the room a presence answer carries only an opening ("…, I have something for you"): it is said on the
  * room's voice point, and the initiative waits for the person's "yes" (their next turn).
  * Nothing reaching the person now: nothing reported, the initiative comes back (feed, presence). "Already handed over" is durable:
@@ -32,12 +32,15 @@
  * conversation, or around the same time with shared words) is not delivered twice: reported `done`. Only for users
  * with the memory on (episodicMemoryEnabled). Nothing here runs on a chat's request path.
  */
+import { randomUUID } from 'node:crypto';
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import {
   addressesOn, type Delivered, InitiativeInbox, type Initiative, type InitiativeOutcome, type PresenceImpulse, type RecordareClient,
   type WebhookEvent,
+  type Perception,
+  type PerceptionResult,
 } from '@arkimedehq/recordare-client';
 import { APP_NAME } from '../config/app.config';
 import { Chat } from '../chats/chats.entity';
@@ -45,8 +48,10 @@ import { Message } from '../messages/messages.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
 import { SkillsService } from '../skills/skills.service';
+import { VoiceDeliveryService } from '../notifications/voice-delivery.service';
 import { GUEST_IDLE_MS } from '../guests/guests.constants';
 import { onRecordareSettingsChange, recordareClient } from './recordare.config';
+import { buildIngestBody } from './recordare-ingest.mapper';
 
 const POLL_MS = Number(process.env.RECORDARE_INITIATIVES_POLL_MS) || 15 * 60_000;
 const FIRST_POLL_MS = 30_000;
@@ -55,6 +60,9 @@ const FIRST_POLL_MS = 30_000;
  * learns from), by the channel it was asked on: a satellite listens for a reply at once; a message or the chat are read
  * later. A reminder said is not checked: silence after it is normal.
  */
+/** "Who am I talking with?" is asked at most this often in a room. */
+export const ASK_WHO_EVERY_MS = 30 * 60_000;
+
 export const ANSWER_WINDOW_MS: Record<string, number> = { voice: 10 * 60_000, messaging: 6 * 3_600_000, chat: 12 * 3_600_000 };
 /** A presence impulse at most this often per user (tabs, reconnects). */
 const PRESENCE_EVERY_MS = 10 * 60_000;
@@ -63,15 +71,6 @@ const SAME_TIME_MS = 2 * 3_600_000;
 export const CHAT_SOURCE = 'recordare';
 export const CHAT_KEY = 'initiatives';
 export const EVENT_TYPE = 'recordare_initiative';
-
-/** A voice channel (Home Assistant): says a text on a voice point and binds it to a chat, so the reply lands there. */
-export interface VoiceChannel {
-  /**
-   * Says `text` on the voice point in `areaId`, else in the room `person` (a `homeassistant` address, `person.x`) is
-   * in, and binds that point to `chatId` for the reply. The point used, or null when none reaches them now.
-   */
-  say(userId: string, text: string, where: { areaId?: string; person?: string }, chatId: string): Promise<string | null>;
-}
 
 /** A push channel (Home Assistant's companion app): a notification on a person's phone. */
 export interface PushChannel {
@@ -102,6 +101,8 @@ export function names(text: string, person: { name: string; addresses?: Array<{ 
 
 @Injectable()
 export class RecordareInitiativesService implements OnModuleInit, OnModuleDestroy {
+  /** When "who am I talking with?" was last asked, per room. */
+  private readonly askedWho = new Map<string, number>();
   private readonly logger = new Logger(RecordareInitiativesService.name);
   private timer: NodeJS.Timeout | null = null;
   private stopListening: (() => void) | null = null;
@@ -110,7 +111,6 @@ export class RecordareInitiativesService implements OnModuleInit, OnModuleDestro
   /** The feed cursor per user, kept across inboxes (a new client after a settings change reads on from there). */
   private readonly cursors = new Map<string, number>();
   private current: { client: RecordareClient; inbox: InitiativeInbox } | null = null;
-  private voice: VoiceChannel | null = null;
   private pushChannel: PushChannel | null = null;
   private busySignal: BusySignal | null = null;
   /** The room a presence impulse is about, while Recordare answers it (what it gives is said there). */
@@ -121,6 +121,7 @@ export class RecordareInitiativesService implements OnModuleInit, OnModuleDestro
     private readonly notifications: NotificationsService,
     private readonly gateway: NotificationsGateway,
     private readonly skills: SkillsService,
+    private readonly voice: VoiceDeliveryService,
   ) {}
 
   /** The client (null when Recordare is off); tests set one of their own. */
@@ -191,6 +192,73 @@ export class RecordareInitiativesService implements OnModuleInit, OnModuleDestro
     }
   }
 
+  /**
+   * Something the agent's senses noticed, for the memory of `userId` (Recordare `perceive`): nothing for a user with the
+   * memory off or without Recordare. Never throws: a failure is logged, the house goes on.
+   */
+  async perceive(userId: string, perception: Perception): Promise<PerceptionResult | null> {
+    const client = this.client();
+    if (!client || !(await this.enabled(userId))) return null;
+    try {
+      return await client.perceive(userId, perception);
+    } catch (err) {
+      this.logger.warn(`Recordare perception failed (user ${userId}, ${perception.sensor} ${perception.place ?? ''}): ${(err as Error).message}`);
+      return null;
+    }
+  }
+
+  /**
+   * A turn `userId` spoke on a satellite that is not theirs (recognised by their voice), into their own memory too —
+   * only with their "my turns on shared satellites" switch on (users.sharedTurnsInMyMemory) and their memory on. Memory
+   * only: the turn ran as the satellite's account. Never throws.
+   */
+  async sharedTurn(userId: string, turn: { conversation: string; text: string; answer: string }, now = new Date()): Promise<boolean> {
+    const client = this.client();
+    if (!client) return false;
+    const [u] = await this.ds.query(
+      `SELECT "name" FROM "users" WHERE "id" = $1 AND "episodicMemoryEnabled" = true AND "sharedTurnsInMyMemory" = true`, [userId]) as Array<{ name: string | null }>;
+    if (!u) return false;
+    const body = buildIngestBody(
+      { id: turn.conversation, title: null, userId, externalSource: 'wyoming' },
+      [
+        { id: randomUUID(), role: 'user', content: turn.text, toolCalls: null, authorId: userId, createdAt: now },
+        ...(turn.answer.trim() ? [{ id: randomUUID(), role: 'assistant' as const, content: turn.answer, toolCalls: null, authorId: null, createdAt: new Date(now.getTime() + 1) }] : []),
+      ],
+      new Map(u.name ? [[userId, u.name]] : []),
+      APP_NAME,
+    );
+    try {
+      await client.ingest(userId, body);
+      return true;
+    } catch (err) {
+      this.logger.warn(`Recordare shared turn failed (user ${userId}): ${(err as Error).message}`);
+      return false;
+    }
+  }
+
+  /** What the memory and the voice can do now (the plugins' services ask before they promise). */
+  capabilities(): { memory: boolean; voice: boolean } {
+    return { memory: !!this.client(), voice: this.voice.available() };
+  }
+
+  /**
+   * A presence at a named place (a plugin's camera): told to the memory like Home Assistant's, and what the memory
+   * answers is said in that room when the place is one with a voice point.
+   */
+  async placePresence(userId: string, impulse: PresenceImpulse): Promise<void> {
+    const areaId = impulse.place ? this.voice.placeArea(impulse.place) : null;
+    await this.roomPresence(userId, impulse, areaId ?? undefined);
+  }
+
+  /** Says a text on the voice point of a named place (or of the room a person is in); the point used, or null. */
+  async announce(userId: string, text: string, where: { place?: string; person?: string }): Promise<string | null> {
+    if (!this.voice.available()) return null;
+    const areaId = where.place ? this.voice.placeArea(where.place) : null;
+    if (where.place && !areaId) return null;
+    if (!areaId && !where.person) return null;
+    return this.voice.deliver(userId, text, await this.dedicatedChat(userId), areaId ? { areaId } : { person: where.person });
+  }
+
   /** Registers (or removes) the push channel (messaging when no skill reaches the person). */
   setPush(push: PushChannel | null): void {
     this.pushChannel = push;
@@ -199,11 +267,6 @@ export class RecordareInitiativesService implements OnModuleInit, OnModuleDestro
   /** Registers (or removes) who tells whether a person is busy. */
   setBusy(signal: BusySignal | null): void {
     this.busySignal = signal;
-  }
-
-  /** Registers (or removes) the voice channel. */
-  setVoice(voice: VoiceChannel | null): void {
-    this.voice = voice;
   }
 
   /**
@@ -215,7 +278,9 @@ export class RecordareInitiativesService implements OnModuleInit, OnModuleDestro
     if (!inbox || !(await this.enabled(userId))) return;
     if (areaId) this.places.set(userId, areaId);
     try {
-      await inbox.presence(userId, impulse);
+      const res = await inbox.presence(userId, impulse);
+      // Nobody identified and something waits for someone: ask who is there, naming no one (Recordare's askWho).
+      if (res?.askWho && areaId && this.voice.available()) await this.askWho(userId, areaId);
     } catch (err) {
       this.logger.warn(`Recordare presence failed (user ${userId}, ${impulse.channel} ${impulse.place ?? ''}): ${(err as Error).message}`);
     } finally {
@@ -333,26 +398,39 @@ export class RecordareInitiativesService implements OnModuleInit, OnModuleDestro
     return u?.haPerson ?? null;
   }
 
-  /** By voice, where the person is (or in the room whose presence brought it): the message is in the chat too. */
+  /**
+   * By voice, in the room whose presence brought it, else where the person it is for is, else where the user is (an
+   * account with no person: anyone) — on confirmed presence only. The message is in the chat too.
+   */
   private async sayByVoice(userId: string, i: Initiative): Promise<boolean> {
-    if (!this.voice) return false;
-    const where = { areaId: this.places.get(userId), person: i.for ? addressesOn(i, 'homeassistant')[0] : undefined };
-    if (!where.areaId && !where.person) return false;
+    if (!this.voice.available()) return false;
+    const areaId = this.places.get(userId);
+    const person = i.for ? addressesOn(i, 'homeassistant')[0] : undefined;
+    // For someone with no Home Assistant address: nowhere to find them by voice.
+    if (!areaId && i.for && !person) return false;
     const chatId = await this.dedicatedChat(userId);
-    const point = await this.voice.say(userId, i.text.trim(), where, chatId).catch((err: Error) => {
-      this.logger.warn(`Recordare initiative ${i.id} not said by voice: ${err.message}`);
-      return null;
-    });
+    const point = await this.voice.deliver(userId, i.text.trim(), chatId, areaId ? { areaId } : person ? { person } : {});
     if (!point) return false;
     await this.record(userId, i, chatId, false, 'voice');
     return true;
   }
 
+  /** Asks, on the voice point of that room, who is there — without a name (a name would tell that something waits). */
+  private async askWho(userId: string, areaId: string, now = Date.now()): Promise<void> {
+    // At most once in a while per room: the presence is renewed every few minutes, the question must not be.
+    if (now - (this.askedWho.get(areaId) ?? 0) < ASK_WHO_EVERY_MS) return;
+    this.askedWho.set(areaId, now);
+    const [u] = await this.ds.query(`SELECT "language" FROM "users" WHERE "id" = $1`, [userId]).catch(() => []);
+    const text = String(u?.language ?? '').toLowerCase().startsWith('it') ? 'Scusa, con chi sto parlando?' : 'Sorry, who am I talking with?';
+    const point = await this.voice.deliver(userId, text, await this.dedicatedChat(userId), { areaId });
+    if (point) this.logger.log(`Recordare askWho said on ${point}`);
+  }
+
   /** Others are in the room: only the opening, there; the initiative waits for the person's "yes". */
   private async sayOpening(userId: string, i: Initiative, opening: string): Promise<void> {
     const areaId = this.places.get(userId);
-    if (!this.voice || !areaId) return;
-    await this.voice.say(userId, opening, { areaId }, await this.dedicatedChat(userId));
+    if (!areaId) return;
+    await this.voice.deliver(userId, opening, await this.dedicatedChat(userId), { areaId });
   }
 
   /** Writes the delivered initiative in a chat of the user, with its notification (the durable "delivered" record). */

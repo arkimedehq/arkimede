@@ -39,6 +39,8 @@ export interface UpsertFlowData {
   enabled?: boolean;
   scope?: FlowScope;
   teamId?: string | null;
+  /** The plugin that contributes it (set only by PluginsService; never from a request). */
+  pluginId?: string | null;
 }
 
 @Injectable()
@@ -94,6 +96,7 @@ export class FlowsService {
       enabled: data.enabled ?? true,
       scope: data.scope ?? 'personal',
       teamId: data.scope === 'team' ? (data.teamId ?? null) : null,
+      pluginId: data.pluginId ?? null,
     });
     this.ensureWebhookToken(flow);
     const saved = await this.flowRepo.save(flow);
@@ -143,6 +146,39 @@ export class FlowsService {
   /** Runs a flow started by Home Assistant (home-assistant/ha-triggers.service.ts), as its owner. */
   async runByHomeAssistant(flow: Flow, input: Record<string, unknown>): Promise<FlowRun> {
     return this.engine.run(flow, flow.userId, input, { triggeredBy: 'home-assistant' });
+  }
+
+  /** The enabled flows the plugin event `type` (`<plugin>/<type>`) can start (trigger type 'plugin-event'). */
+  async pluginEventFlows(type: string): Promise<Flow[]> {
+    return this.flowRepo.createQueryBuilder('f')
+      .where("f.trigger ->> 'type' = 'plugin-event'")
+      .andWhere("f.trigger -> 'plugin' ->> 'event' = :type", { type })
+      .andWhere('f.enabled = true')
+      .getMany();
+  }
+
+  /** Runs a flow started by a plugin event (plugins/plugin-events.service.ts), as its owner. */
+  async runByPluginEvent(flow: Flow, input: Record<string, unknown>): Promise<FlowRun> {
+    return this.engine.run(flow, flow.userId, input, { triggeredBy: 'plugin-event' });
+  }
+
+  /** A copy of an accessible flow, owned by `userId`, personal and switched off — how a plugin's flow is changed. */
+  async duplicate(id: string, userId: string): Promise<Flow> {
+    const flow = await this.findOneAccessible(id, userId);
+    const trigger = { ...flow.trigger };
+    delete trigger.webhookToken;
+    delete trigger.firedAt;
+    return this.create(userId, {
+      name: `${flow.name} (copy)`.slice(0, 120),
+      description: flow.description,
+      definition: flow.definition,
+      trigger,
+      inputSchema: flow.inputSchema,
+      exposeAsTool: false,
+      loadOnFirst: flow.loadOnFirst,
+      enabled: false,
+      scope: 'personal',
+    });
   }
 
   /** Runs a flow from the webhook token (public endpoint, no JWT). */

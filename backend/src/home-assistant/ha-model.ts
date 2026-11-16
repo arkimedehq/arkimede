@@ -132,6 +132,13 @@ export class HaModel {
       .flatMap((d) => (d && this.deviceNames.get(d) ? [this.deviceNames.get(d)!] : []));
   }
 
+  /** Whether the entity's device also has a `camera.*` entity. */
+  onCameraDevice(entityId: string): boolean {
+    if (entityId.startsWith('camera.')) return true;
+    const device = this.entityDevice.get(entityId);
+    return !!device && (this.deviceEntities.get(device) ?? []).some((e) => e.startsWith('camera.'));
+  }
+
   /** The area of an entity: its own, else its device's; null when none. */
   areaIdOf(entityId: string): string | null {
     return this.entityArea.get(entityId) ?? null;

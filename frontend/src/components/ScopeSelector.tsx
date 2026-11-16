@@ -91,3 +91,39 @@ export function ScopeBadge({ scope }: { scope: ResourceScope }) {
   if (scope === 'team') return <span className="text-xs px-2 py-0.5 rounded-full bg-amber-900/40 text-amber-300">{t('scope.team')}</span>;
   return <span className="text-xs px-2 py-0.5 rounded-full bg-gray-800 text-gray-400">{t('scope.personal')}</span>;
 }
+
+/**
+ * Scope of a resource created by hand (a tool, an MCP server; specs/EXTENSION_AUDIENCE.md): "Personal" marks one that
+ * uses one person's account or data, never shared; otherwise only an admin shares it with a team or the organization.
+ */
+export function ShareableScope({
+  personal, scope, teamId, onPersonal, onScope, onTeam, isAdmin, disabled,
+}: {
+  personal: boolean;
+  scope: ResourceScope;
+  teamId: string | null;
+  onPersonal: (v: boolean) => void;
+  onScope: (s: ResourceScope) => void;
+  onTeam: (id: string | null) => void;
+  isAdmin: boolean;
+  disabled?: boolean;
+}) {
+  const { t } = useTranslation('common');
+  return (
+    <div className="space-y-2">
+      <label className="flex items-start gap-2 text-sm text-gray-300">
+        <input
+          type="checkbox" className="mt-0.5" checked={personal} disabled={disabled}
+          onChange={(e) => { onPersonal(e.target.checked); if (e.target.checked) { onScope('personal'); onTeam(null); } }}
+        />
+        <span>
+          {t('scope.personalOption')}
+          <span className="block text-xs text-gray-500">{t('scope.personalOptionHint')}</span>
+        </span>
+      </label>
+      {!personal && (isAdmin
+        ? <ScopeSelector scope={scope} teamId={teamId} onScope={onScope} onTeam={onTeam} disabled={disabled} allowOrg />
+        : <p className="text-xs text-gray-500">{t('scope.adminShares')}</p>)}
+    </div>
+  );
+}

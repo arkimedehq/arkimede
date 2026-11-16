@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Users, Plus, Search, Shield, ShieldOff, KeyRound, Key, Trash2, Ban, CheckCircle2, X, Loader2, ArrowLeft, Copy, Check,
+  Users, Plus, Search, Shield, ShieldOff, KeyRound, Key, Brain, Trash2, Ban, CheckCircle2, X, Loader2, ArrowLeft, Copy, Check,
 } from 'lucide-react';
 import { apiKeysApi, type ApiKeyRow } from '../api/apiKeys';
 import ApiKeyPersistToggle from '../components/ApiKeyPersistToggle';
@@ -32,6 +32,7 @@ export function UsersSection() {
   const [editUser, setEditUser]     = useState<AdminUser | null>(null);
   const [resetUser, setResetUser]   = useState<AdminUser | null>(null);
   const [apiKeyUser, setApiKeyUser] = useState<AdminUser | null>(null);
+  const [memoryUser, setMemoryUser] = useState<AdminUser | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   const pageSize = 25;
@@ -72,6 +73,9 @@ export function UsersSection() {
   }
   if (editUser) {
     return <EditUserEditor user={editUser} onClose={() => setEditUser(null)} onSaved={() => { setEditUser(null); invalidate(); }} />;
+  }
+  if (memoryUser) {
+    return <MemoryEditor user={memoryUser} onClose={() => setMemoryUser(null)} />;
   }
   if (apiKeyUser) {
     return <ApiKeyEditor user={apiKeyUser} onClose={() => setApiKeyUser(null)} />;
@@ -177,6 +181,9 @@ export function UsersSection() {
                       </button>
                       <button title={t('actions.apiKeys')} onClick={() => setApiKeyUser(u)} className="p-1.5 text-gray-400 hover:text-gray-200 rounded transition-colors">
                         <Key size={15} />
+                      </button>
+                      <button title={t('actions.memory')} onClick={() => setMemoryUser(u)} className="p-1.5 text-gray-400 hover:text-gray-200 rounded transition-colors">
+                        <Brain size={15} />
                       </button>
                       <button
                         title={t('actions.delete')}
@@ -359,6 +366,63 @@ function ApiKeyEditor({ user, onClose }: { user: AdminUser; onClose: () => void 
         </select>
       </Field>
       <ModalActions onClose={onClose} onConfirm={() => createM.mutate()} pending={createM.isPending} disabled={!name.trim()} confirmLabel={t('apiKeys.create')} />
+    </InlineEditor>
+  );
+}
+
+/** A user's memory and voice agent, set by the admin (specs/VOICE_SATELLITES.md §3.6): for a service account nobody signs in as. */
+function MemoryEditor({ user, onClose }: { user: AdminUser; onClose: () => void }) {
+  const { t } = useTranslation('users');
+  const qc = useQueryClient();
+  const [err, setErr] = useState<string | null>(null);
+  const q = useQuery({ queryKey: ['admin-user-memory', user.id], queryFn: () => adminUsersApi.memory(user.id) });
+  const m = useMutation({
+    mutationFn: (patch: Parameters<typeof adminUsersApi.setMemory>[1]) => adminUsersApi.setMemory(user.id, patch),
+    onSuccess: (res) => { setErr(null); qc.setQueryData(['admin-user-memory', user.id], res); },
+    onError: (e: any) => setErr(e?.response?.data?.message ?? t('errors.operationFailed')),
+  });
+  const d = q.data;
+  const toggle = (key: 'autoMemoryEnabled' | 'sharedMemoryEnabled' | 'episodicMemoryEnabled', show = true) => show && d && (
+    <label className="flex items-center justify-between py-2 border-t border-gray-800">
+      <span className="pr-4">
+        <span className="block text-sm text-gray-200">{t(`memory.${key}`)}</span>
+        <span className="block text-xs text-gray-500">{t(`memory.${key}Hint`)}</span>
+      </span>
+      <input type="checkbox" checked={!!d[key]} disabled={m.isPending} onChange={(e) => m.mutate({ [key]: e.target.checked })} />
+    </label>
+  );
+  return (
+    <InlineEditor backLabel={t('header.title')} title={t('memory.title', { name: user.name })} onBack={onClose}>
+      {err && <Banner text={err} onClose={() => setErr(null)} />}
+      {!d ? <Loader2 className="animate-spin text-gray-500" size={16} /> : (
+        <div>
+          {toggle('autoMemoryEnabled')}
+          {toggle('sharedMemoryEnabled')}
+          {toggle('episodicMemoryEnabled', !!d.episodicMemoryAvailable)}
+          {d.episodicMemoryAvailable && d.episodicMemoryEnabled && (
+            <Field label={t('memory.mode')}>
+              <select className="input-field w-full" value={d.episodicMemoryMode ?? ''} disabled={m.isPending}
+                onChange={(e) => e.target.value && m.mutate({ episodicMemoryMode: e.target.value as 'personal' | 'entity' })}>
+                {!d.episodicMemoryMode && <option value="">—</option>}
+                <option value="personal">{t('memory.modePersonal')}</option>
+                <option value="entity">{t('memory.modeEntity')}</option>
+              </select>
+              <p className="text-xs text-gray-500 mt-1">{t('memory.modeHint')}</p>
+            </Field>
+          )}
+          <div className="border-t border-gray-800 pt-3 mt-1">
+            <Field label={t('memory.voiceAgent')}>
+              <select className="input-field w-full" value={d.voiceAgentId ?? ''} disabled={m.isPending}
+                onChange={(e) => m.mutate({ voiceAgentId: e.target.value || null })}>
+                <option value="">{t('memory.voiceStandard')}</option>
+                {d.voiceAgents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+              <p className="text-xs text-gray-500 mt-1">{t('memory.voiceAgentHint')}</p>
+            </Field>
+          </div>
+        </div>
+      )}
+      <div className="flex justify-end mt-4"><button onClick={onClose} className="btn-primary px-4 py-2 text-sm">{t('modal.close')}</button></div>
     </InlineEditor>
   );
 }

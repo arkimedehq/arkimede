@@ -98,6 +98,13 @@ export class CustomTool {
   @Column({ type: 'uuid', nullable: true, default: null })
   teamId: string | null;
 
+  /**
+   * Personal: it uses one person's account or data (the "Personal" option, specs/EXTENSION_AUDIENCE.md) — it stays
+   * personal, never shared with a team or the organization.
+   */
+  @Column({ type: 'boolean', default: false })
+  personal: boolean;
+
   /** Encrypted secrets associated with the tool (API keys, tokens, etc.) */
   @OneToMany(() => ToolSecret, (s) => s.tool, { cascade: true, eager: false })
   secrets: ToolSecret[];

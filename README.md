@@ -178,7 +178,7 @@ Beyond chat, four integrated systems — and they interconnect (flows are agent 
 
 More capabilities: no-code **custom tools** (HTTP/SQL/RAG/prompt), **scope-aware RAG** (universal/project/personal), **DataSources**, **executable Skills** with a per-skill network tier, an arbitrary-code **Sandbox** (`run_in_sandbox`), **SSE streaming** with automatic file detection, an **OpenAI-compatible API** to drive agents from external clients, long-lived **API keys** for service integrations, voice input (Whisper), i18n (EN/IT), and an Electron **bridge** for local MCP processes.
 
-👉 Full feature reference and architecture: **[PROJECT.md](docs/PROJECT.md)**. Building Skills: **[SKILLS.md](docs/SKILLS.md)**.
+👉 Full feature reference and architecture: **[PROJECT.md](docs/PROJECT.md)**. Building Skills: **[SKILLS.md](docs/SKILLS.md)**. Building Plugins: **[PLUGINS.md](docs/PLUGINS.md)**.
 
 ## Terminal client (CLI)
 
@@ -257,6 +257,7 @@ Arkimede uses a **capability model**: every power (network, filesystem, SQL oper
 | [GUIDE.md](docs/GUIDE.md) | Usage & development guide (setup, overlays, LAN, dev notes) |
 | [CLI.md](docs/CLI.md) | Terminal client (TUI, plain REPL, settings panel) |
 | [SKILLS.md](docs/SKILLS.md) | How to build Skills (schema, templates, conventions) |
+| [PLUGINS.md](docs/PLUGINS.md) | How to build Plugins (manifest, routes, pages, events, services, signatures) |
 | [MEMORY.md](docs/MEMORY.md) | Agentic memory (A-MEM) design |
 | [BACKUP.md](docs/BACKUP.md) | Scheduled backups (NAS / network share), point-in-time recovery, restore |
 | [LICENSING.md](docs/LICENSING.md) | License (AGPL-3.0) & contribution terms |

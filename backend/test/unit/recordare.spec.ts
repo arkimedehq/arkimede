@@ -82,6 +82,7 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
           tool('search_episodes', { query: { type: 'string' }, mode: { type: 'string', enum: ['search', 'list', 'latest'] } }),
           tool('search_memory', { query: { type: 'string' } }), tool('resolve_period', { expression: { type: 'string' } }),
           tool('log_episode'), tool('remember'), tool('correct_episode'), tool('forget_episode'),
+          tool('learn_procedure'), tool('report_procedure_run', { procedure_id: { type: 'string' }, outcome: { type: 'string', enum: ['done', 'failed', 'corrected'] } }),
         ] } });
       }
       if (s.body?.method === 'tools/call') return send(200, { jsonrpc: '2.0', id: s.body.id, result: { content: [{ type: 'text', text: JSON.stringify({ episodes: [], notes: ['nothing to show here'] }) }] } });
@@ -674,8 +675,8 @@ describe('RecordareMcpService', () => {
     const svc = new RecordareMcpService(outbox);
     const tools = await svc.buildTools('u1', 'chat-42');
     expect(tools.map((t) => t.name).sort()).toEqual([
-      'recordare_correct_episode', 'recordare_forget_episode', 'recordare_remember',
-      'recordare_resolve_period', 'recordare_search_episodes', 'recordare_search_memory',
+      'recordare_correct_episode', 'recordare_forget_episode', 'recordare_learn_procedure', 'recordare_remember',
+      'recordare_report_procedure_run', 'recordare_resolve_period', 'recordare_search_episodes', 'recordare_search_memory',
     ]); // prefixed (no clash with A-MEM search_memory); no log_episode: the ingest already captures the conversation
     expect(tools.find((t) => t.name === 'recordare_search_episodes')!.description).toBe('search_episodes (Recordare)');
     const out = await tools.find((t) => t.name === 'recordare_search_episodes')!.invoke({ mode: 'list' });
@@ -798,6 +799,16 @@ describe('AgentMemoryService: the agent\'s memory for every run', () => {
     expect(m.tools.map((t) => t.name).slice(0, 2)).toEqual(['recordare_search_episodes', 'recordare_search_memory']);
     expect(m.tools.map((t) => t.name)).toContain('save_memory');
     expect(notes.buildMemoryTools).toHaveBeenCalledWith('u1', 'chat-1', { personal: true, shared: false });
+  });
+
+  it('an agent with tools asks the memory for look-ups too; a words-only turn does not', async () => {
+    const notes = amem();
+    seen.length = 0;
+    await service(notes).forTurn({ userId: 'u1', user: user(), conversationId: 'chat-1', query: 'Che si dice?', lookups: true });
+    await service(notes).forTurn({ userId: 'u1', user: user(), conversationId: 'chat-1', query: 'Che si dice?' });
+    const bodies = seen.filter((r) => r.path === '/api/v1/context').map((r) => (typeof r.body === 'string' ? JSON.parse(r.body) : r.body));
+    expect(bodies[0].initiatives).toEqual({ lookups: true });
+    expect(bodies[1].initiatives).toBeUndefined();
   });
 
   it('Recordare down → A-MEM with its own charter, at once on the next turns too', async () => {

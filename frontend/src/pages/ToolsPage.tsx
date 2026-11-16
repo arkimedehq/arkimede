@@ -41,7 +41,7 @@ import { dataSourcesApi, engineFamily, type DataSource } from '../api/dataSource
 import { filesApi } from '../api/files';
 import { llmConfigsApi, type LlmConfigOption } from '../api/llmConfigs';
 import { useStore } from '../store/useStore';
-import { ScopeSelector, ScopeBadge } from '../components/ScopeSelector';
+import { ShareableScope, ScopeBadge } from '../components/ScopeSelector';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -74,6 +74,7 @@ interface FormState {
   executorType: 'http' | 'sql' | 'prompt' | 'rag' | 'mongo' | 'redis';
   scope: 'personal' | 'team' | 'org';
   teamId: string | null;
+  personal: boolean;
   loadOnFirst: boolean;
   // ── HTTP ────────────────────────────────────────────────────────────────────
   url: string;
@@ -187,6 +188,7 @@ function toolToForm(tool: CustomTool): FormState {
     executorType: tool.executorType,
     scope:        tool.scope ?? 'personal',
     teamId:       tool.teamId ?? null,
+    personal:     tool.personal ?? false,
     loadOnFirst:  tool.loadOnFirst ?? true,
     // HTTP defaults
     url: '', method: 'GET',
@@ -335,7 +337,7 @@ function toolToForm(tool: CustomTool): FormState {
 
 function emptyForm(): FormState {
   return {
-    name: '', description: '', executorType: 'http', scope: 'personal', teamId: null,
+    name: '', description: '', executorType: 'http', scope: 'personal', teamId: null, personal: false,
     loadOnFirst: true,
     // HTTP
     url: '', method: 'GET',
@@ -803,6 +805,7 @@ function ToolEditor({
       executorConfig,
       scope: form.scope,
       teamId: form.scope === 'team' ? form.teamId : null,
+      personal: form.personal,
       loadOnFirst: form.loadOnFirst,
       secrets: Object.keys(secrets).length ? secrets : undefined,
     };
@@ -811,7 +814,7 @@ function ToolEditor({
   // ── Mutations ───────────────────────────────────────────────────────────────
   const createMut = useMutation({
     mutationFn: () => {
-      const { parameters, executorConfig, scope, teamId, loadOnFirst, secrets } = buildPayload();
+      const { parameters, executorConfig, scope, teamId, personal, loadOnFirst, secrets } = buildPayload();
       return customToolsApi.create({
         name:         form.name,
         description:  form.description,
@@ -820,6 +823,7 @@ function ToolEditor({
         parameters,
         scope,
         teamId,
+        personal,
         loadOnFirst,
         secrets,
       });
@@ -839,7 +843,7 @@ function ToolEditor({
   const updateMut = useMutation({
     mutationFn: () => {
       const id = savedId!;
-      const { parameters, executorConfig, scope, teamId, loadOnFirst, secrets } = buildPayload();
+      const { parameters, executorConfig, scope, teamId, personal, loadOnFirst, secrets } = buildPayload();
       return customToolsApi.update(id, {
         description:  form.description,
         executorType: form.executorType,
@@ -847,6 +851,7 @@ function ToolEditor({
         parameters,
         scope,
         teamId,
+        personal,
         loadOnFirst,
         secrets,
       });
@@ -1053,12 +1058,14 @@ function ToolEditor({
               {/* Scope: personal / team / org (org reserved for admins) */}
               <div>
                 <Label>{t('common:scope.visibility')}</Label>
-                <ScopeSelector
+                <ShareableScope
+                  personal={form.personal}
                   scope={form.scope}
                   teamId={form.teamId}
+                  onPersonal={(v) => set('personal', v)}
                   onScope={(s) => set('scope', s)}
                   onTeam={(id) => set('teamId', id)}
-                  allowOrg={isAdmin}
+                  isAdmin={isAdmin}
                 />
               </div>
 

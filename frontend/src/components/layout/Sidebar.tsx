@@ -9,11 +9,12 @@ import { it } from 'date-fns/locale';
 import { useStore } from '../../store/useStore';
 import { projectsApi } from '../../api/projects';
 import { chatsApi } from '../../api/chats';
+import { pluginsApi } from '../../api/plugins';
 import ProjectModal from '../projects/ProjectModal';
 import {
   MessageSquare, FolderOpen, Plus, ChevronDown, ChevronRight,
   Trash2, Settings, LogOut, PanelLeftClose, PanelLeft, Pencil,
-  Sun, Moon, Monitor, Users, AudioLines, Plug,
+  Sun, Moon, Monitor, Users, AudioLines, Plug, Puzzle,
 } from 'lucide-react';
 import { APP_NAME } from '../../config/app.config';
 import { useTheme, type ThemePreference } from '../../hooks/useTheme';
@@ -198,6 +199,8 @@ export default function Sidebar() {
           )}
         </div>
 
+        <PluginPagesNav onOpened={closeIfMobile} />
+
         {/* Footer */}
         <div className="border-t border-gray-800 p-3 space-y-2.5">
 
@@ -380,6 +383,39 @@ function ChatItem({
           <Trash2 size={12} />
         </button>
       )}
+    </div>
+  );
+}
+
+/** The pages of the plugins the user sees (specs/PLUGINS.md §7.1): one entry per page, opened in the main area. */
+function PluginPagesNav({ onOpened }: { onOpened: () => void }) {
+  const { t } = useTranslation();
+  const activeView = useStore((s) => s.activeView);
+  const current = useStore((s) => s.activePluginPage);
+  const openPluginPage = useStore((s) => s.openPluginPage);
+  const { data } = useQuery({ queryKey: ['plugin-pages'], queryFn: pluginsApi.pages, staleTime: 60_000 });
+  const entries = (data ?? []).flatMap((p) => p.pages.map((page) => ({
+    name: p.name, page: page.id, title: p.pages.length > 1 ? `${p.label} · ${page.title}` : page.title,
+  })));
+  if (!entries.length) return null;
+  return (
+    <div className="border-t border-gray-800 px-2 py-2">
+      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider px-2 block mb-1">{t('nav.plugins')}</span>
+      {entries.map((e) => {
+        const active = activeView === 'plugin' && current?.name === e.name && current?.page === e.page;
+        return (
+          <button
+            key={`${e.name}/${e.page}`}
+            onClick={() => { openPluginPage(e); onOpened(); }}
+            className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm text-left transition-colors ${
+              active ? 'bg-gray-800 text-white' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/60'
+            }`}
+          >
+            <Puzzle size={14} className="flex-shrink-0" />
+            <span className="truncate">{e.title}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

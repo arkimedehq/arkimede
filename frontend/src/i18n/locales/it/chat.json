@@ -123,6 +123,14 @@
       "team": "Il team di agenti è al lavoro"
     }
   },
+  "sequence": {
+    "running": "Sequenza in corso",
+    "calls_one": "{{count}} azione",
+    "calls_other": "{{count}} azioni",
+    "failures_one": "{{count}} non riuscita",
+    "failures_other": "{{count}} non riuscite",
+    "time": "{{seconds}} s di {{planned}} s"
+  },
   "private": {
     "chatOn": "Chat privata",
     "chatOff": "Chat non privata",

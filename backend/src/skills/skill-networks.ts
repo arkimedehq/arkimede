@@ -81,7 +81,8 @@ export type SkillNetworkMode = (typeof SKILL_NETWORK_MODES)[number];
  *  - `network`: the job tier. The admin override (Skill.networkMode) wins when set:
  *    'open' = full internet (no allowlist), 'internet' = squid allowlist, 'internal' =
  *    force the baseline even when the skill declares domains. When unset the tier is
- *    derived: 'internet' if the skill declared external domains (runtime.network),
+ *    derived: 'internet' if the skill declared external domains (runtime.network) or is a
+ *    plugin's (the proxy opens the hosts the admin approved for the plugin: its MCP URLs),
  *    otherwise omitted (the executor defaults to the `internal` baseline);
  *  - `grantedNetworks`: the resolved Docker names of the reserved networks granted to it.
  * The baseline internal BE network is added by the executor for every job.
@@ -90,9 +91,10 @@ export function skillNetworkParams(skill: {
   networkDomains?: string[] | null;
   grantedNetworks?: string[] | null;
   networkMode?: SkillNetworkMode | null;
+  pluginId?: string | null;
 }): { network?: NetworkMode; grantedNetworks?: string[] } {
   const out: { network?: NetworkMode; grantedNetworks?: string[] } = {};
-  const mode = skill.networkMode ?? (skill.networkDomains?.length ? 'internet' : undefined);
+  const mode = skill.networkMode ?? (skill.networkDomains?.length || skill.pluginId ? 'internet' : undefined);
   // 'internal' is the executor default → omit (an explicit override still suppresses
   // the domain-derived 'internet' because the override wins in the line above).
   if (mode && mode !== 'internal') out.network = mode;

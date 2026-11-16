@@ -245,7 +245,8 @@ export type FlowTriggerType =
   | 'chat-as-tool'  // invoked by the agent as a tool
   | 'webhook'       // external POST with token
   | 'flow-call'     // invoked by another flow (flow node)
-  | 'home-assistant'; // a Home Assistant entity changed state (home-assistant/ha-triggers.service.ts)
+  | 'home-assistant' // a Home Assistant entity changed state (home-assistant/ha-triggers.service.ts)
+  | 'plugin-event'; // a plugin emitted an event (plugins/plugin-events.service.ts)
 
 export interface FlowTrigger {
   type: FlowTriggerType;
@@ -265,6 +266,12 @@ export interface FlowTrigger {
    * area, from, to, at. At most one run every `cooldownSeconds` (default 30).
    */
   ha?: { entityId: string; from?: string; to?: string; cooldownSeconds?: number };
+  /**
+   * Only type='plugin-event': the event's full type (`<plugin>/<type>`) and, optionally, values that fields of its
+   * `data` must equal. The run's input: plugin, type, id, at, subject, data. At most one run every `cooldownSeconds`
+   * (default 0).
+   */
+  plugin?: { event: string; match?: Record<string, string | number | boolean>; cooldownSeconds?: number };
 }
 
 /** Start variable of the flow (tool signature / manual-execution form). */
@@ -303,7 +310,7 @@ export interface FlowRunState {
 export type FlowRunStatus = 'running' | 'completed' | 'error' | 'cancelled';
 
 /** Who started the run (for history/observability). 'node' = test run of a single node + predecessors. */
-export type FlowTriggeredBy = 'manual' | 'cron' | 'scheduled' | 'agent' | 'webhook' | 'flow' | 'node' | 'home-assistant';
+export type FlowTriggeredBy = 'manual' | 'cron' | 'scheduled' | 'agent' | 'webhook' | 'flow' | 'node' | 'home-assistant' | 'plugin-event';
 
 /** Per-node timeline saved on flow_runs.nodeRuns (debug). */
 export interface NodeRunRecord {

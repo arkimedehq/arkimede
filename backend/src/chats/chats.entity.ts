@@ -98,6 +98,10 @@ export class Chat {
   @Column({ type: 'uuid', nullable: true })
   memoryUpToMessageId: string | null;
 
+  /** When Recordare was told this conversation ended (recordare-conversations.service.ts); a later message reopens it. */
+  @Column({ type: 'timestamptz', nullable: true })
+  memoryEndedAt: Date | null;
+
   @CreateDateColumn()
   createdAt: Date;
 

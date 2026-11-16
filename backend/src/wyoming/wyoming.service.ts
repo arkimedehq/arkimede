@@ -19,12 +19,15 @@
  *   describe → info                       (capabilities: asr + tts + handle programs)
  *   transcribe, audio-start/chunk/stop → transcript
  *   synthesize → audio-start/chunk/stop
- *   transcript → handled | not-handled   (conversation: the hub sends the text to handle, the configured
- *                                         user's agent answers; `handled` carries `continue_conversation`)
+ *   transcript → handled | not-handled   (conversation: the hub sends the text to handle, the agent of the
+ *                                         satellite's account answers; `handled` carries `continue_conversation`)
  *   ping → pong
  *
- * Conversation ("handle" program): exposed only when an admin picked the user
- * the hub acts as (`wyomingHandleUserId`) and optionally an agent of theirs.
+ * Conversation ("handle" program): exposed when the admin turns it on. Each turn
+ * runs as the account its satellite is assigned to in the Home Assistant settings
+ * (an unassigned satellite, or a hub that sends none: the default account), with
+ * the voice agent that user chose (specs/VOICE_SATELLITES.md). The advertised
+ * model is the default account's, so the hub's pipeline keeps its name.
  * The hub sends one text per turn; multi-turn context is kept here per
  * `context.conversation_id` (the hub's conversation), with a short TTL.
  *
@@ -47,11 +50,20 @@ import { agentSlug } from '../openai-compat/openai-mapper';
 import { UsersService } from '../users/users.service';
 import { InvocationsService } from '../invocations/invocations.service';
 import { makeToolCollector } from '../invocations/tool-collector';
-import { ExternalChatsService } from '../chats/external-chats.service';
+import { ExternalChatsService, type ExternalTurn } from '../chats/external-chats.service';
+import { VoiceDeliveryService } from '../notifications/voice-delivery.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationsGateway } from '../notifications/notifications.gateway';
+import { ChatRunsService } from '../messages/chat-runs.service';
+import type { AgentProgressEvent } from '../agent/agent.service';
 import type { ToolCallRecord } from '../messages/messages.entity';
 import { ConversationFocusService, FOCUS_HISTORY_MESSAGES, satelliteName } from '../chats/conversation-focus.service';
 import { APP_NAME, APP_NAME_SLUG } from '../config/app.config';
 import { withTraceUser } from '../observability/genai-tracing';
+import { VoiceIdService, type VoiceTurnResult } from '../voice-id/voice-id.service';
+import { HomeAssistantService } from '../home-assistant/home-assistant.service';
+import { RecordareInitiativesService } from '../recordare/recordare-initiatives.service';
+import { RecordareIdentityService } from '../recordare/recordare-identity.service';
 import {
   WyomingDecoder, WyomingEvent, encodeEvent, pcmToWav, parseWav, chunkPcm, PcmFormat,
 } from './wyoming.protocol';
@@ -74,6 +86,32 @@ const MAX_ASR_BYTES = 16000 * 2 * 300;
 
 /** Idle timeout per connection. */
 const SOCKET_TIMEOUT_MS = 120_000;
+
+/**
+ * A turn still running after this long is detached (0: never): the hub hears that the work goes on and hangs up, the
+ * run goes on, and its answer is delivered when it ends — said where the user is (the one voice channel) and written in
+ * the chat, with a notification. A satellite is no place to wait minutes for a whole app to be written, and the hub
+ * would close the connection (SOCKET_TIMEOUT_MS), which cancelled the run.
+ */
+const detachMs = (): number => Math.max(0, Number(process.env.WYOMING_DETACH_MS ?? 25_000) || 0);
+
+/**
+ * A voice command the hub cut at its maximum length (Home Assistant's pipeline stops listening after 15 s, whatever is
+ * being said): a transcription this long is taken as cut, not as the whole request. Its text is held — the satellite
+ * says "go on" and keeps listening — and the next part of that conversation is joined to it, up to DICTATION_MAX_PARTS
+ * parts, before the agent runs. A part waits DICTATION_TTL_MS at most.
+ */
+const DICTATION_CUT_SECONDS = Math.max(0, Number(process.env.WYOMING_DICTATION_CUT_S ?? 14.8) || 0);
+const DICTATION_TTL_MS = 60_000;
+const DICTATION_MAX_PARTS = 6;
+
+/** What a satellite says when a command was cut at the hub's limit: the rest is awaited (Italian or English). */
+export function keepTalking(language?: string): string {
+  return (language ?? '').toLowerCase().startsWith('it') ? 'Continua, ti ascolto.' : 'Go on, I am listening.';
+}
+
+/** A transcription's text as compared between the STT request and the turn that carries it. */
+const dictationKey = (text: string): string => text.trim().replace(/\s+/g, ' ').toLowerCase();
 
 /** Conversation window kept per hub conversation: max turns and inactivity TTL. */
 const CONVERSATION_MAX_MESSAGES = 20;
@@ -102,6 +140,27 @@ export function spokenFailure(language?: string): string {
     : "Sorry, I couldn't finish that. Please try again, maybe asking in another way.";
 }
 
+/** What a satellite says when a turn is detached: the work goes on, the answer will come (Italian or English). */
+export function workingOn(language?: string): string {
+  return (language ?? '').toLowerCase().startsWith('it')
+    ? 'Ci sto lavorando: te lo dico appena ho finito.'
+    : "I'm working on it: I'll tell you as soon as it's done.";
+}
+
+/**
+ * A detached turn's answer waits while a voice exchange is going on — audio coming in, a turn waiting for its answer,
+ * a sentence being played (as long as its synthesis lasts, plus VOICE_TAIL_MS) — at most QUIET_WAIT_MS: an
+ * announcement on a satellite cuts the pipeline running on it, and the hub then cancels that turn.
+ */
+const QUIET_WAIT_MS = 120_000;
+const VOICE_TAIL_MS = 1_500;
+const AUDIO_QUIET_MS = 2_000;
+
+/** What a satellite says when the user stopped a detached turn's work (Italian or English). */
+export function stoppedWork(language?: string): string {
+  return (language ?? '').toLowerCase().startsWith('it') ? 'Ho fermato il lavoro.' : 'I stopped the work.';
+}
+
 /** A voice conversation's turns (the assistant's tool calls with its answer: the agent replays them on the next turn). */
 interface ConversationWindow {
   messages: { id?: string; role: 'user' | 'assistant'; content: string; toolCalls?: ToolCallRecord[] }[];
@@ -113,9 +172,12 @@ export interface WyomingStatus {
   port:      number;
   clients:   number;
   lastError: string | null;
-  /** Resolved conversation agent (null = STT/TTS only). */
+  /** The default account's conversation agent, as advertised (null = STT/TTS only). */
   handle:    { userEmail: string; agentName: string | null; model: string } | null;
 }
+
+/** Who a turn runs as: the satellite's account and the agent that user chose for the voice. */
+interface TurnAccount { userId: string; userEmail: string; agentId: string | null; agentName: string | null; model: string }
 
 @Injectable()
 export class WyomingService implements OnModuleInit, OnModuleDestroy {
@@ -126,10 +188,19 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
   private lastError: string | null = null;
   private port: number;
   private readonly host: string;
-  /** Conversation agent resolved from the config (null = handle program not exposed). */
-  private handle: { userId: string; userEmail: string; agentId: string | null; agentName: string | null; model: string } | null = null;
+  /** The default account (advertised model, speech attribution); null = handle program not exposed. */
+  private handle: TurnAccount | null = null;
   private readonly conversations = new Map<string, ConversationWindow>();
-  /** Save the conversation turns as chats of the handle user (admin toggle). */
+  /** The voice exchange going on (see QUIET_WAIT_MS): turns waiting for their answer, the last audio in, the end of the
+   * last sentence synthesized. */
+  private turnsInProgress = 0;
+  private audioAt = 0;
+  private speakingUntil = 0;
+  /** Transcriptions cut at the hub's command limit (their text → when), until their turn comes. */
+  private readonly cutTranscripts = new Map<string, number>();
+  /** The parts of a command dictated across cuts, per conversation (its key): joined when the last one comes. */
+  private readonly dictations = new Map<string, { parts: string[]; at: number }>();
+  /** Save the conversation turns as chats of the turn's account (admin toggle). */
   private persistConversations = false;
 
   constructor(
@@ -157,6 +228,27 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
   private get invocations(): InvocationsService { return this.moduleRef.get(InvocationsService, { strict: false }); }
   private get externalChats(): ExternalChatsService { return this.moduleRef.get(ExternalChatsService, { strict: false }); }
   private get focus(): ConversationFocusService { return this.moduleRef.get(ConversationFocusService, { strict: false }); }
+  private get voiceDelivery(): VoiceDeliveryService { return this.moduleRef.get(VoiceDeliveryService, { strict: false }); }
+  private get notifications(): NotificationsService { return this.moduleRef.get(NotificationsService, { strict: false }); }
+  private get gateway(): NotificationsGateway { return this.moduleRef.get(NotificationsGateway, { strict: false }); }
+  private get chatRuns(): ChatRunsService | null {
+    try { return this.moduleRef.get(ChatRunsService, { strict: false }); } catch { return null; }
+  }
+  /** Voice recognition (optional: absent in a test module without it). */
+  private get voiceId(): VoiceIdService | null {
+    try { return this.moduleRef.get(VoiceIdService, { strict: false }); } catch { return null; }
+  }
+  /** Home Assistant (the satellites' assignments) and the memory's shared turns: optional likewise. */
+  private get homeAssistant(): HomeAssistantService | null {
+    try { return this.moduleRef.get(HomeAssistantService, { strict: false }); } catch { return null; }
+  }
+  private get initiatives(): RecordareInitiativesService | null {
+    try { return this.moduleRef.get(RecordareInitiativesService, { strict: false }); } catch { return null; }
+  }
+
+  private get identity(): RecordareIdentityService | null {
+    try { return this.moduleRef.get(RecordareIdentityService, { strict: false }); } catch { return null; }
+  }
 
   async onModuleInit(): Promise<void> {
     await this.applyConfig();
@@ -178,7 +270,7 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
   async applyConfig(): Promise<void> {
     const cfg = await this.appConfig.getWyomingConfig();
     this.allowlist = (cfg.wyomingAllowedCidrs ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-    this.handle = await this.resolveHandle(cfg.wyomingHandleUserId, cfg.wyomingHandleAgentId);
+    this.handle = cfg.wyomingConversationEnabled ? await this.accountFor(null, null) : null;
     this.persistConversations = cfg.wyomingPersistConversations;
     if (cfg.wyomingEnabled) {
       if (!this.server) await this.start();
@@ -188,58 +280,94 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Resolves the conversation identity from the config. Tolerant: a deleted or
-   * disabled user (or a vanished agent) silently disables the handle program
-   * instead of breaking STT/TTS, and is logged for the admin.
+   * The account a turn from this satellite runs as (its assignment, else the default account) with that user's voice
+   * agent. Tolerant: a disabled user gives no account (the turn is not handled), a vanished or no longer visible agent
+   * the standard pipeline; both are logged for the admin.
    */
-  private async resolveHandle(userId: string | null, agentId: string | null) {
-    if (!userId) return null;
-    try {
-      const user = await this.usersService.getById(userId);
-      if (user.status !== 'active') {
-        this.logger.warn(`Wyoming: conversation user ${user.email} is not active — handle program disabled`);
-        return null;
-      }
-      let agentName: string | null = null;
-      if (agentId) {
-        const agents = await this.agentsService.findAll(userId);
-        const agent = agents.find((a) => a.id === agentId);
-        if (!agent) {
-          this.logger.warn(`Wyoming: agent ${agentId} not accessible by ${user.email} — falling back to the standard pipeline`);
-          agentId = null;
-        } else {
-          agentName = agent.name;
-        }
-      }
-      return { userId, userEmail: user.email, agentId, agentName, model: agentName ? agentSlug(agentName) : DEFAULT_HANDLE_MODEL };
-    } catch (err: any) {
-      this.logger.warn(`Wyoming: conversation user ${userId} not found — handle program disabled (${err?.message ?? err})`);
+  async accountFor(satelliteId: string | null, deviceId: string | null): Promise<TurnAccount | null> {
+    const accounts = await this.appConfig.voiceAccounts();
+    const entity = this.homeAssistant?.satelliteEntity(satelliteId, deviceId) ?? null;
+    const userId = (entity && accounts.satellites[entity]) || accounts.defaultUserId;
+    if (!userId) {
+      this.logger.warn('Wyoming: no account for the satellites (no active admin) — conversation not handled');
       return null;
     }
-  }
-
-  /**
-   * Validates a conversation identity before it is saved (admin PATCH):
-   * the user must exist and be active, the agent must be visible to that user.
-   * Throws a plain Error with an i18n key the controller maps to a 400.
-   */
-  async validateHandleConfig(userId: string | null, agentId: string | null): Promise<void> {
-    if (!userId) return;
-    const user = await this.usersService.getById(userId).catch(() => null);
-    if (!user || user.status !== 'active') throw new Error('wyoming.handleUserInvalid');
-    if (agentId) {
-      const agents = await this.agentsService.findAll(userId);
-      if (!agents.some((a) => a.id === agentId)) throw new Error('wyoming.handleAgentInvalid');
+    const user = await this.usersService.voiceSettings(userId);
+    if (!user || user.status !== 'active') {
+      this.logger.warn(`Wyoming: the account of ${entity ?? 'the satellites'} is not active — conversation not handled`);
+      return null;
     }
-  }
-
-  /** Agents the given user can run as a conversation agent (admin picker). */
-  async listHandleAgents(userId: string): Promise<{ id: string; name: string }[]> {
-    const agents = await this.agentsService.findAll(userId);
-    return agents.map((a) => ({ id: a.id, name: a.name }));
+    let agentId = user.voiceAgentId;
+    let agentName: string | null = null;
+    if (agentId) {
+      const agent = (await this.agentsService.findAll(userId)).find((a) => a.id === agentId);
+      if (agent) agentName = agent.name;
+      else {
+        this.logger.warn(`Wyoming: voice agent ${agentId} not accessible by ${user.email} — standard pipeline`);
+        agentId = null;
+      }
+    }
+    return { userId, userEmail: user.email, agentId, agentName, model: agentName ? agentSlug(agentName) : DEFAULT_HANDLE_MODEL };
   }
 
   /** Returns the conversation window for a key, evicting expired ones on the way. */
+  /** Drops what waits longer than its TTL: a cut transcription whose turn never came, a dictation left unfinished. */
+  private forgetStaleDictations(now: number): void {
+    for (const [text, at] of this.cutTranscripts) if (now - at > DICTATION_TTL_MS) this.cutTranscripts.delete(text);
+    for (const [key, d] of this.dictations) if (now - d.at > DICTATION_TTL_MS) this.dictations.delete(key);
+  }
+
+  /**
+   * Saves a turn's answer: into the chat its recognised speaker already opened (`early`), else as a whole turn when it
+   * is recorded at all. In the background (the hub waits for its answer) it is not awaited: null. Otherwise the chat
+   * id, or null when it could not be saved.
+   */
+  private async saveTurn(early: string | null, record: boolean, turn: ExternalTurn, background: boolean): Promise<string | null> {
+    if (!early && !record) return null;
+    const save = early
+      ? this.externalChats.recordAnswer(early, { answer: turn.answer, toolCalls: turn.toolCalls, usage: turn.usage }).then(() => early)
+      : this.externalChats.recordTurn(turn);
+    const saved = save.catch((err) => { this.logger.warn(`Wyoming: saving the turn failed: ${err?.message ?? err}`); return null; });
+    if (background) { void saved; return null; }
+    return saved;
+  }
+
+  /**
+   * A detached turn's answer, once its work ended: said where the user is (the one voice channel: a turn of the last
+   * minutes put presence in the satellite's room), and announced in the app with its chat to open.
+   */
+  /** Resolves once no voice exchange is going on (see QUIET_WAIT_MS), or after MAX_MS; how long it waited. */
+  async quiet(maxMs = QUIET_WAIT_MS, stepMs = 250): Promise<number> {
+    const start = Date.now();
+    const busy = () => this.turnsInProgress > 0 || Date.now() < this.speakingUntil || Date.now() - this.audioAt < AUDIO_QUIET_MS;
+    while (busy() && Date.now() - start < maxMs) await new Promise((resolve) => setTimeout(resolve, stepMs));
+    return Date.now() - start;
+  }
+
+  private async deliverDetached(userId: string, answer: string, chatId: string | null, request: string): Promise<void> {
+    if (!chatId) return;
+    const waited = await this.quiet();
+    if (waited > 1000) this.logger.log(`Wyoming: a detached turn's answer waited ${Math.round(waited / 1000)} s for the voice exchange going on`);
+    const point = await this.voiceDelivery.deliver(userId, answer, chatId);
+    this.logger.log(`Wyoming: a detached turn's answer ${point ? `said on ${point}` : 'not said by voice (nobody confirmed present): in its chat'}`);
+    try {
+      const title = request.length > 80 ? `${request.slice(0, 80)}…` : request;
+      const payload = { title: `🎙️ ${title}`, message: answer.length > 160 ? `${answer.slice(0, 160)}…` : answer, chatId, spoken: !!point };
+      const notif = await this.notifications.create({ userId, source: 'wyoming', sourceId: chatId, eventType: 'voice_work_done', payload });
+      this.gateway.emitToUser(userId, 'notification', { id: notif.id, eventType: 'voice_work_done', ...payload });
+    } catch (err) {
+      this.logger.warn(`Wyoming: the detached turn's notification failed: ${(err as Error).message}`);
+    }
+  }
+
+  /** Someone spoke to that satellite: its room is lived in now (Home Assistant tells the memory, a voice delivery speaks there). */
+  private voiceTurn(context: Record<string, any>, speaker: { identity?: { channel: string; externalId: string } | null; confidence: number } | null, userId: string): void {
+    this.focus.voiceTurn({
+      userId, satelliteId: satelliteName(context.satellite_id), deviceId: satelliteName(context.device_id),
+      ...(speaker?.identity ? { speaker: { identity: speaker.identity, confidence: speaker.confidence } } : {}),
+    });
+  }
+
   private conversationWindow(key: string): ConversationWindow {
     const now = Date.now();
     for (const [k, w] of this.conversations) {
@@ -349,11 +477,13 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
         return;
 
       case 'audio-start':
+        this.audioAt = Date.now();
         asr.active = true; asr.chunks = []; asr.bytes = 0;
         asr.fmt = this.pcmFormatOf(ev.data);
         return;
 
       case 'audio-chunk':
+        this.audioAt = Date.now();
         if (!asr.active) { asr.active = true; asr.fmt = this.pcmFormatOf(ev.data); }
         if (ev.payload?.length) {
           asr.bytes += ev.payload.length;
@@ -368,10 +498,21 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
         const pcm = Buffer.concat(asr.chunks);
         asr.chunks = []; asr.bytes = 0;
         const t0 = Date.now();
-        // Speech requests act for the configured conversation user (trace attribution only).
-        const text = pcm.length
-          ? await withTraceUser(this.handle?.userId, () => this.transcription.transcribe(pcmToWav(pcm, asr.fmt), 'audio.wav', asr.language, { userId: this.handle?.userId }))
+        const wav = pcm.length ? pcmToWav(pcm, asr.fmt) : null;
+        // Who spoke (voice recognition on): the voiceprint is computed alongside the transcription, no added wait.
+        const voiceId = wav && this.handle ? this.voiceId : null;
+        const voiceprint = voiceId && (await voiceId.active()) ? voiceId.embed(wav!) : null;
+        // Speech requests act for the default account (trace attribution only: the satellite is known with the text).
+        const text = wav
+          ? await withTraceUser(this.handle?.userId, () => this.transcription.transcribe(wav, 'audio.wav', asr.language, { userId: this.handle?.userId }))
           : '';
+        if (voiceprint && text.trim()) voiceId!.remember(text, voiceprint);
+        // As long as the hub's command limit: cut while the user was still speaking (see DICTATION_CUT_SECONDS).
+        const seconds = pcm.length / (asr.fmt.rate * asr.fmt.width * asr.fmt.channels);
+        if (DICTATION_CUT_SECONDS > 0 && seconds >= DICTATION_CUT_SECONDS && text.trim()) {
+          this.cutTranscripts.set(dictationKey(text), Date.now());
+          this.logger.log(`Wyoming: a transcript cut at ${seconds.toFixed(1)} s (the hub's limit): its turn will wait for the rest`);
+        }
         this.logger.log(`Wyoming: transcript for ${ip} (${pcm.length} bytes → ${text.length} chars) in ${Date.now() - t0}ms`);
         this.send(socket, { type: 'transcript', data: { text, ...(asr.language ? { language: asr.language } : {}) } });
         return;
@@ -383,14 +524,35 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
           this.send(socket, { type: 'not-handled', data: { text: 'No conversation agent configured' } });
           return;
         }
-        const text = String(ev.data?.text ?? '').trim();
-        if (!text) { this.send(socket, { type: 'not-handled', data: { text: '' } }); return; }
+        const said = String(ev.data?.text ?? '').trim();
+        if (!said) { this.send(socket, { type: 'not-handled', data: { text: '' } }); return; }
         const language = typeof ev.data?.language === 'string' ? ev.data.language : asr.language;
         const context = ev.data?.context && typeof ev.data.context === 'object' ? ev.data.context : {};
         const key = typeof context.conversation_id === 'string' && context.conversation_id ? context.conversation_id : `ip:${ip}`;
-        // The hub reports the satellite (its entity) beside the conversation id: a client
-        // may have focused that satellite on a chat (ConversationFocusService).
-        const userId = this.handle.userId;
+        // A command dictated across the hub's cuts: this part joins the ones before; a part cut again waits for the next.
+        const now = Date.now();
+        this.forgetStaleDictations(now);
+        const before = this.dictations.get(key);
+        const parts = [...(before?.parts ?? []), said];
+        const cut = this.cutTranscripts.delete(dictationKey(said));
+        if (cut && parts.length < DICTATION_MAX_PARTS) {
+          this.dictations.set(key, { parts, at: now });
+          this.logger.log(`Wyoming: part ${parts.length} of a dictated command for ${ip} (key ${key}): waiting for the rest`);
+          this.send(socket, { type: 'handled', data: {
+            text: keepTalking(language), continue_conversation: true, ...(context.conversation_id ? { context } : {}),
+          } });
+          return;
+        }
+        this.dictations.delete(key);
+        const text = parts.join(' ');
+        // The hub reports the satellite (its entity) beside the conversation id: the turn runs as the satellite's
+        // account, and a client may have focused that satellite on a chat (ConversationFocusService).
+        const account = await this.accountFor(satelliteName(context.satellite_id), satelliteName(context.device_id));
+        if (!account) {
+          this.send(socket, { type: 'not-handled', data: { text: spokenFailure(language) } });
+          return;
+        }
+        const userId = account.userId;
         const satellite = satelliteName(context.satellite_id) ?? satelliteName(context.device_id);
         const focusedId = this.focus.get(userId, satellite);
         const focused = focusedId ? await this.externalChats.historyOf(focusedId, userId, FOCUS_HISTORY_MESSAGES) : null;
@@ -399,27 +561,35 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
         const fresh = this.focus.freshSince(userId, satellite);
         if (!focused && fresh && window.messages.length && window.updatedAt < fresh) window.messages = [];
         const history = (focused ?? window.messages.map((m) => ({ ...m }))) as any[];
+        // Who is speaking (voice recognition on): told to the agent, to the memory with the turn, and as the presence.
+        // Its voiceprint is found by the text just transcribed: the last part of a dictated command.
+        const voice: VoiceTurnResult = (await this.voiceId?.forTurn(said, satellite, userId).catch(() => null)) ?? { kind: 'unknown' };
+        const speaker = voice.kind === 'speaker' && !voice.speaker.holder ? voice.speaker : null;
+        // An entity's memory (a shared agent: the account is the assistant's own identity): an unknown voice is not its holder.
+        const entity = voice.kind === 'unknown' && (await this.identity?.mode(userId).catch(() => null)) === 'entity';
+        const turnBlocks = voiceBlocks(voice, entity);
+        // A recognised speaker goes into the chat before the run: the memory reads who is talking when asked for context.
+        const record = this.persistConversations || !!focused;
+        let early = record && speaker
+          ? await this.externalChats.recordUserMessage({
+            userId, source: 'wyoming', key, idleMs: CONVERSATION_TTL_MS, satellite, chatId: focused ? focusedId : null, notBefore: fresh,
+            userText: text, speaker: { channel: speaker.identity!.channel, externalId: speaker.identity!.externalId, displayName: speaker.displayName },
+          }).catch((err) => { this.logger.warn(`Wyoming: saving the turn failed: ${err?.message ?? err}`); return null; })
+          : null;
         const t0 = Date.now();
         const tools = makeToolCollector();
         const abort = new AbortController();
-        socket.once('close', () => abort.abort());
+        const onClose = () => abort.abort();
+        socket.once('close', onClose);
         let answer = '';
-        try {
-          const usage = await this.agentService.streamResponse(
-            text, this.handle.userId, undefined, undefined, history,
-            [], [], [],
-            (chunk) => { answer += chunk; },
-            tools.onToolCall,
-            abort.signal,
-            tools.onToolResult,
-            {
-              ...agentRunOptions(this.handle.agentId ? await this.agentsService.findById(this.handle.agentId).catch(() => null) : null, 'voice'),
-              // The memory's conversation: the chat this turn continues (as recordTurn below groups it).
-              conversationId: await this.externalChats.memoryConversationId({
-                userId, source: 'wyoming', key, idleMs: CONVERSATION_TTL_MS, chatId: focused ? focusedId : null, notBefore: fresh,
-              }),
-            },
-          );
+        let detached = false;
+        // A detached turn's work, shown in its chat like a chat's run (step, tool) and stoppable there.
+        let run: { chatId: string; runId: string } | null = null;
+        let stopped = false;
+        const runs = this.chatRuns;
+        // The turn's end, whether the hub is still waiting (`handled`) or the work went on after it (detached).
+        const finish = async (usage: Awaited<ReturnType<AgentService['streamResponse']>>): Promise<void> => {
+          if (stopped) answer = answer ? `${answer}\n\n${stoppedWork(language)}` : stoppedWork(language);
           if (!focused) {
             window.messages.push({ role: 'user', content: text }, {
               id: randomUUID(), role: 'assistant', content: answer, ...(tools.records.length ? { toolCalls: tools.records as ToolCallRecord[] } : {}),
@@ -427,37 +597,125 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
             if (window.messages.length > CONVERSATION_MAX_MESSAGES) window.messages.splice(0, window.messages.length - CONVERSATION_MAX_MESSAGES);
             window.updatedAt = Date.now();
           }
-          this.logger.log(`Wyoming: handled turn for ${ip} [${this.handle.model}] (${text.length} → ${answer.length} chars, ${history.length} history, key ${key}, satellite ${satellite ?? '-'}${focused ? `, focused on chat ${focusedId}` : ''}) in ${Date.now() - t0}ms`);
+          this.logger.log(`Wyoming: handled turn for ${ip} [${account.model} as ${account.userEmail}] (${text.length} → ${answer.length} chars, ${history.length} history, key ${key}, satellite ${satellite ?? '-'}${focused ? `, focused on chat ${focusedId}` : ''}${detached ? ', detached' : ''}) in ${Date.now() - t0}ms`);
           void this.invocations.record({
-            userId: this.handle.userId, origin: 'voice', route: 'chat', model: `wyoming:${this.handle.model}`,
+            userId, origin: 'voice', route: 'chat', model: `wyoming:${account.model}`,
             inputPreview: text, outputPreview: answer || null, toolCalls: tools.records,
             inputTokens: usage?.inputTokens ?? null, outputTokens: usage?.outputTokens ?? null,
             durationMs: Date.now() - t0, status: 'ok',
           });
-          if (this.persistConversations || focused) {
-            // The hub's conversation id (or the client IP) already identifies the
-            // conversation; the window TTL closes the chat like it drops the context.
-            // A focused turn always goes into its chat: the client asked for it.
-            void this.externalChats.recordTurn({
-              userId, source: 'wyoming', key, idleMs: CONVERSATION_TTL_MS,
-              satellite, chatId: focused ? focusedId : null, notBefore: fresh,
-              userText: text, answer, toolCalls: tools.records, usage,
-            }).catch((err) => this.logger.warn(`Wyoming: saving the turn failed: ${err?.message ?? err}`));
+          // Detached, the answer is delivered from its chat: the turn is saved even with persistence off.
+          const chatId = await this.saveTurn(early, record || detached, {
+            userId, source: 'wyoming', key, idleMs: CONVERSATION_TTL_MS,
+            satellite, chatId: focused ? focusedId : null, notBefore: fresh,
+            userText: text, answer, toolCalls: tools.records, usage,
+          }, !detached);
+          if (run) runs?.finish(run.chatId, run.runId, null);
+          if (detached) await this.deliverDetached(userId, stopped ? stoppedWork(language) : answer, chatId, text);
+          else {
+            answered();
+            this.send(socket, { type: 'handled', data: {
+              text: answer, continue_conversation: expectsReply(answer), ...(context.conversation_id ? { context } : {}),
+            } });
           }
-          this.send(socket, { type: 'handled', data: {
-            text: answer, continue_conversation: expectsReply(answer), ...(context.conversation_id ? { context } : {}),
-          } });
-          // Someone spoke to that satellite: its room is lived in now (Home Assistant tells the memory).
-          this.focus.voiceTurn({ userId, satelliteId: satelliteName(context.satellite_id), deviceId: satelliteName(context.device_id) });
-        } catch (err: any) {
+          // A recognised person on a satellite that is not theirs: the turn into their own memory too (their choice).
+          const owner = voice.kind === 'speaker' ? voice.speaker.userId : null;
+          if (owner && owner !== userId) {
+            void this.initiatives?.sharedTurn(owner, { conversation: `wyoming:${key}`, text, answer })
+              .catch((err) => this.logger.warn(`Wyoming: the shared turn was not sent: ${err?.message ?? err}`));
+          }
+          // Someone spoke to that satellite: its room is lived in now (Home Assistant tells the memory). Detached, it
+          // was said at the detach.
+          if (!detached) this.voiceTurn(context, speaker, userId);
+        };
+        const failed = async (err: any): Promise<void> => {
           const message = err?.message ?? 'Internal error';
-          this.logger.warn(`Wyoming: handle failed for ${ip} in ${Date.now() - t0}ms: ${message}`);
+          this.logger.warn(`Wyoming: handle failed for ${ip} in ${Date.now() - t0}ms${detached ? ' (detached)' : ''}: ${message}`);
           void this.invocations.record({
-            userId: this.handle.userId, origin: 'voice', route: 'chat', model: `wyoming:${this.handle.model}`,
+            userId, origin: 'voice', route: 'chat', model: `wyoming:${account.model}`,
             inputPreview: text, outputPreview: answer || null, toolCalls: tools.records,
             durationMs: Date.now() - t0, status: 'error', error: abort.signal.aborted ? 'client aborted' : message,
           });
-          this.send(socket, { type: 'not-handled', data: { text: spokenFailure(language) } });
+          if (!detached) {
+            answered();
+            this.send(socket, { type: 'not-handled', data: { text: spokenFailure(language) } });
+            return;
+          }
+          // Detached: the user was told the work goes on — they hear (and read) that it did not end.
+          if (run) runs?.finish(run.chatId, run.runId, null);
+          const failure = stopped ? stoppedWork(language) : spokenFailure(language);
+          const chatId = await this.saveTurn(early, true, {
+            userId, source: 'wyoming', key, idleMs: CONVERSATION_TTL_MS,
+            satellite, chatId: focused ? focusedId : null, notBefore: fresh,
+            userText: text, answer: answer ? `${answer}\n\n${failure}` : failure, toolCalls: tools.records,
+          }, false);
+          await this.deliverDetached(userId, failure, chatId, text);
+        };
+        // Waiting for its answer (QUIET_WAIT_MS): until `handled`, `not-handled` or the detach.
+        this.turnsInProgress++;
+        let counted = true;
+        const answered = () => { if (counted) { counted = false; this.turnsInProgress--; } };
+        try {
+          const running = this.agentService.streamResponse(
+            text, userId, undefined, undefined, history,
+            [], [], [],
+            (chunk) => { answer += chunk; },
+            (call: any) => {
+              tools.onToolCall(call);
+              if (run && call?.name) runs?.update(run.chatId, run.runId, { phase: 'tool', tool: call.name });
+            },
+            abort.signal,
+            (name: string, result: any, status?: 'success' | 'error', input?: any) => {
+              tools.onToolResult(name, result, status, input);
+              if (run) runs?.toolDone(run.chatId, run.runId, { tool: name, ok: status !== 'error' });
+            },
+            {
+              ...agentRunOptions(account.agentId ? await this.agentsService.findById(account.agentId).catch(() => null) : null, 'voice'),
+              // The memory's conversation: the chat this turn continues (as recordTurn below groups it).
+              conversationId: early ?? await this.externalChats.memoryConversationId({
+                userId, source: 'wyoming', key, idleMs: CONVERSATION_TTL_MS, chatId: focused ? focusedId : null, notBefore: fresh,
+              }),
+              ...(turnBlocks.length ? { turnBlocks } : {}),
+              onProgress: (event: AgentProgressEvent) => {
+                if (!run) return;
+                if (event.type === 'model_start') runs?.update(run.chatId, run.runId, { phase: 'model', tool: null, nextStep: true });
+                else if (event.type === 'tool_preparing') runs?.update(run.chatId, run.runId, { phase: 'preparing', tool: event.name, argsChars: event.argsChars });
+                else runs?.update(run.chatId, run.runId, { phase: 'writing', tool: null });
+              },
+            },
+          );
+          // A long turn (an app to write, a long search) does not hold the satellite: past detachMs() the hub hears that
+          // the work goes on, and the answer comes when it is done — said where the user is, and in the chat.
+          const wait = detachMs();
+          if (wait > 0 && await Promise.race([
+            running.then(() => false, () => false),
+            new Promise<boolean>((resolve) => setTimeout(() => resolve(true), wait).unref?.()),
+          ])) {
+            detached = true;
+            answered();
+            socket.off('close', onClose);   // the hub may hang up now: the work is no longer its request
+            this.send(socket, { type: 'handled', data: {
+              text: workingOn(language), continue_conversation: false, ...(context.conversation_id ? { context } : {}),
+            } });
+            this.voiceTurn(context, speaker, userId);
+            // Its chat now (the user's words in it), and the work registered there: followed and stoppable in the app.
+            early ??= await this.externalChats.recordUserMessage({
+              userId, source: 'wyoming', key, idleMs: CONVERSATION_TTL_MS, satellite, chatId: focused ? focusedId : null, notBefore: fresh,
+              userText: text,
+              ...(speaker ? { speaker: { channel: speaker.identity!.channel, externalId: speaker.identity!.externalId, displayName: speaker.displayName } } : {}),
+            }).catch((err) => { this.logger.warn(`Wyoming: saving the turn failed: ${err?.message ?? err}`); return null; });
+            const started = early ? runs?.start(early) : null;
+            if (early && started) {
+              run = { chatId: early, runId: started.runId };
+              runs?.update(run.chatId, run.runId, { phase: 'model', tool: null });
+              started.signal.addEventListener('abort', () => { stopped = true; abort.abort(); });
+            }
+            running.then(finish, failed).catch((err) => this.logger.warn(`Wyoming: a detached turn's end failed: ${err?.message ?? err}`));
+            return;
+          }
+          await finish(await running);
+        } catch (err: any) {
+          await failed(err);
         }
         return;
       }
@@ -468,6 +726,8 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
         const t0 = Date.now();
         const wav = await withTraceUser(this.handle?.userId, () => this.tts.synthesize(text, voice, 'wav'));
         const { fmt, pcm } = parseWav(wav);
+        // The satellite plays it now: no announcement over it (QUIET_WAIT_MS).
+        this.speakingUntil = Math.max(this.speakingUntil, Date.now() + (pcm.length / (fmt.rate * fmt.width * fmt.channels)) * 1000 + VOICE_TAIL_MS);
         this.send(socket, { type: 'audio-start', data: { ...fmt, timestamp: 0 } });
         let ts = 0;
         for (const chunk of chunkPcm(pcm, fmt)) {
@@ -568,4 +828,33 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
     if (m) return [m[1], `${m[1]}-${m[2]}`];
     return internal ? ['en'] : CLOUD_TTS_LANGUAGES;
   }
+}
+
+/**
+ * What the agent is told about the voice of the turn: who is speaking (recognised, may be wrong), or that a voice is
+ * being learned (so it can say so in a few words). Unknown: nothing — but on an entity's account (`entity`: the account
+ * and its memory are the assistant's own identity) that the speaker is not the account, so its name is never theirs.
+ */
+export function voiceBlocks(voice: VoiceTurnResult, entity = false): string[] {
+  if (voice.kind === 'speaker') {
+    const who = voice.speaker.holder ? `${voice.speaker.displayName} (the account's own user)` : voice.speaker.displayName;
+    return [`<speaker>The person speaking is ${who}, recognised by their voice (it may be wrong: if what they say does not fit, do not insist on the name).</speaker>`];
+  }
+  if (voice.kind === 'enrolled') {
+    const done = voice.samples >= voice.of;
+    return [`<voice-learning>You are learning ${voice.name}'s voice: sample ${voice.samples} of ${voice.of}${done ? ' — done, from now on you recognise it' : ''}. Answer as usual and mention this in a few words.</voice-learning>`];
+  }
+  if (voice.kind === 'rejected') {
+    const r = voice.rejection;
+    const why = r.reason === 'short' ? 'it was too short to learn from'
+      : r.reason === 'other' ? `it sounded like ${r.name}'s voice`
+        : 'it did not sound like the samples taken so far (another person, or noise)';
+    return [`<voice-learning>You are learning ${voice.name}'s voice: that sentence was not taken (${why}); ${voice.left} still to go. `
+      + `Answer as usual and, in a few words, ask ${voice.name} to say another sentence of a few words, alone.</voice-learning>`];
+  }
+  if (entity) {
+    return ['<speaker>Who is speaking was not recognised. This account and its memory are your own identity, not the speaker\'s: '
+      + 'never call them by the account\'s name, nor write it as theirs (e.g. in an automation\'s instruction). Use no name unless they say who they are.</speaker>'];
+  }
+  return [];
 }

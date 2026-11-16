@@ -64,6 +64,14 @@ export interface HomeAssistantSettings {
   haVoiceEnabled: boolean;
   haToolsEnabled: boolean;
   haToolsUserIds: string[] | null;
+  haPerceptionsEnabled: boolean;
+  haPerceptionEntities: string[];
+  /** Whose memory hears Home Assistant; null = the first active admin (resolved by voiceAccounts()). */
+  haMemoryUserId: string | null;
+  /** The account of an unassigned satellite; null = the first active admin. */
+  haDefaultVoiceUserId: string | null;
+  /** Satellite entity id → account. */
+  haSatelliteUsers: Record<string, string>;
 }
 
 /** Home Assistant settings to change: a value sets, null clears, undefined keeps. */
@@ -76,6 +84,12 @@ export interface HomeAssistantSettingsDto {
   haVoiceEnabled?: boolean;
   haToolsEnabled?: boolean;
   haToolsUserIds?: string[] | null;
+  haPerceptionsEnabled?: boolean;
+  haPerceptionEntities?: string[] | null;
+  haMemoryUserId?: string | null;
+  haDefaultVoiceUserId?: string | null;
+  /** The whole map (an entry with a null account is dropped: back to the default). */
+  haSatelliteUsers?: Record<string, string | null> | null;
 }
 
 /** Recordare settings: a string sets (secrets encrypted), null clears (back to the environment), undefined keeps. */
@@ -125,8 +139,8 @@ export interface TranscriptionConfigDto {
 export interface WyomingConfigDto {
   wyomingEnabled:       boolean;
   wyomingAllowedCidrs:  string | null;
-  wyomingHandleUserId:  string | null;
-  wyomingHandleAgentId: string | null;
+  /** Expose the conversation program (the satellites' accounts are Home Assistant settings). */
+  wyomingConversationEnabled: boolean;
   /** Omitted = keep the current value. */
   wyomingPersistConversations?: boolean;
 }
@@ -468,16 +482,14 @@ export class AppConfigService implements OnModuleInit {
   async getWyomingConfig(): Promise<{
     wyomingEnabled:       boolean;
     wyomingAllowedCidrs:  string | null;
-    wyomingHandleUserId:  string | null;
-    wyomingHandleAgentId: string | null;
+    wyomingConversationEnabled: boolean;
     wyomingPersistConversations: boolean;
   }> {
     const config = await this.repo.findOne({ where: { id: CONFIG_ID } });
     return {
       wyomingEnabled:       config?.wyomingEnabled       ?? false,
       wyomingAllowedCidrs:  config?.wyomingAllowedCidrs  ?? null,
-      wyomingHandleUserId:  config?.wyomingHandleUserId  ?? null,
-      wyomingHandleAgentId: config?.wyomingHandleAgentId ?? null,
+      wyomingConversationEnabled: config?.wyomingConversationEnabled ?? false,
       wyomingPersistConversations: config?.wyomingPersistConversations ?? false,
     };
   }
@@ -497,18 +509,16 @@ export class AppConfigService implements OnModuleInit {
       systemPrompt: current?.systemPrompt ?? SYSTEM_PROMPT,
       wyomingEnabled:       dto.wyomingEnabled,
       wyomingAllowedCidrs:  cidrs || null,
-      wyomingHandleUserId:  dto.wyomingHandleUserId  || null,
-      // An agent without a user makes no sense: the agent is resolved in that user's scope.
-      wyomingHandleAgentId: dto.wyomingHandleUserId ? (dto.wyomingHandleAgentId || null) : null,
+      wyomingConversationEnabled: dto.wyomingConversationEnabled,
       wyomingPersistConversations: dto.wyomingPersistConversations ?? current?.wyomingPersistConversations ?? false,
     });
-    this.logger.log(`WyomingConfig: updated — enabled=${dto.wyomingEnabled} allowlist=${cidrs || '(any)'} handleUser=${dto.wyomingHandleUserId ?? '-'} agent=${dto.wyomingHandleAgentId ?? '-'} persist=${dto.wyomingPersistConversations ?? '(unchanged)'}`);
+    this.logger.log(`WyomingConfig: updated — enabled=${dto.wyomingEnabled} allowlist=${cidrs || '(any)'} conversation=${dto.wyomingConversationEnabled} persist=${dto.wyomingPersistConversations ?? '(unchanged)'}`);
     await this.audit?.record({
       actorId: actorId ?? null,
       action: 'appconfig.update',
       resource: 'wyoming',
       outcome: 'ok',
-      ctx: { section: 'wyoming', enabled: dto.wyomingEnabled, allowlist: cidrs || null, handleUserId: dto.wyomingHandleUserId ?? null, handleAgentId: dto.wyomingHandleAgentId ?? null, persistConversations: dto.wyomingPersistConversations ?? null },
+      ctx: { section: 'wyoming', enabled: dto.wyomingEnabled, allowlist: cidrs || null, conversation: dto.wyomingConversationEnabled, persistConversations: dto.wyomingPersistConversations ?? null },
     });
     return this.getWyomingConfig();
   }
@@ -531,6 +541,11 @@ export class AppConfigService implements OnModuleInit {
       haVoiceEnabled:    c?.haVoiceEnabled    ?? false,
       haToolsEnabled:    c?.haToolsEnabled    ?? false,
       haToolsUserIds:    c?.haToolsUserIds    ?? null,
+      haPerceptionsEnabled: c?.haPerceptionsEnabled ?? false,
+      haPerceptionEntities: c?.haPerceptionEntities ?? [],
+      haMemoryUserId:       c?.haMemoryUserId ?? null,
+      haDefaultVoiceUserId: c?.haDefaultVoiceUserId ?? null,
+      haSatelliteUsers:     c?.haSatelliteUsers ?? {},
     };
   }
 
@@ -549,6 +564,11 @@ export class AppConfigService implements OnModuleInit {
       haVoiceEnabled:    keep(dto.haVoiceEnabled,    current?.haVoiceEnabled    ?? false),
       haToolsEnabled:    keep(dto.haToolsEnabled,    current?.haToolsEnabled    ?? false),
       haToolsUserIds:    dto.haToolsUserIds === undefined ? current?.haToolsUserIds ?? null : dto.haToolsUserIds?.length ? dto.haToolsUserIds : null,
+      haPerceptionsEnabled: keep(dto.haPerceptionsEnabled, current?.haPerceptionsEnabled ?? false),
+      haPerceptionEntities: dto.haPerceptionEntities === undefined ? current?.haPerceptionEntities ?? null : cleanList(dto.haPerceptionEntities),
+      haMemoryUserId:       dto.haMemoryUserId === undefined ? current?.haMemoryUserId ?? null : dto.haMemoryUserId || null,
+      haDefaultVoiceUserId: dto.haDefaultVoiceUserId === undefined ? current?.haDefaultVoiceUserId ?? null : dto.haDefaultVoiceUserId || null,
+      haSatelliteUsers:     dto.haSatelliteUsers === undefined ? current?.haSatelliteUsers ?? null : cleanMap(dto.haSatelliteUsers),
     });
     await this.audit?.record({
       actorId: actorId ?? null,
@@ -558,6 +578,33 @@ export class AppConfigService implements OnModuleInit {
       ctx: { section: 'home-assistant', ...dto, haToken: dto.haToken === undefined ? undefined : dto.haToken ? '(set)' : null },
     });
     return this.getHomeAssistantConfig();
+  }
+
+  /**
+   * The accounts of the voice at home (specs/VOICE_SATELLITES.md): whose memory hears Home Assistant, the account of an
+   * unassigned satellite and the satellites' assignments. An unset or no longer active account falls back to the first
+   * active admin (null only with no admin at all).
+   */
+  async voiceAccounts(): Promise<{ memoryUserId: string | null; defaultUserId: string | null; satellites: Record<string, string> }> {
+    const c = await this.repo.findOne({ where: { id: CONFIG_ID } });
+    const wanted = [c?.haMemoryUserId, c?.haDefaultVoiceUserId, ...Object.values(c?.haSatelliteUsers ?? {})].filter((x): x is string => !!x);
+    const rows: Array<{ id: string; role: string }> = await this.repo.manager.query(
+      `SELECT "id", "role" FROM "users" WHERE "status" = 'active' AND ("id" = ANY($1::uuid[]) OR "role" = 'admin') ORDER BY "createdAt" ASC`, [wanted]);
+    const active = new Set(rows.map((r) => r.id));
+    const admin = rows.find((r) => r.role === 'admin')?.id ?? null;
+    const pick = (id: string | null | undefined) => (id && active.has(id) ? id : admin);
+    return {
+      memoryUserId: pick(c?.haMemoryUserId),
+      defaultUserId: pick(c?.haDefaultVoiceUserId),
+      satellites: Object.fromEntries(Object.entries(c?.haSatelliteUsers ?? {}).filter(([, u]) => active.has(u))),
+    };
+  }
+
+  /** The active users who want their own presence in their own memory, with their Home Assistant person. */
+  async presenceUsers(): Promise<Array<{ userId: string; person: string }>> {
+    const rows: Array<{ id: string; haPerson: string }> = await this.repo.manager.query(
+      `SELECT "id", "haPerson" FROM "users" WHERE "presenceInMyMemory" = true AND "haPerson" IS NOT NULL AND "status" = 'active'`);
+    return rows.map((r) => ({ userId: r.id, person: r.haPerson }));
   }
 
   // ── TTS Configuration (Piper) ───────────────────────────────────────────────
@@ -857,4 +904,16 @@ export class AppConfigService implements OnModuleInit {
       return null;
     }
   }
+}
+
+/** A list of entity ids or patterns: trimmed, without blanks or repeats, at most 200; null when empty. */
+/** A satellite → account map without empty keys or accounts; null when empty. */
+function cleanMap(map: Record<string, string | null> | null): Record<string, string> | null {
+  const out = Object.fromEntries(Object.entries(map ?? {}).map(([k, v]) => [k.trim(), v?.trim() ?? '']).filter(([k, v]) => k && v).slice(0, 200));
+  return Object.keys(out).length ? out : null;
+}
+
+function cleanList(list: string[] | null): string[] | null {
+  const out = [...new Set((list ?? []).map((e) => e.trim()).filter(Boolean))].slice(0, 200);
+  return out.length ? out : null;
 }

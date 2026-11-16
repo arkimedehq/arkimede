@@ -22,7 +22,8 @@ import {
   Download, RefreshCw, AlertCircle, ArrowLeft, X, Save, Copy, Check, Link2,
 } from 'lucide-react';
 import { mcpServersApi, type McpServer, type CreateMcpServerPayload } from '../api/mcpServers';
-import { ScopeSelector } from '../components/ScopeSelector';
+import { ShareableScope } from '../components/ScopeSelector';
+import PluginBadge from '../components/plugins/PluginBadge';
 import { useStore } from '../store/useStore';
 import { detectBridgeOS, bridgeOSLabel, bridgeReleasesUrl, fetchLatestBridgeReleaseUrl } from '../utils/bridgeDownload';
 import { copyText } from '../utils/clipboard';
@@ -44,6 +45,7 @@ interface FormState {
   loadOnFirst: boolean;
   scope: 'personal' | 'team' | 'org';
   teamId: string | null;
+  personal: boolean;
 }
 
 const emptyForm = (): FormState => ({
@@ -51,7 +53,7 @@ const emptyForm = (): FormState => ({
   url: '', command: '', args: '',
   headers: [], env: [], secrets: [],
   loadOnFirst: true,
-  scope: 'personal', teamId: null,
+  scope: 'personal', teamId: null, personal: false,
 });
 
 function serverToForm(s: McpServer): FormState {
@@ -68,6 +70,7 @@ function serverToForm(s: McpServer): FormState {
     loadOnFirst: s.loadOnFirst ?? true,
     scope:       s.scope ?? 'personal',
     teamId:      s.teamId ?? null,
+    personal:    s.personal ?? false,
   };
 }
 
@@ -95,6 +98,7 @@ function formToPayload(form: FormState): CreateMcpServerPayload {
     loadOnFirst: form.loadOnFirst,
     scope:       form.scope,
     teamId:      form.scope === 'team' ? form.teamId : null,
+    personal:    form.personal,
   };
 }
 
@@ -589,6 +593,7 @@ function ServerCard({
                   {t(`card.scope.${server.scope}`)}
                 </span>
               )}
+              {server.pluginId && <PluginBadge label={t('plugin.badge')} title={t('plugin.managed')} />}
             </div>
             {server.description && (
               <p className="text-xs text-gray-500 mt-0.5 truncate">{server.description}</p>
@@ -604,8 +609,8 @@ function ServerCard({
           </div>
         </div>
 
-        {/* Enable toggle — right side, skills-style pill */}
-        <button
+        {/* Enable toggle — right side, skills-style pill; a plugin's server is turned on and off with its plugin */}
+        {!server.pluginId && <button
           role="switch"
           aria-checked={server.enabled}
           onClick={(e) => { e.stopPropagation(); onToggle(!server.enabled); }}
@@ -619,7 +624,7 @@ function ServerCard({
               transition-transform duration-200 ease-in-out
               ${server.enabled ? 'translate-x-4' : 'translate-x-0'}`}
           />
-        </button>
+        </button>}
       </div>
     </div>
   );
@@ -722,6 +727,8 @@ function ServerEditor({
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const isEditing = !!server;
+  // A plugin's server is managed with its plugin (specs/PLUGINS.md §5): shown read-only, the backend refuses changing it.
+  const fromPlugin = !!server?.pluginId;
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((p) => ({ ...p, [key]: value }));
@@ -795,9 +802,11 @@ function ServerEditor({
           <h3 className="text-base font-semibold text-gray-100 truncate">
             {isEditing ? t('modal.editTitle') : t('modal.newTitle')}
           </h3>
+          {fromPlugin && <PluginBadge label={t('plugin.badge')} title={t('plugin.managed')} />}
         </div>
+        {fromPlugin && <p className="text-xs text-blue-400 -mt-3 mb-4">{t('plugin.managed')}</p>}
 
-        <div className="space-y-4">
+        <fieldset disabled={fromPlugin} className="space-y-4 min-w-0">
             {/* Name */}
             <div>
               <Label>{t('modal.name')}</Label>
@@ -823,13 +832,15 @@ function ServerEditor({
             {/* Visibility scope: personal | team | org (shares the server's tools) */}
             <div>
               <Label>{t('modal.scopeLabel')}</Label>
-              <ScopeSelector
+              <ShareableScope
+                personal={form.personal}
                 scope={form.scope}
                 teamId={form.teamId}
+                onPersonal={(v) => set('personal', v)}
                 onScope={(s) => set('scope', s)}
                 onTeam={(id) => set('teamId', id)}
                 disabled={isPending}
-                allowOrg={isAdmin}
+                isAdmin={isAdmin}
               />
             </div>
 
@@ -996,15 +1007,15 @@ function ServerEditor({
                 <p className="text-xs text-red-300">{error}</p>
               </div>
             )}
-          </div>
+          </fieldset>
 
         {/* Connection test — existing server only (tests the SAVED configuration) */}
         {isEditing && server && <McpTestPanel serverId={server.id} />}
 
         {/* Footer */}
         <div className="flex items-center gap-2 mt-6 pt-4 border-t border-gray-800">
-          {/* Delete — existing server only */}
-          {isEditing && (
+          {/* Delete — existing server only, not a plugin's */}
+          {isEditing && !fromPlugin && (
             confirmDelete ? (
               <div className="flex items-center gap-2 flex-shrink-0">
                 <span className="text-xs text-gray-400">{t('card.deleteConfirm')}</span>
@@ -1044,7 +1055,7 @@ function ServerEditor({
           >
             {t('common:actions.cancel')}
           </button>
-          <button
+          {!fromPlugin && <button
             type="submit"
             disabled={isPending}
             className="flex items-center gap-1.5 px-4 py-1.5 bg-blue-600 hover:bg-blue-500
@@ -1052,7 +1063,7 @@ function ServerEditor({
           >
             {isPending ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
             {isEditing ? t('common:actions.save') : t('modal.create')}
-          </button>
+          </button>}
         </div>
       </form>
     </div>

@@ -5,7 +5,7 @@ import { BadRequestException, Body, Controller, Get, Patch, Post, UseGuards } fr
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { IsArray, IsBoolean, IsOptional, IsString, IsUUID, Matches, MaxLength } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsObject, IsOptional, IsString, IsUUID, Matches, MaxLength, isUUID } from 'class-validator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -38,6 +38,26 @@ class UpdateHomeAssistantDto {
   /** Who may use the agent's `ha_*` tools; null or empty = every user. */
   @IsOptional() @IsArray() @IsUUID('all', { each: true })
   haToolsUserIds?: string[] | null;
+
+  /** Remember the chosen entities' events as the memory's perceptions. */
+  @IsOptional() @IsBoolean()
+  haPerceptionsEnabled?: boolean;
+
+  /** The entities whose events are perceptions (ids, `*` allowed). */
+  @IsOptional() @IsArray() @IsString({ each: true }) @MaxLength(200, { each: true }) @ArrayMaxSize(200)
+  haPerceptionEntities?: string[] | null;
+
+  /** Whose memory hears Home Assistant; null = the first active admin. */
+  @IsOptional() @IsUUID()
+  haMemoryUserId?: string | null;
+
+  /** The account of an unassigned satellite; null = the first active admin. */
+  @IsOptional() @IsUUID()
+  haDefaultVoiceUserId?: string | null;
+
+  /** Satellite entity → account (the whole map; a null account = back to the default). */
+  @IsOptional() @IsObject()
+  haSatelliteUsers?: Record<string, string | null> | null;
 }
 
 class ImportFromMcpDto {
@@ -82,6 +102,7 @@ export class HomeAssistantController {
   @Patch()
   @ApiOperation({ summary: 'Update the Home Assistant integration' })
   async update(@Body() dto: UpdateHomeAssistantDto, @CurrentUser() user: any) {
+    await this.checkAccounts(dto);
     await this.config.updateHomeAssistantConfig(dto, user?.id);
     await this.ha.apply();
     return this.view();
@@ -108,12 +129,31 @@ export class HomeAssistantController {
     return this.view();
   }
 
+  /** The accounts chosen for the memory and the satellites must be active users; satellites are `assist_satellite.*`. */
+  private async checkAccounts(dto: UpdateHomeAssistantDto): Promise<void> {
+    const map = dto.haSatelliteUsers ?? {};
+    if (Object.keys(map).length > 200) throw new BadRequestException('Too many satellites');
+    for (const [entity, id] of Object.entries(map)) {
+      if (!/^assist_satellite\.[a-z0-9_]+$/.test(entity)) throw new BadRequestException(`Not a satellite: ${entity}`);
+      if (id !== null && (typeof id !== 'string' || !isUUID(id))) throw new BadRequestException(`Not an account: ${String(id)}`);
+    }
+    const ids = [dto.haMemoryUserId, dto.haDefaultVoiceUserId, ...Object.values(map)].filter((x): x is string => !!x);
+    if (!ids.length) return;
+    const found = await this.users.find({ where: ids.map((id) => ({ id, status: 'active' as const })), select: { id: true } });
+    const ok = new Set(found.map((u) => u.id));
+    const missing = ids.find((id) => !ok.has(id));
+    if (missing) throw new BadRequestException(`Account not found or not active: ${missing}`);
+  }
+
   private async view() {
-    const users = await this.users.find({ select: { id: true, name: true, email: true, haPerson: true }, order: { name: 'ASC' } });
+    const users = await this.users.find({ select: { id: true, name: true, email: true, haPerson: true, status: true }, order: { name: 'ASC' } });
+    const accounts = await this.config.voiceAccounts();
     return {
       ...(await this.config.getHomeAssistantConfig()),
       status: this.ha.getStatus(),
-      users: users.map((u) => ({ id: u.id, name: u.name ?? u.email, haPerson: u.haPerson })),
+      users: users.map((u) => ({ id: u.id, name: u.name ?? u.email, haPerson: u.haPerson, active: u.status === 'active' })),
+      // The accounts in effect (an unset or inactive choice falls back to the first active admin).
+      resolved: { memoryUserId: accounts.memoryUserId, defaultUserId: accounts.defaultUserId },
       servers: await this.mcp.httpServers(),
     };
   }

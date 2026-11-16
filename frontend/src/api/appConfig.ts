@@ -80,7 +80,17 @@ export interface HomeAssistantConfig {
   haVoiceEnabled:    boolean;
   haToolsEnabled:    boolean;
   haToolsUserIds:    string[] | null;
-  users:   Array<{ id: string; name: string; haPerson: string | null }>;
+  haPerceptionsEnabled: boolean;
+  haPerceptionEntities: string[];
+  /** Whose memory hears Home Assistant (null = the first active admin). */
+  haMemoryUserId: string | null;
+  /** The account of an unassigned satellite (null = the first active admin). */
+  haDefaultVoiceUserId: string | null;
+  /** Satellite entity → account. */
+  haSatelliteUsers: Record<string, string>;
+  /** The accounts in effect (the choices above, or their fallback). */
+  resolved: { memoryUserId: string | null; defaultUserId: string | null };
+  users:   Array<{ id: string; name: string; haPerson: string | null; active: boolean }>;
   servers: Array<{ id: string; name: string }>;
   status: {
     state: 'off' | 'connecting' | 'connected' | 'error';
@@ -105,30 +115,33 @@ export interface UpdateHomeAssistantPayload {
   haVoiceEnabled?:    boolean;
   haToolsEnabled?:    boolean;
   haToolsUserIds?:    string[] | null;
+  haPerceptionsEnabled?: boolean;
+  haPerceptionEntities?: string[] | null;
+  haMemoryUserId?: string | null;
+  haDefaultVoiceUserId?: string | null;
+  haSatelliteUsers?: Record<string, string | null> | null;
 }
 
 /** Wyoming voice server (Home Assistant & co.): config + live status. */
 export interface WyomingConfig {
   wyomingEnabled:       boolean;
   wyomingAllowedCidrs:  string | null;
-  /** Conversation identity (null = STT/TTS only). */
-  wyomingHandleUserId:  string | null;
-  wyomingHandleAgentId: string | null;
-  /** Save the conversation turns as chats of the handle user. */
+  /** Expose the conversation (each satellite's account: Home Assistant settings). Off = STT/TTS only. */
+  wyomingConversationEnabled: boolean;
+  /** Save the conversation turns as chats of the turn's account. */
   wyomingPersistConversations: boolean;
   running:   boolean;
   port:      number;
   clients:   number;
   lastError: string | null;
-  /** Conversation agent as resolved by the server (null = not exposed). */
+  /** The default account's conversation agent as advertised (null = not exposed). */
   handle:    { userEmail: string; agentName: string | null; model: string } | null;
 }
 
 export interface UpdateWyomingConfigPayload {
   wyomingEnabled:        boolean;
   wyomingAllowedCidrs?:  string | null;
-  wyomingHandleUserId?:  string | null;
-  wyomingHandleAgentId?: string | null;
+  wyomingConversationEnabled?: boolean;
   wyomingPersistConversations?: boolean;
 }
 
@@ -254,9 +267,6 @@ export const appConfigApi = {
   updateWyomingConfig: (payload: UpdateWyomingConfigPayload): Promise<WyomingConfig> =>
     api.patch('/admin/config/wyoming', payload).then((r) => r.data),
 
-  /** GET /api/admin/config/wyoming/agents?userId= — agents a user can run as conversation agent */
-  listWyomingAgents: (userId: string): Promise<{ id: string; name: string }[]> =>
-    api.get('/admin/config/wyoming/agents', { params: { userId } }).then((r) => r.data),
 
   // ── Tool Loading Config ─────────────────────────────────────────────────────
 

@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
-import { Loader2, Plug, Sparkles, Workflow, Wrench, Bot, Home, ChevronDown, ChevronRight, CircleOff } from 'lucide-react';
+import { Loader2, Plug, Sparkles, Workflow, Wrench, Bot, Home, ChevronDown, ChevronRight, CircleOff, Terminal } from 'lucide-react';
 import { agentsApi, type ToolCatalogGroup } from '../api/agents';
 
 const SOURCE_META: Record<ToolCatalogGroup['source'], { Icon: React.ElementType; color: string }> = {
@@ -14,6 +14,7 @@ const SOURCE_META: Record<ToolCatalogGroup['source'], { Icon: React.ElementType;
   flow:   { Icon: Workflow, color: 'text-amber-400' },
   agent:  { Icon: Bot,      color: 'text-emerald-400' },
   custom: { Icon: Wrench,   color: 'text-teal-400' },
+  builtin: { Icon: Terminal, color: 'text-rose-400' },
 };
 
 /**
@@ -57,7 +58,8 @@ export function ToolPicker({ selected, onChange }: { selected: Set<string>; onCh
           const key = `${g.source}:${g.wildcard ?? g.label}:${gi}`;
           const wildcardOn = g.wildcard != null && selected.has(g.wildcard);
           const isOpen = !collapsed[key];
-          const { Icon, color } = SOURCE_META[g.source];
+          // A source this page does not know yet (a newer backend than the loaded page): a plain icon, not a crash.
+          const { Icon, color } = SOURCE_META[g.source] ?? SOURCE_META.custom;
           return (
             <div key={key} className="rounded-md bg-gray-900/40">
               <div className="flex items-center gap-2 px-2 py-1.5">

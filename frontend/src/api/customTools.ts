@@ -151,6 +151,8 @@ export interface CustomTool {
   userId: string;
   /** Visibility: personal = creator; team = team members; org = everyone */
   scope: 'personal' | 'team' | 'org';
+  /** Uses one person's account or data: never shared (specs/EXTENSION_AUDIENCE.md). */
+  personal?: boolean;
   teamId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -175,6 +177,7 @@ export interface CreateToolPayload {
   executorType: 'http' | 'sql' | 'prompt' | 'rag' | 'mongo' | 'redis';
   executorConfig: Record<string, unknown>;
   scope?: 'personal' | 'team' | 'org';
+  personal?: boolean;
   teamId?: string | null;
   loadOnFirst?: boolean;
   secrets?: Record<string, string>;

@@ -9,5 +9,6 @@
   "cannotDeleteOwnAccount": "Non puoi eliminare il tuo stesso account.",
   "memoryNotEmpty": "La modalità della memoria si può cambiare solo finché la memoria è vuota.",
   "episodicMemoryOff": "Attiva prima la memoria episodica.",
-  "memoryEraseFailed": "Account non eliminato: non è stato possibile cancellare la sua memoria episodica (Recordare). Riprova più tardi."
+  "memoryEraseFailed": "Account non eliminato: non è stato possibile cancellare la sua memoria episodica (Recordare). Riprova più tardi.",
+  "voiceAgentNotFound": "Agente non trovato (deve essere tuo, del tuo team o dell'organizzazione)."
 }

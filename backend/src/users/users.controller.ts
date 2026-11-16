@@ -2,7 +2,7 @@
 // Copyright © 2026 Andrea Genovese
 
 import {Body, Controller, Get, HttpCode, HttpStatus, Inject, Optional, Patch, Post, UseGuards,} from '@nestjs/common';
-import { IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, Min, MinLength } from 'class-validator';
+import { IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Max, Min, MinLength } from 'class-validator';
 import { Type } from 'class-transformer';
 import {JwtAuthGuard} from '../common/guards/jwt-auth.guard';
 import {CurrentUser} from '../common/decorators/current-user.decorator';
@@ -74,6 +74,15 @@ class UpdateProfileDto {
   @IsOptional() @IsIn(['personal', 'entity'])
   episodicMemoryMode?: 'personal' | 'entity';
 
+  /** The agent of the user's voice turns (their satellites); null = the standard pipeline. */
+  @IsOptional() @IsUUID()
+  voiceAgentId?: string | null;
+  /** Their presence from Home Assistant also into their own memory. */
+  @IsOptional() @IsBoolean()
+  presenceInMyMemory?: boolean;
+  /** Their turns on satellites that are not theirs (recognised by voice) also into their own memory. */
+  @IsOptional() @IsBoolean()
+  sharedTurnsInMyMemory?: boolean;
   /** Override memory extraction threshold (no. of messages); null = global default. */
   @IsOptional() @IsInt() @Min(1) @Max(100) @Type(() => Number)
   memoryThreshold?: number | null;

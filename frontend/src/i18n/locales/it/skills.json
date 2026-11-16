@@ -4,6 +4,7 @@
   "tabs": {
     "mine": "Le mie skill",
     "shared": "Condivise",
+    "all": "Tutte",
     "public": "Marketplace",
     "daemons": "Background",
     "review": "Review"
@@ -41,7 +42,10 @@
     "notReadyTitle": "La skill deve essere pronta (ready) per essere pubblicata",
     "sendReview": "Invia in review",
     "publishTeam": "Pubblica al team",
-    "makePersonal": "Rendi personale"
+    "makePersonal": "Rendi personale",
+    "personalOnly": "Skill personale: usa l'account o i dati di una persona, resta solo tua (ognuno installa la sua copia).",
+    "adminShares": "Solo l'admin la condivide con un team o con l'organizzazione.",
+    "personalBadge": "Personale"
   },
   "detail": {
     "skillId": "Skill ID",
@@ -248,5 +252,14 @@
     "off": "Disattivata",
     "onHint": "Il proprietario l'ha attivata: gli agenti possono usarla",
     "offHint": "Il proprietario l'ha disattivata: per ora nessun agente può usarla"
+  },
+  "plugin": {
+    "badge": "Plugin",
+    "managed": "Questa skill viene da un plugin: si aggiorna, si condivide e si elimina dalla pagina del plugin."
+  },
+  "all": {
+    "info": "Le skill di tutti gli utenti, anche personali o in attesa. Da qui un admin le apre e ne imposta la rete; modificarle, condividerle o eliminarle resta del proprietario.",
+    "search": "Cerca per nome o proprietario",
+    "empty": "Nessuna skill"
   }
 }

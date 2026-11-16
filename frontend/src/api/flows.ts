@@ -86,7 +86,7 @@ export interface FlowDefinition {
   edges: FlowEdge[];
 }
 
-export type FlowTriggerType = 'manual' | 'cron' | 'scheduled' | 'chat-as-tool' | 'webhook' | 'flow-call' | 'home-assistant';
+export type FlowTriggerType = 'manual' | 'cron' | 'scheduled' | 'chat-as-tool' | 'webhook' | 'flow-call' | 'home-assistant' | 'plugin-event';
 export interface FlowTrigger {
   type: FlowTriggerType;
   cron?: string;
@@ -96,6 +96,8 @@ export interface FlowTrigger {
   webhookToken?: string;
   /** type='home-assistant': the entity (`*` allowed), optional from / to states, the cooldown in seconds. */
   ha?: { entityId: string; from?: string; to?: string; cooldownSeconds?: number };
+  /** type='plugin-event': the event's full type (`<plugin>/<type>`), values its data must have, the cooldown in seconds. */
+  plugin?: { event: string; match?: Record<string, string | number | boolean>; cooldownSeconds?: number };
 }
 
 export interface FlowInputVar {
@@ -118,6 +120,8 @@ export interface Flow {
   enabled: boolean;
   scope: FlowScope;
   teamId: string | null;
+  /** Set when a plugin contributed the flow: read-only, duplicate it to change it. */
+  pluginId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -182,6 +186,10 @@ export const flowsApi = {
 
   remove: (id: string): Promise<void> =>
     api.delete(`/flows/${id}`).then((r) => r.data),
+
+  /** A personal, switched-off copy of the flow (how a plugin's flow is changed). */
+  duplicate: (id: string): Promise<Flow> =>
+    api.post(`/flows/${id}/duplicate`).then((r) => r.data),
 
   run: (id: string, input: Record<string, unknown> = {}): Promise<FlowRun> =>
     api.post(`/flows/${id}/run`, { input }).then((r) => r.data),

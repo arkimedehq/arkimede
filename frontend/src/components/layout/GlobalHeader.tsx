@@ -23,7 +23,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { FolderOpen, Square, Settings, MessageSquare, Pencil, Check, X } from 'lucide-react';
+import { FolderOpen, Square, Settings, MessageSquare, Pencil, Check, X, Puzzle } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { chatsApi } from '../../api/chats';
 import { NotificationBell } from '../notifications/NotificationCenter';
@@ -35,12 +35,22 @@ function HeaderTitle() {
   const { t } = useTranslation();
   const activeView   = useStore((s) => s.activeView);
   const activeChatId = useStore((s) => s.activeChatId);
+  const pluginPage   = useStore((s) => s.activePluginPage);
 
   if (activeView === 'settings') {
     return (
       <div className="flex items-center gap-2 text-sm text-gray-400">
         <Settings size={14} className="flex-shrink-0" />
         <span>{t('nav.settings')}</span>
+      </div>
+    );
+  }
+
+  if (activeView === 'plugin' && pluginPage) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-gray-400 min-w-0">
+        <Puzzle size={14} className="flex-shrink-0" />
+        <span className="truncate">{pluginPage.title}</span>
       </div>
     );
   }

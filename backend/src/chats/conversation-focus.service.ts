@@ -45,6 +45,8 @@ export interface VoiceTurn {
   userId: string;
   satelliteId: string | null;
   deviceId: string | null;
+  /** Who spoke, recognised by their voice (voice-id/), as the memory knows them; absent when unknown. */
+  speaker?: { identity: { channel: string; externalId: string }; confidence: number } | null;
 }
 
 @Injectable()

@@ -18,6 +18,7 @@ import { FlowsModule } from '../flows/flows.module';
 import { AgentsModule } from '../agents/agents.module';
 import { SchedulingModule } from '../scheduling/scheduling.module';
 import { SandboxModule } from '../sandbox/sandbox.module';
+import { SequencesModule } from '../sequences/sequences.module';
 import { AgentMemoryModule } from '../agent-memory/agent-memory.module';
 import { ToolSourcesModule } from '../tool-sources/tool-sources.module';
 import { TranscriptionModule } from '../transcription/transcription.module';
@@ -39,6 +40,7 @@ import { Chat } from '../chats/chats.entity';
     AgentsModule,        // agenti/team esposti come tool (exposeAsTool)
     SchedulingModule,
     SandboxModule,
+    SequencesModule,     // run_sequence / stop_sequences: timed calls of the turn's tools
     AgentMemoryModule,   // the agent's memory: Recordare, else A-MEM
     ToolSourcesModule,   // native integrations' tools (Home Assistant)
     forwardRef(() => TranscriptionModule), // transcripts of the audio files tools return

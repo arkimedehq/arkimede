@@ -15,11 +15,12 @@ import { InternalGuestMessagesController } from './internal-guest-messages.contr
 
 /**
  * Guests: contacts of an account writing on a messaging channel a skill holds (Telegram), answered by the agent as
- * that account. Imported only by AppModule (it imports the agent and the chats, nothing imports it).
+ * that account — and people writing through a plugin (agent.ask, PluginsModule). Imported by AppModule and PluginsModule.
  */
 @Module({
   imports: [TypeOrmModule.forFeature([Chat, Message, SkillDaemon, User]), ChatsModule, SkillsModule, AgentModule],
   controllers: [InternalGuestMessagesController],
   providers: [GuestMessagesService],
+  exports: [GuestMessagesService],
 })
 export class GuestsModule {}

@@ -57,6 +57,8 @@ export interface CreateCustomToolDto {
   executorConfig: ExecutorConfig;
   /** Visibility scope — default 'personal' */
   scope?: ToolScope;
+  /** Personal: never shared (the "Personal" option). */
+  personal?: boolean;
   /** Reference team (mandatory if scope='team'). */
   teamId?: string | null;
   /** If false, the tool does not enter the flat chat context — default true. */
@@ -224,6 +226,7 @@ export class CustomToolsService {
       loadOnFirst:    dto.loadOnFirst ?? true,
       scope,
       teamId,
+      personal: !!dto.personal,
     });
 
     const saved = await this.toolRepo.save(tool);
@@ -272,7 +275,7 @@ export class CustomToolsService {
         id: true, name: true, description: true,
         parameters: true as any,
         executorType: true, executorConfig: true as any,
-        enabled: true, loadOnFirst: true, userId: true, scope: true, teamId: true,
+        enabled: true, loadOnFirst: true, userId: true, scope: true, teamId: true, personal: true,
         createdAt: true, updatedAt: true,
         // keyName yes, encryptedValue never
         secrets: { id: true, toolId: true, keyName: true },
@@ -292,7 +295,7 @@ export class CustomToolsService {
         id: true, name: true, description: true,
         parameters: true as any,
         executorType: true, executorConfig: true as any,
-        enabled: true, loadOnFirst: true, userId: true, scope: true, teamId: true,
+        enabled: true, loadOnFirst: true, userId: true, scope: true, teamId: true, personal: true,
         createdAt: true, updatedAt: true,
         secrets: { id: true, toolId: true, keyName: true },
       },
@@ -317,7 +320,7 @@ export class CustomToolsService {
         id: true, name: true, description: true,
         parameters: true as any,
         executorType: true, executorConfig: true as any,
-        enabled: true, loadOnFirst: true, userId: true, scope: true, teamId: true,
+        enabled: true, loadOnFirst: true, userId: true, scope: true, teamId: true, personal: true,
         createdAt: true, updatedAt: true,
         secrets: { id: true, toolId: true, keyName: true },
       },
@@ -366,6 +369,7 @@ export class CustomToolsService {
     if (dto.enabled       !== undefined) tool.enabled        = dto.enabled;
     if (dto.loadOnFirst   !== undefined) tool.loadOnFirst    = dto.loadOnFirst;
     if (dto.scope         !== undefined) tool.scope          = nextScope;
+    if (dto.personal      !== undefined) tool.personal       = dto.personal;
     if (dto.scope !== undefined || dto.teamId !== undefined) tool.teamId = nextTeamId;
 
     await this.toolRepo.save(tool);
@@ -411,7 +415,7 @@ export class CustomToolsService {
         id: true, name: true, description: true,
         parameters: true as any,
         executorType: true, executorConfig: true as any,
-        enabled: true, loadOnFirst: true, userId: true, scope: true, teamId: true,
+        enabled: true, loadOnFirst: true, userId: true, scope: true, teamId: true, personal: true,
         createdAt: true, updatedAt: true,
         secrets: { id: true, toolId: true, keyName: true },
       },

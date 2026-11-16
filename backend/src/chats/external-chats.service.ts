@@ -23,7 +23,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Chat } from './chats.entity';
-import { Message, ToolCallRecord } from '../messages/messages.entity';
+import { Message, ToolCallRecord, MessageSpeaker } from '../messages/messages.entity';
 import { truncateToolValue } from '../invocations/invocations.service';
 import { isCoherentContinuation, isWithinIdleWindow } from './external-chats.util';
 
@@ -55,6 +55,8 @@ export interface ExternalTurn {
    */
   priorUserTexts?: string[];
   userText: string;
+  /** Who said it, when not the account's user (a voice recognised on a satellite): a participant of the memory. */
+  speaker?: MessageSpeaker | null;
   answer: string;
   /** Tool events collected during the run (tool-collector.ts records). */
   toolCalls?: (Omit<ToolCallRecord, 'input'> & { input?: any })[];
@@ -85,14 +87,30 @@ export class ExternalChatsService {
 
   /** Records a completed turn; returns the chat it was appended to. */
   async recordTurn(input: ExternalTurn): Promise<string> {
-    const turn = { ...input, key: input.key.slice(0, 200) };   // column width
+    const chatId = await this.recordUserMessage(input);
+    await this.recordAnswer(chatId, input);
+    return chatId;
+  }
+
+  /**
+   * The first half of a turn, before the agent runs: the user's message in the chat it continues (or a new one), so the
+   * memory reads who is speaking when the agent asks it for context. Returns the chat; `recordAnswer` completes it.
+   */
+  async recordUserMessage(input: Omit<ExternalTurn, 'answer' | 'toolCalls' | 'usage'>): Promise<string> {
+    const turn = { ...input, answer: '', key: input.key.slice(0, 200) };   // column width
     const chatId = (await this.focusedChat(turn)) ?? (await this.findOpenChat(turn)) ?? (await this.createChat(turn));
 
     // createdAt stays the DB default (as in the in-app flow): insertion order is the
     // chat order, and app-written and DB-written timestamps are not comparable.
     await this.messageRepo.save(this.messageRepo.create({
       chatId, role: 'user', content: turn.userText, authorId: turn.userId,
+      ...(turn.speaker ? { speaker: turn.speaker } : {}),
     }));
+    return chatId;
+  }
+
+  /** The second half of a turn: the agent's answer, and the chat marked unread. */
+  async recordAnswer(chatId: string, turn: Pick<ExternalTurn, 'answer' | 'toolCalls' | 'usage'>): Promise<void> {
     const toolCalls: ToolCallRecord[] = (turn.toolCalls ?? []).map((r) => ({
       ...r, input: truncateToolValue(r.input ?? null, MAX_TOOL_VALUE), output: truncateToolValue(r.output, MAX_TOOL_VALUE),
     }));
@@ -110,7 +128,6 @@ export class ExternalChatsService {
     }));
     // New content the user has not seen yet → sidebar "unread" badge.
     await this.chatRepo.update(chatId, { updatedAt: new Date(), unread: true });
-    return chatId;
   }
 
   /**

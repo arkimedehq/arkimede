@@ -30,22 +30,66 @@
     "haFrom": "da (qualsiasi)",
     "haTo": "a (qualsiasi)",
     "haCooldown": "30 s",
-    "haCooldownHint": "Al massimo un run ogni tanti secondi (default 30)."
+    "haCooldownHint": "Al massimo un run ogni tanti secondi (default 30).",
+    "pluginEvent": "Evento di un plugin",
+    "pluginEventType": "plugin/tipo",
+    "pluginEventTypeHint": "Il tipo completo dell'evento, per esempio crm-sync/customer.created",
+    "pluginMatch": "{\"campo\": \"valore\"}",
+    "pluginMatchHint": "Facoltativo: valori che i campi dei dati dell'evento devono avere (JSON)",
+    "pluginMatchInvalid": "Il filtro non è un JSON valido."
   },
-  "palette": { "add": "Aggiungi:" },
+  "palette": {
+    "add": "Aggiungi:"
+  },
   "nodeType": {
-    "tool": { "label": "Tool", "desc": "Esegue un tuo custom tool (HTTP/SQL/RAG/prompt) con argomenti mappati dai binding." },
-    "llm": { "label": "LLM", "desc": "Chiamata a un LLM con system/user prompt interpolati. Output = il testo generato." },
-    "http": { "label": "HTTP", "desc": "Richiesta HTTP diretta (GET/POST/…). Estrai un campo dalla risposta con responsePath." },
-    "skill": { "label": "Skill", "desc": "Esegue uno script di una skill installata (Python/Node/JS) nel sandbox executor." },
-    "transform": { "label": "Transform", "desc": "Trasformazione dati in JavaScript (sandbox isolated-vm). Usa `return` per l'output." },
-    "flow": { "label": "Flow", "desc": "Invoca un altro flow (sub-flow) con input mappati. Componibilità ricorsiva." },
-    "agent": { "label": "Agente", "desc": "Esegue un singolo agente del Multi-Agent con i suoi tool e il suo modello." },
-    "team": { "label": "Team", "desc": "Esegue un team di agenti con la sua topologia (supervisor/sequenziale/parallelo)." },
-    "condition": { "label": "Condizione", "desc": "Biforca il flusso: attiva il ramo vero/falso in base a un confronto. Collega i due handle." },
-    "loop": { "label": "Loop", "desc": "Itera su un array (binding) eseguendo un sub-flow per ogni elemento. Output = array." },
-    "join": { "label": "Join", "desc": "Fan-in: attende tutti i predecessori e ne raccoglie gli output in un oggetto." },
-    "chat": { "label": "Chat", "desc": "Consegna un messaggio (binding) in una chat dedicata, con notifica e badge non letto." }
+    "tool": {
+      "label": "Tool",
+      "desc": "Esegue un tuo custom tool (HTTP/SQL/RAG/prompt) con argomenti mappati dai binding."
+    },
+    "llm": {
+      "label": "LLM",
+      "desc": "Chiamata a un LLM con system/user prompt interpolati. Output = il testo generato."
+    },
+    "http": {
+      "label": "HTTP",
+      "desc": "Richiesta HTTP diretta (GET/POST/…). Estrai un campo dalla risposta con responsePath."
+    },
+    "skill": {
+      "label": "Skill",
+      "desc": "Esegue uno script di una skill installata (Python/Node/JS) nel sandbox executor."
+    },
+    "transform": {
+      "label": "Transform",
+      "desc": "Trasformazione dati in JavaScript (sandbox isolated-vm). Usa `return` per l'output."
+    },
+    "flow": {
+      "label": "Flow",
+      "desc": "Invoca un altro flow (sub-flow) con input mappati. Componibilità ricorsiva."
+    },
+    "agent": {
+      "label": "Agente",
+      "desc": "Esegue un singolo agente del Multi-Agent con i suoi tool e il suo modello."
+    },
+    "team": {
+      "label": "Team",
+      "desc": "Esegue un team di agenti con la sua topologia (supervisor/sequenziale/parallelo)."
+    },
+    "condition": {
+      "label": "Condizione",
+      "desc": "Biforca il flusso: attiva il ramo vero/falso in base a un confronto. Collega i due handle."
+    },
+    "loop": {
+      "label": "Loop",
+      "desc": "Itera su un array (binding) eseguendo un sub-flow per ogni elemento. Output = array."
+    },
+    "join": {
+      "label": "Join",
+      "desc": "Fan-in: attende tutti i predecessori e ne raccoglie gli output in un oggetto."
+    },
+    "chat": {
+      "label": "Chat",
+      "desc": "Consegna un messaggio (binding) in una chat dedicata, con notifica e badge non letto."
+    }
   },
   "node": {
     "deleteNode": "Elimina nodo",
@@ -132,7 +176,15 @@
     "custom": "personalizzato",
     "atMinute": "al minuto",
     "at": "alle",
-    "dow": { "1": "Lun", "2": "Mar", "3": "Mer", "4": "Gio", "5": "Ven", "6": "Sab", "0": "Dom" }
+    "dow": {
+      "1": "Lun",
+      "2": "Mar",
+      "3": "Mer",
+      "4": "Gio",
+      "5": "Ven",
+      "6": "Sab",
+      "0": "Dom"
+    }
   },
   "bind": {
     "extraParams": "Parametri extra (non dichiarati)",
@@ -143,5 +195,10 @@
     "none": "nessun binding",
     "addArg": "argomento",
     "choose": "— scegli —"
-  }
+  },
+  "pluginBadge": "Plugin",
+  "pluginTurnOn": "Accendi",
+  "pluginTurnOff": "Spegni",
+  "duplicateTitle": "Duplica",
+  "pluginReadOnly": "Questo flow viene da un plugin: è in sola lettura. Duplicalo per modificarlo."
 }

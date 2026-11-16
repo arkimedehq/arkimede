@@ -1,0 +1,35 @@
+# A minimal, neutral plugin: notes kept in the plugin's storage, a page to read and add them, an event when one is
+# added, a notification to the plugin's owner, and a flow (switched off) that starts on that event.
+contract: 1
+name: notes-demo
+version: 1.0.0
+label: Notes
+description: Short notes kept by the plugin, with a page to read and add them.
+author: Arkimede
+license: AGPL-3.0-or-later
+
+settings:
+  - { key: NOTIFY_TITLE, description: Title of the notification sent when a note is added, default: New note }
+
+contributes:
+  skills: [skills/notes]
+  routes:
+    - { method: GET, path: notes, skill: notes, script: scripts/list.py }
+    - { method: POST, path: notes, skill: notes, script: scripts/add.py }
+  ui:
+    pages:
+      - { id: notes, title: Notes, entry: ui/index.html }
+  flows: [flows/note-added.json]
+
+events:
+  - name: note.added
+    description: A note was added from the page.
+    schema:
+      type: object
+      required: [id, text]
+      properties:
+        id: { type: string }
+        text: { type: string }
+
+services: [storage, notify]
+storage: { quotaKb: 256 }

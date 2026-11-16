@@ -43,6 +43,12 @@ export interface UserProfile {
   gender?: UserGender | null;
   /** Recordare Atlas address (admins only, when installed). */
   recordareAtlasUrl?: string | null;
+  /** The agent of the user's voice turns (the satellites assigned to them); null = the standard pipeline. */
+  voiceAgentId?: string | null;
+  /** Their presence from Home Assistant also into their own memory. */
+  presenceInMyMemory?: boolean;
+  /** Their turns on satellites that are not theirs (recognised by voice) also into their own memory. */
+  sharedTurnsInMyMemory?: boolean;
   createdAt:    string;
   updatedAt:    string;
 }
@@ -73,6 +79,9 @@ export const profileApi = {
     episodicMemoryMode?: MemoryMode;
     gender?: UserGender | null;
     recordareCopyCategories?: string[];
+    voiceAgentId?: string | null;
+    presenceInMyMemory?: boolean;
+    sharedTurnsInMyMemory?: boolean;
   }): Promise<UserProfile> =>
     api.patch('/users/me', data).then((r) => r.data),
 

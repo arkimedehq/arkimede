@@ -5,6 +5,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from '../users/users.entity';
 import { RecordareIdentityService } from './recordare-identity.service';
+import { RecordareConversationsService } from './recordare-conversations.service';
 import { RecordareOutboxService } from './recordare-outbox.service';
 import { RecordareMessageSubscriber } from './recordare-message.subscriber';
 import { RecordareMcpService } from './recordare-mcp.service';
@@ -27,7 +28,7 @@ import { RecordareWebhookController } from './recordare-webhook.controller';
 @Module({
   imports: [TypeOrmModule.forFeature([User]), UserMemoryModule, NotificationsModule, SkillsModule],
   controllers: [RecordareDiaryController, RecordareWebhookController],
-  providers: [RecordareIdentityService, RecordareOutboxService, RecordareMessageSubscriber, RecordareMcpService, RecordareNotesSyncService,
+  providers: [RecordareIdentityService, RecordareOutboxService, RecordareConversationsService, RecordareMessageSubscriber, RecordareMcpService, RecordareNotesSyncService,
     RecordareInitiativesService],
   exports: [RecordareIdentityService, RecordareMcpService, RecordareInitiativesService],
 })

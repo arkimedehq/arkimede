@@ -12,7 +12,9 @@
  *   - `sequential` → A → B → C (the output of one = the input of the next). [MA-3]
  *   - `supervisor` / `parallel` → MA-4 (StateGraph).
  */
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, Optional } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
+import { DataSource } from 'typeorm';
 import { I18nContext } from 'nestjs-i18n';
 import { createReactAgent } from '@langchain/langgraph/prebuilt';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
@@ -39,6 +41,8 @@ import { LlmUsage, emptyUsage, addUsage, sumUsageFromMessages, usageFromResult }
 import { runWithLlmCallContext, getLlmCallContext } from '../usage/llm-call-context';
 import { withAgentSpan, withRunParent } from '../observability/genai-tracing';
 import { agentToolName } from './agent-tool-name';
+import { recursionLimitOf } from './agent-run-options';
+import { SandboxService } from '../sandbox/sandbox.service';
 
 export interface TeamStep { agent: string; role: string | null; output: string }
 export interface TeamRunResult {
@@ -60,6 +64,8 @@ export class MultiAgentService {
     private readonly flows: FlowsService,
     private readonly llmConfigs: LlmConfigsService,
     private readonly memory: AgentMemoryService,
+    @Optional() private readonly moduleRef?: ModuleRef,
+    @Optional() private readonly ds?: DataSource,
   ) {}
 
   // ── Entry point with access check ───────────────────────────────────────────
@@ -115,9 +121,10 @@ export class MultiAgentService {
       schema: z.object({
         input: z.string().describe('The task / request to assign to the agent, in natural language.'),
       }),
-      // withRunParent: the delegated agent's span nests under this tool's span.
-      func: async ({ input }, runManager) =>
-        withRunParent(runManager?.runId, () => this.runAgent(agent, userId, input, projectId)),
+      // withRunParent: the delegated agent's span nests under this tool's span. The caller's stop (its run's signal,
+      // in the tool's config) stops the delegated agent too.
+      func: async ({ input }, runManager, config) =>
+        withRunParent(runManager?.runId, () => this.runAgent(agent, userId, input, projectId, config?.signal)),
     });
   }
 
@@ -144,18 +151,19 @@ export class MultiAgentService {
 
   // ── Building & running a single agent ──────────────────────────
 
-  async runAgent(agent: Agent, userId: string, input: string, projectId?: string): Promise<string> {
-    return (await this.runAgentWithUsage(agent, userId, input, projectId)).text;
+  async runAgent(agent: Agent, userId: string, input: string, projectId?: string, signal?: AbortSignal): Promise<string> {
+    return (await this.runAgentWithUsage(agent, userId, input, projectId, signal)).text;
   }
 
-  private async runAgentWithUsage(agent: Agent, userId: string, input: string, projectId?: string): Promise<{ text: string; usage: LlmUsage }> {
+  private async runAgentWithUsage(agent: Agent, userId: string, input: string, projectId?: string, signal?: AbortSignal): Promise<{ text: string; usage: LlmUsage }> {
     const { executor, callbacks } = await this.buildAgent(agent, userId, input, projectId);
     // LangGraph does not fire the model's instance callbacks (serving metrics):
     // re-passed via config, same workaround as AgentService. Class inherited
     // from the surroundings (chat-triggered teams stay interactive).
     const result: any = await withAgentSpan({ name: agent.name, id: agent.id, userId }, () => runWithLlmCallContext(
       { priority: getLlmCallContext().priority ?? 'interactive', userId, origin: 'team' },
-      () => executor.invoke({ messages: [new HumanMessage(input)] }, { callbacks }),
+      // Its own step budget (Agent.maxIterations), not LangGraph's default 25: a delegated task may be long.
+      () => executor.invoke({ messages: [new HumanMessage(input)] }, { callbacks, recursionLimit: recursionLimitOf(agent.maxIterations), ...(signal ? { signal } : {}) }),
     ));
     const messages = result?.messages ?? [];
     const last = messages[messages.length - 1];
@@ -194,7 +202,26 @@ export class MultiAgentService {
     };
   }
 
-  /** Loads the user's tools (custom/mcp/skill/flow) and applies the agent's filter. */
+  /**
+   * The sandbox (`run_in_sandbox`, a gated built-in) for an agent whose filter asks for it (all its tools, or the name),
+   * when it is on for the user — as in the chat; the workspace is the conversation's.
+   */
+  private async sandboxTools(agent: Agent, userId: string, projectId?: string): Promise<DynamicStructuredTool[]> {
+    const filter = agent.toolFilter;
+    const wanted = (filter?.mode ?? 'all') === 'all' || (filter?.mode === 'names' && (filter.names ?? []).includes('run_in_sandbox'));
+    let sandbox: SandboxService | null = null;
+    try {
+      sandbox = wanted ? (this.moduleRef?.get(SandboxService, { strict: false }) ?? null) : null;
+    } catch {
+      sandbox = null;   // no sandbox in this app: the agent runs without it
+    }
+    if (!sandbox) return [];
+    const [user] = (await this.ds?.query(`SELECT "role" FROM "users" WHERE "id" = $1`, [userId]).catch(() => [])) ?? [];
+    if (!(await sandbox.isEnabledFor(userId, projectId, user?.role === 'admin'))) return [];
+    return sandbox.buildSandboxTools(userId, projectId, getLlmCallContext().conversationId);
+  }
+
+  /** Loads the user's tools (custom/mcp/skill/flow, the sandbox when asked) and applies the agent's filter. */
   private async loadFilteredTools(agent: Agent, userId: string, projectId?: string): Promise<DynamicStructuredTool[]> {
     const mode = agent.toolFilter?.mode ?? 'all';
     if (mode === 'none') return [];
@@ -204,6 +231,7 @@ export class MultiAgentService {
       this.mcp.loadToolsForUser(userId),
       this.skills.loadToolsForUser(userId, projectId),
       this.flows.loadToolsForUser(userId, projectId),
+      this.sandboxTools(agent, userId, projectId),
     ]);
     const all = groups.flat();
 

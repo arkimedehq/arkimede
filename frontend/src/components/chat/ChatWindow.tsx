@@ -6,7 +6,9 @@ import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Download, Loader2, Check, X, Brain, Eye, Network, Lock, LockOpen } from 'lucide-react';
 import { messagesApi } from '../../api/messages';
-import { chatRunsApi, watchChatMemory, watchChatRun, type ChatRunState } from '../../api/chatRuns';
+import {
+  chatRunsApi, sequencesApi, watchChatMemory, watchChatRun, watchChatSequences, type ChatRunState, type SequenceState,
+} from '../../api/chatRuns';
 import { chatsApi } from '../../api/chats';
 import { agentTeamsApi } from '../../api/agents';
 import { profileApi } from '../../api/profile';
@@ -17,6 +19,7 @@ import MessageBubble, { sandboxSkillName } from './MessageBubble';
 import MessageInput from './MessageInput';
 import FilePanel from '../files/FilePanel';
 import RunStatus from './RunStatus';
+import SequenceStatus from './SequenceStatus';
 import { downloadWithAuth } from '../../utils/downloadWithAuth';
 
 interface Props {
@@ -88,6 +91,9 @@ export default function ChatWindow({ chatId }: Props) {
   const runRef = useRef<ChatRunState | null>(null);
   const showRun = (next: ChatRunState | null) => { runRef.current = next; setRun(next); };
   const [stopping, setStopping] = useState(false);
+  // The sequences started from this chat (run_sequence), by id, and the ones being stopped.
+  const [sequences, setSequences] = useState<SequenceState[]>([]);
+  const [stoppingSequences, setStoppingSequences] = useState<Set<string>>(new Set());
   const chatIdRef = useRef(chatId);
   chatIdRef.current = chatId;
   const mountedRef = useRef(true);
@@ -192,6 +198,37 @@ export default function ChatWindow({ chatId }: Props) {
     const poll = setInterval(() => { if (!abortRef.current) read(); }, 15_000);
     return () => { alive = false; unwatch(); clearInterval(poll); };
   }, [chatId, qc]);
+
+  // ── Sequences started from this chat: read when it opens, then followed on the socket ──
+  useEffect(() => {
+    setSequences([]);
+    setStoppingSequences(new Set());
+    let alive = true;
+    sequencesApi.list(chatId).then((list) => { if (alive) setSequences(list); }).catch(() => undefined);
+    const unwatch = watchChatSequences(chatId, (event) => {
+      if (event.sequence) {
+        const next = event.sequence;
+        setSequences((prev) => (prev.some((x) => x.sequenceId === next.sequenceId)
+          ? prev.map((x) => (x.sequenceId === next.sequenceId ? next : x))
+          : [...prev, next]));
+        return;
+      }
+      setSequences((prev) => prev.filter((x) => x.sequenceId !== event.sequenceId));
+      setStoppingSequences((prev) => { const n = new Set(prev); n.delete(event.sequenceId); return n; });
+      // Its end line was written in this chat.
+      if (event.messageId) qc.invalidateQueries({ queryKey: ['messages', chatId] });
+    });
+    return () => { alive = false; unwatch(); };
+  }, [chatId, qc]);
+
+  const stopSequence = (sequenceId: string) => {
+    setStoppingSequences((prev) => new Set(prev).add(sequenceId));
+    sequencesApi.stop(sequenceId).catch(() => setStoppingSequences((prev) => {
+      const n = new Set(prev);
+      n.delete(sequenceId);
+      return n;
+    }));
+  };
 
   // ── Memory proposals of this chat: the ones still to confirm, and the new ones ──
   // (also when another page of this user sent the message, or this one reloaded).
@@ -492,6 +529,16 @@ export default function ChatWindow({ chatId }: Props) {
               stopping={stopping}
             />
           )}
+
+          {/* Sequences started from this chat, running in the background */}
+          {sequences.map((sq) => (
+            <SequenceStatus
+              key={sq.sequenceId}
+              sequence={sq}
+              onStop={() => stopSequence(sq.sequenceId)}
+              stopping={stoppingSequences.has(sq.sequenceId)}
+            />
+          ))}
 
           {/* Error banner — visible between the end of streaming and the message reload */}
           {streamError && !isStreaming && (

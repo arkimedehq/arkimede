@@ -43,6 +43,7 @@ export class UpdateTaskDto {
   @IsOptional() @ValidateNested() @Type(() => ToolFilterDto) toolFilter?: ToolFilterDto;
   /** null = global default, absent = unchanged; validated only when a value is sent. */
   @ValidateIf((o) => o.maxTokensPerRun != null) @IsInt() @Min(0) maxTokensPerRun?: number | null;
+  @IsOptional() @IsBoolean() voice?: boolean;
 }
 
 @ApiTags('scheduled-tasks')

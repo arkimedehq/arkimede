@@ -30,7 +30,7 @@ function makeService(task: any, env: Record<string, any> = { SCHED_MAX_TOKENS_PE
     save: async (t: any) => t,
   };
   const config = { get: (k: string, d?: any) => (k in env ? env[k] : d) };
-  return new SchedulingService(config as any, {} as any, repo as any, {} as any, {} as any, {} as any, {} as any);
+  return new SchedulingService(config as any, {} as any, repo as any, {} as any, {} as any, {} as any, {} as any, {} as any);
 }
 
 describe('SchedulingService.update', () => {

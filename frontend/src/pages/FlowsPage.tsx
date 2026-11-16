@@ -13,7 +13,7 @@ import 'reactflow/dist/style.css';
 import {
   Workflow, Plus, Trash2, Play, Save, X, Loader2, Wrench, Bot, GitBranch,
   ArrowLeft, History, CheckCircle2, XCircle, MinusCircle, Globe, Sparkles, Wand2, Braces, Network,
-  Repeat, GitMerge, MessageSquare,
+  Repeat, GitMerge, MessageSquare, Puzzle, Power, Copy,
 } from 'lucide-react';
 
 import {
@@ -156,6 +156,16 @@ export function FlowsSection() {
     onSuccess: () => { setErr(null); invalidate(); },
     onError: (e: any) => setErr(e?.response?.data?.message ?? t('errDelete')),
   });
+  const duplicateM = useMutation({
+    mutationFn: (id: string) => flowsApi.duplicate(id),
+    onSuccess: () => { setErr(null); invalidate(); },
+    onError: (e: any) => setErr(e?.response?.data?.message ?? t('errSave')),
+  });
+  const toggleM = useMutation({
+    mutationFn: (f: Flow) => flowsApi.toggle(f.id, !f.enabled),
+    onSuccess: () => { setErr(null); invalidate(); },
+    onError: (e: any) => setErr(e?.response?.data?.message ?? t('errSave')),
+  });
 
   if (editing) {
     return (
@@ -205,15 +215,30 @@ export function FlowsSection() {
                   <div className="font-medium text-gray-100 truncate flex items-center gap-2">
                     {f.name}
                     {!f.enabled && <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-500">{t('offBadge')}</span>}
+                    {f.pluginId && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 flex items-center gap-1"><Puzzle size={10} />{t('pluginBadge')}</span>}
                   </div>
                   <div className="text-xs text-gray-500 mt-0.5">
                     {t('nodesScope', { count: f.definition?.nodes?.length ?? 0, scope: f.scope })}
                   </div>
                 </button>
-                <button title={t('deleteFlowTitle')} className="text-gray-500 hover:text-red-400"
-                  onClick={() => { if (confirm(t('deleteFlowConfirm', { name: f.name }))) removeM.mutate(f.id); }}>
-                  <Trash2 size={15} />
-                </button>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {f.pluginId && (
+                    <button title={f.enabled ? t('pluginTurnOff') : t('pluginTurnOn')} className="text-gray-500 hover:text-gray-200"
+                      disabled={toggleM.isPending} onClick={() => toggleM.mutate(f)}>
+                      <Power size={15} />
+                    </button>
+                  )}
+                  <button title={t('duplicateTitle')} className="text-gray-500 hover:text-gray-200"
+                    disabled={duplicateM.isPending} onClick={() => duplicateM.mutate(f.id)}>
+                    <Copy size={15} />
+                  </button>
+                  {!f.pluginId && (
+                    <button title={t('deleteFlowTitle')} className="text-gray-500 hover:text-red-400"
+                      onClick={() => { if (confirm(t('deleteFlowConfirm', { name: f.name }))) removeM.mutate(f.id); }}>
+                      <Trash2 size={15} />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           ))}
@@ -356,7 +381,7 @@ function FlowEditor({ flow, isNew = false, onClose }: { flow: Flow; isNew?: bool
         <button onClick={() => setRunOpen(true)} className="px-3 py-1.5 text-sm rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white flex items-center gap-1.5">
           <Play size={15} /> {t('editor.run')}
         </button>
-        <button onClick={() => saveM.mutate()} disabled={saveM.isPending}
+        <button onClick={() => saveM.mutate()} disabled={saveM.isPending || !!flow.pluginId} title={flow.pluginId ? t('pluginReadOnly') : undefined}
           className="btn-primary px-3 py-1.5 text-sm flex items-center gap-1.5">
           {saveM.isPending ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} {t('common:actions.save')}
         </button>
@@ -365,6 +390,12 @@ function FlowEditor({ flow, isNew = false, onClose }: { flow: Flow; isNew?: bool
       {err && (
         <div className="flex items-center justify-between gap-3 bg-red-950/50 border border-red-900 text-red-300 text-sm rounded-lg px-3 py-2 mb-3">
           <span>{err}</span><button onClick={() => setErr(null)}><X size={14} /></button>
+        </div>
+      )}
+
+      {flow.pluginId && (
+        <div className="flex items-center gap-2 bg-blue-500/10 border border-blue-500/30 text-blue-300 text-sm rounded-lg px-3 py-2 mb-3">
+          <Puzzle size={14} className="flex-shrink-0" /><span>{t('pluginReadOnly')}</span>
         </div>
       )}
 
@@ -381,6 +412,7 @@ function FlowEditor({ flow, isNew = false, onClose }: { flow: Flow; isNew?: bool
           <option value="scheduled">{t('trigger.scheduled')}</option>
           <option value="webhook">{t('trigger.webhook')}</option>
           <option value="home-assistant">{t('trigger.homeAssistant')}</option>
+          <option value="plugin-event">{t('trigger.pluginEvent')}</option>
         </select>
         {trigger.type === 'cron' && (
           <CronBuilder value={trigger.cron ?? ''} onChange={(cron) => setTrigger({ ...trigger, cron })} />
@@ -403,6 +435,24 @@ function FlowEditor({ flow, isNew = false, onClose }: { flow: Flow; isNew?: bool
               className="bg-gray-900 border border-gray-800 rounded-lg px-2.5 py-1.5 text-gray-200 w-24" />
             <input type="number" min={0} value={trigger.ha?.cooldownSeconds ?? ''} placeholder={t('trigger.haCooldown')} title={t('trigger.haCooldownHint')}
               onChange={(e) => setTrigger({ ...trigger, ha: { ...(trigger.ha ?? { entityId: '' }), cooldownSeconds: e.target.value === '' ? undefined : Number(e.target.value) } })}
+              className="bg-gray-900 border border-gray-800 rounded-lg px-2.5 py-1.5 text-gray-200 w-20" />
+          </>
+        )}
+        {trigger.type === 'plugin-event' && (
+          <>
+            <input value={trigger.plugin?.event ?? ''} placeholder={t('trigger.pluginEventType')} title={t('trigger.pluginEventTypeHint')}
+              onChange={(e) => setTrigger({ ...trigger, plugin: { ...(trigger.plugin ?? { event: '' }), event: e.target.value.trim() } })}
+              className="bg-gray-900 border border-gray-800 rounded-lg px-2.5 py-1.5 text-gray-200 w-56" />
+            <input defaultValue={trigger.plugin?.match ? JSON.stringify(trigger.plugin.match) : ''} placeholder={t('trigger.pluginMatch')} title={t('trigger.pluginMatchHint')}
+              onBlur={(e) => {
+                const text = e.target.value.trim();
+                let match: Record<string, string | number | boolean> | undefined;
+                try { match = text ? JSON.parse(text) : undefined; } catch { setErr(t('trigger.pluginMatchInvalid')); return; }
+                setTrigger({ ...trigger, plugin: { ...(trigger.plugin ?? { event: '' }), match } });
+              }}
+              className="bg-gray-900 border border-gray-800 rounded-lg px-2.5 py-1.5 text-gray-200 w-48 font-mono text-xs" />
+            <input type="number" min={0} value={trigger.plugin?.cooldownSeconds ?? ''} placeholder={t('trigger.haCooldown')}
+              onChange={(e) => setTrigger({ ...trigger, plugin: { ...(trigger.plugin ?? { event: '' }), cooldownSeconds: e.target.value === '' ? undefined : Number(e.target.value) } })}
               className="bg-gray-900 border border-gray-800 rounded-lg px-2.5 py-1.5 text-gray-200 w-20" />
           </>
         )}

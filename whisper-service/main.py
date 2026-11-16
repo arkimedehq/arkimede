@@ -25,6 +25,10 @@ voices): a request may name any model of ALLOWED_MODELS in its `model` field; if
 it differs from the loaded one, the service swaps it under a lock (download on
 first use). A single model is kept in memory to bound RAM.
 
+Speaker embeddings (`POST /v1/speaker/embed`): a voiceprint of a short recording — a vector compared by the backend
+with the voices it learned (who spoke to a satellite). sherpa-onnx with SPEAKER_MODEL (default CAM++, ~30 MB),
+downloaded on first use into `<models>/speaker/`, loaded on the first request and kept: unused, it costs nothing.
+
 Parakeet: the model is downloaded on first use into the same volume
 (`<models>/parakeet/<PARAKEET_MODEL>/`), unless PARAKEET_OFFLINE=1.
 
@@ -81,6 +85,19 @@ PARAKEET_THREADS = int(os.getenv("PARAKEET_THREADS", "0")) or CPU_THREADS or 4
 PARAKEET_OFFLINE = os.getenv("PARAKEET_OFFLINE", "0") == "1"
 PARAKEET_DIR     = MODELS_DIR / "parakeet" / PARAKEET_MODEL
 SAMPLE_RATE      = 16_000
+
+# Speaker embeddings (sherpa-onnx): model id = the release file name without `.onnx`.
+SPEAKER_MODEL = os.getenv("SPEAKER_MODEL", "3dspeaker_speech_campplus_sv_en_voxceleb_16k").strip()
+if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", SPEAKER_MODEL):
+    raise SystemExit(f"SPEAKER_MODEL is not a valid model name: {SPEAKER_MODEL!r}")
+SPEAKER_URL = os.getenv(
+    "SPEAKER_MODEL_URL",
+    f"https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/{SPEAKER_MODEL}.onnx",
+)
+SPEAKER_FILE = MODELS_DIR / "speaker" / f"{SPEAKER_MODEL}.onnx"
+SPEAKER_THREADS = int(os.getenv("SPEAKER_THREADS", "2"))
+# Shorter than this, a voiceprint says little: the backend gets no vector.
+SPEAKER_MIN_SECONDS = float(os.getenv("SPEAKER_MIN_SECONDS", "1.0"))
 
 # Models an admin may switch to at runtime, smallest → largest (multilingual only:
 # the `.en` variants would break the language hint). RAM (int8, CPU) ≈ 0.3 / 0.5 /
@@ -241,6 +258,50 @@ def parakeet_transcribe(data: bytes) -> tuple[str, float]:
     return stream.result.text.strip(), samples.size / SAMPLE_RATE
 
 
+# ── Speaker embeddings ───────────────────────────────────────────────────────
+
+speaker = None                         # sherpa_onnx.SpeakerEmbeddingExtractor, loaded on first use
+_speaker_lock = threading.Lock()
+
+
+def load_speaker():
+    """The extractor, downloading the model file the first time (atomically)."""
+    global speaker
+    with _speaker_lock:
+        if speaker is not None:
+            return speaker
+        import sherpa_onnx
+
+        if not SPEAKER_FILE.is_file():
+            SPEAKER_FILE.parent.mkdir(parents=True, exist_ok=True)
+            part = SPEAKER_FILE.with_suffix(".onnx.part")
+            logger.info(f"Downloading speaker model {SPEAKER_MODEL} from {SPEAKER_URL}")
+            with urllib.request.urlopen(SPEAKER_URL, timeout=60) as res, open(part, "wb") as out:
+                shutil.copyfileobj(res, out)
+            os.replace(part, SPEAKER_FILE)
+        config = sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=str(SPEAKER_FILE), num_threads=SPEAKER_THREADS)
+        if not config.validate():
+            raise RuntimeError(f"invalid speaker model {SPEAKER_FILE}")
+        speaker = sherpa_onnx.SpeakerEmbeddingExtractor(config)
+        logger.info(f"Speaker model {SPEAKER_MODEL} ready (dim {speaker.dim})")
+        return speaker
+
+
+def speaker_embed(data: bytes) -> tuple[list[float] | None, float]:
+    """The voiceprint of a recording (None when too short) and its duration (s)."""
+    samples = decode_audio(io.BytesIO(data), sampling_rate=SAMPLE_RATE)
+    seconds = samples.size / SAMPLE_RATE
+    if seconds < SPEAKER_MIN_SECONDS:
+        return None, seconds
+    extractor = load_speaker()
+    stream = extractor.create_stream()
+    stream.accept_waveform(SAMPLE_RATE, samples)
+    stream.input_finished()
+    if not extractor.is_ready(stream):
+        return None, seconds
+    return list(extractor.compute(stream)), seconds
+
+
 # ── App ───────────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
@@ -306,6 +367,18 @@ async def transcribe(
     if response_format == "text":
         return text
     return {"text": text}
+
+
+@app.post("/v1/speaker/embed")
+async def embed_speaker(file: UploadFile = File(...)):
+    """`{embedding, model, seconds}`; `embedding` null when the recording is too short to tell a voice."""
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty audio")
+    t0 = time.perf_counter()
+    embedding, seconds = speaker_embed(data)
+    logger.info(f"speaker embed → {'none' if embedding is None else len(embedding)} in {(time.perf_counter() - t0) * 1000:.0f}ms (audio={seconds:.1f}s)")
+    return {"embedding": embedding, "model": SPEAKER_MODEL, "seconds": round(seconds, 2)}
 
 
 @app.get("/v1/models")

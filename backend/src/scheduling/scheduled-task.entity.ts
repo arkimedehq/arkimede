@@ -6,7 +6,8 @@
  *
  * An **automation** scheduled by the user (including from chat, via the built-in
  * tool `schedule_task`). On fire, a headless runner re-runs the agent with
- * `instruction` and delivers the outcome via a notification. See SchedulingService.
+ * `instruction` and delivers the outcome in a chat with a notification, and by voice
+ * when `voice` is on. See SchedulingService.
  */
 import {
   Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn,
@@ -62,6 +63,13 @@ export class ScheduledTask {
    */
   @Column({ type: 'uuid', nullable: true })
   chatId: string | null;
+
+  /**
+   * Voice delivery: the outcome is also said aloud on a voice satellite of the user, only where they are confirmed
+   * present (VoiceDeliveryService); always written in the chat too. On by default when it was asked for by voice.
+   */
+  @Column({ type: 'boolean', default: false })
+  voice: boolean;
 
   @Column({ type: 'boolean', default: true })
   enabled: boolean;

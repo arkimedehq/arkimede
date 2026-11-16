@@ -115,6 +115,7 @@ export function AutomationsSection() {
                     {task.maxTokensPerRun != null && (
                       <span className="text-gray-600"> · {task.maxTokensPerRun === 0 ? t('info.capOff') : t('info.cap', { count: task.maxTokensPerRun.toLocaleString() })}</span>
                     )}
+                    {task.voice && <span className="text-gray-600"> · {t('info.voice')}</span>}
                     <span className="text-gray-600"> · {t('info.toolLabel')}: {task.toolFilter?.mode === 'none' || !task.toolFilter ? t('info.toolNone') : task.toolFilter.mode === 'all' ? t('info.toolAll') : (task.toolFilter.names ?? []).join(', ') || '—'}</span>
                   </div>
                   {/* bg-gray-800/50, not gray-900/40: only some opacity steps are remapped
@@ -183,6 +184,7 @@ function AutomationEditor({ task, onClose, onSaved }: { task: ScheduledTask; onC
   const [timezone, setTimezone] = useState(task.timezone ?? '');
   const [useTools, setUseTools] = useState(task.toolFilter?.mode === 'names' || task.toolFilter?.mode === 'all');
   const [tools, setTools] = useState<Set<string>>(new Set(task.toolFilter?.names ?? []));
+  const [voice, setVoice] = useState(!!task.voice);
   const [customCap, setCustomCap] = useState(task.maxTokensPerRun != null);
   const [cap, setCap] = useState(task.maxTokensPerRun != null ? String(task.maxTokensPerRun) : '');
   const [err, setErr] = useState<string | null>(null);
@@ -211,6 +213,7 @@ function AutomationEditor({ task, onClose, onSaved }: { task: ScheduledTask; onC
           : task.toolFilter?.mode === 'all' ? { mode: 'all' }
           : { mode: 'names', names: [...tools] },
         maxTokensPerRun: customCap ? capNum : null,
+        voice,
       };
       if (isCron) data.cron = cron.trim();
       else if (runAt !== toLocalInput(task.runAt)) data.runAt = new Date(runAt).toISOString();
@@ -290,6 +293,14 @@ function AutomationEditor({ task, onClose, onSaved }: { task: ScheduledTask; onC
                 )}
               </>
             ))}
+        </div>
+
+        <div className="mb-3">
+          <label className="flex items-center gap-2 text-xs font-medium text-gray-400">
+            <input type="checkbox" className="accent-indigo-500" checked={voice} onChange={(e) => setVoice(e.target.checked)} />
+            {t('edit.voice')}
+          </label>
+          <p className="text-[11px] text-gray-500 mt-1">{t('edit.voiceHint')}</p>
         </div>
 
         <div className="mb-4">

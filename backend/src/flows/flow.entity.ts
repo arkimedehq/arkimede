@@ -81,6 +81,10 @@ export class Flow {
   @Column({ type: 'uuid', nullable: true })
   teamId: string | null;
 
+  /** The plugin that contributed it (specs/PLUGINS.md §5): managed with the plugin, not by hand. Null otherwise. */
+  @Column({ type: 'uuid', nullable: true, default: null })
+  pluginId: string | null;
+
   @CreateDateColumn()
   createdAt: Date;
 

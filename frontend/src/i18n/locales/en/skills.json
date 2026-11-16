@@ -4,6 +4,7 @@
   "tabs": {
     "mine": "My skills",
     "shared": "Shared",
+    "all": "All",
     "public": "Marketplace",
     "daemons": "Background",
     "review": "Review"
@@ -41,7 +42,10 @@
     "notReadyTitle": "The skill must be ready to be published",
     "sendReview": "Send for review",
     "publishTeam": "Publish to team",
-    "makePersonal": "Make personal"
+    "makePersonal": "Make personal",
+    "personalOnly": "Personal skill: it uses one person's account or data and stays yours only (everyone installs their own copy).",
+    "adminShares": "Only the admin shares it with a team or the organization.",
+    "personalBadge": "Personal"
   },
   "detail": {
     "skillId": "Skill ID",
@@ -248,5 +252,14 @@
     "off": "Disabled",
     "onHint": "Switched on by its owner: agents can use it",
     "offHint": "Switched off by its owner: no agent can use it for now"
+  },
+  "plugin": {
+    "badge": "Plugin",
+    "managed": "This skill comes from a plugin: it is updated, shared and deleted from the plugin's page."
+  },
+  "all": {
+    "info": "Every user's skills, personal or pending included. From here an admin opens them and sets their network; changing, sharing or deleting them stays the owner's.",
+    "search": "Search by name or owner",
+    "empty": "No skills"
   }
 }

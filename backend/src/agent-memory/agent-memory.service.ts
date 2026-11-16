@@ -47,6 +47,11 @@ export interface AgentMemoryRequest {
   query?: string;
   /** Extra topical signal for A-MEM's retrieval (e.g. the tail of the rolling summary). */
   querySignal?: string;
+  /**
+   * The agent has tools this turn (not a words-only guest): the memory may hand it a look-up to do (Recordare
+   * `initiatives.lookups`) — it finds the answer with its tools and keeps it with `learn_source`.
+   */
+  lookups?: boolean;
 }
 
 export interface AgentMemory {
@@ -96,7 +101,7 @@ export class AgentMemoryService {
 
     const [notes, recordare] = await Promise.all([
       usesNotes ? this.notes(user.id, use, query, req.querySignal) : null,
-      wantsRecordare ? this.recordareTurn(user.id, req.conversationId!, query) : null,
+      wantsRecordare ? this.recordareTurn(user.id, req.conversationId!, query, !!req.lookups) : null,
     ]);
     const noteTools = usesNotes ? this.userMemory!.buildMemoryTools(user.id, req.chatId, use) : [];
 
@@ -144,10 +149,10 @@ export class AgentMemoryService {
    * Recordare's part of the turn, or null when Recordare did not answer (the caller falls back to A-MEM).
    * The context call decides: it runs every turn and is bounded; the charter and the tools are cached.
    */
-  private async recordareTurn(userId: string, conversationId: string, query: string) {
+  private async recordareTurn(userId: string, conversationId: string, query: string, lookups = false) {
     const recordare = this.recordare!;
     const [ctx, tools] = await Promise.all([
-      query ? recordare.context(userId, conversationId, query) : Promise.resolve({ reachable: true, block: null }),
+      query ? recordare.context(userId, conversationId, query, { lookups }) : Promise.resolve({ reachable: true, block: null }),
       recordare.buildTools(userId, conversationId),
     ]);
     if (!ctx.reachable) return null;

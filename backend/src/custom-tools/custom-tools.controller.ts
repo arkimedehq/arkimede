@@ -34,7 +34,7 @@
 import {
   Controller, Get, Post, Put, Patch, Delete,
   Body, Param, UseGuards, HttpCode, HttpStatus,
-  Inject, Logger, ForbiddenException,
+  Inject, Logger, ForbiddenException, BadRequestException,
 } from '@nestjs/common';
 import {
   ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiParam, ApiBody,
@@ -109,6 +109,11 @@ class CreateToolDto {
   @IsIn(['personal', 'team', 'org'])
   scope?: 'personal' | 'team' | 'org';
 
+  /** Personal: it uses one person's account or data — never shared (the "Personal" option). */
+  @IsOptional()
+  @IsBoolean()
+  personal?: boolean;
+
   /** Reference team (mandatory if scope='team'). */
   @IsOptional()
   @IsUUID()
@@ -162,6 +167,11 @@ class UpdateToolDto {
   @IsIn(['personal', 'team', 'org'])
   scope?: 'personal' | 'team' | 'org';
 
+  /** Personal: it uses one person's account or data — never shared (the "Personal" option). */
+  @IsOptional()
+  @IsBoolean()
+  personal?: boolean;
+
   @IsOptional()
   @IsUUID()
   teamId?: string | null;
@@ -213,8 +223,7 @@ export class CustomToolsController {
    * Verifies that the user can MANAGE (create with this scope / modify /
    * delete) a resource with the given scope/teamId:
    *   - personal → only the creator (ownerId)
-   *   - org      → only admin
-   *   - team     → admin or team owner
+   *   - org, team → only admin (specs/EXTENSION_AUDIENCE.md)
    */
   private async assertCanManage(
     user: { id: string; role: string },
@@ -231,7 +240,6 @@ export class CustomToolsController {
     if (scope === 'team') {
       if (!teamId) throw new ForbiddenException('tools.teamIdMissing');
       if (user.role === 'admin') return;
-      if (await this.teams.isOwner(teamId, user.id)) return;
       throw new ForbiddenException('tools.teamForbidden');
     }
     // personal
@@ -259,8 +267,10 @@ export class CustomToolsController {
   @ApiResponse({ status: 409, description: 'Name already in use or reserved by the system' })
   async create(@Body() dto: CreateToolDto, @CurrentUser() user: any) {
     const scope = dto.scope ?? 'personal';
+    if (dto.personal && scope !== 'personal') throw new BadRequestException('tools.personalOnly');
     await this.assertCanManage(user, scope, dto.teamId);
     return this.service.create(user.id, {
+      personal:       !!dto.personal,
       name:           dto.name,
       description:    dto.description,
       parameters:     dto.parameters ?? [],
@@ -302,6 +312,8 @@ export class CustomToolsController {
     if (dto.scope !== undefined && dto.scope !== existing.scope) {
       await this.assertCanManage(user, dto.scope, dto.teamId ?? existing.teamId, existing.userId);
     }
+    const personal = dto.personal ?? existing.personal;
+    if (personal && (dto.scope ?? existing.scope) !== 'personal') throw new BadRequestException('tools.personalOnly');
 
     return this.service.update(id, user.id, {
       description:    dto.description,
@@ -313,6 +325,7 @@ export class CustomToolsController {
       scope:          dto.scope,
       teamId:         dto.teamId,
       secrets:        dto.secrets,
+      personal:       dto.personal,
     });
   }
 

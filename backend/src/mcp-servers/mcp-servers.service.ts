@@ -119,6 +119,8 @@ export interface CreateMcpServerDto {
   env?: Record<string, string>;
   secrets?: Record<string, string>;
   loadOnFirst?: boolean;
+  /** Personal: it uses one person's account or data — never shared (the "Personal" option). */
+  personal?: boolean;
   scope?: McpServerScope;
   teamId?: string | null;
 }
@@ -171,7 +173,7 @@ export class McpServersService implements OnModuleDestroy {
     id: true, name: true, description: true,
     transport: true, url: true, command: true, args: true,
     headers: true, env: true, enabled: true, loadOnFirst: true, userId: true,
-    scope: true, teamId: true, createdAt: true, updatedAt: true,
+    scope: true, teamId: true, personal: true, pluginId: true, createdAt: true, updatedAt: true,
     secrets: { id: true, serverId: true, keyName: true },
   } as const;
 
@@ -213,9 +215,7 @@ export class McpServersService implements OnModuleDestroy {
     if (nextScope === 'team') {
       const tid = teamId ?? current?.teamId ?? null;
       if (!tid) throw new BadRequestException('teamId is required for scope=team');
-      if (user.role !== 'admin' && !(await this.teams.isMember(tid, user.id))) {
-        throw new ForbiddenException('You can only share an MCP server with a team you belong to.');
-      }
+      if (user.role !== 'admin') throw new ForbiddenException('Only admins can share an MCP server with a team.');
       return { scope: 'team', teamId: tid };
     }
     return { scope: 'personal', teamId: null };
@@ -271,9 +271,11 @@ export class McpServersService implements OnModuleDestroy {
       );
     }
 
+    if (dto.personal && (dto.scope ?? 'personal') !== 'personal') throw new BadRequestException('A personal MCP server cannot be shared.');
     const { scope, teamId } = await this.resolveScope({ id: userId, role }, dto.scope, dto.teamId);
 
     const server = this.serverRepo.create({
+      personal:    !!dto.personal,
       userId,
       name:        dto.name,
       description: dto.description ?? null,
@@ -352,6 +354,8 @@ export class McpServersService implements OnModuleDestroy {
     if (dto.env         !== undefined) server.env         = dto.env ?? null;
     if (dto.enabled     !== undefined) server.enabled     = dto.enabled;
     if (dto.loadOnFirst !== undefined) server.loadOnFirst = dto.loadOnFirst;
+    if (dto.personal    !== undefined) server.personal    = dto.personal;
+    if (server.personal && (dto.scope ?? server.scope) !== 'personal') throw new BadRequestException('A personal MCP server cannot be shared.');
 
     if (dto.scope !== undefined || dto.teamId !== undefined) {
       const { scope, teamId } = await this.resolveScope(
@@ -400,6 +404,12 @@ export class McpServersService implements OnModuleDestroy {
   /** The server's tool-name slug: its tools are `mcp_<slug>_<tool>`. */
   static slug(name: string): string {
     return name.toLowerCase().replace(/\W+/g, '_');
+  }
+
+  /** A plugin's MCP server is managed with its plugin (specs/PLUGINS.md §5): not changed or deleted by hand. */
+  async assertNotPluginManaged(id: string): Promise<void> {
+    const server = await this.serverRepo.findOne({ where: { id }, select: { id: true, pluginId: true } });
+    if (server?.pluginId) throw new ForbiddenException('tools.mcpPluginManaged');
   }
 
   async remove(id: string, userId: string, isAdmin = false): Promise<void> {

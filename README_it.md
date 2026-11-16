@@ -178,7 +178,7 @@ Oltre alla chat, quattro sistemi integrati — e interconnessi (i flow sono tool
 
 Altre funzionalità: **tool custom** no-code (HTTP/SQL/RAG/prompt), **RAG con scope** (universale/progetto/personale), **DataSource**, **Skill eseguibili** con tier di rete per-skill, una **Sandbox** per codice arbitrario (`run_in_sandbox`), **streaming SSE** con rilevamento automatico dei file, un'**API compatibile OpenAI** per pilotare gli agenti da client esterni, **API key** a lunga scadenza per le integrazioni di servizio, input vocale (Whisper), i18n (EN/IT) e un **bridge** Electron per i processi MCP locali.
 
-👉 Riferimento completo delle funzionalità e architettura: **[PROJECT.md](docs/PROJECT.md)**. Creare Skill: **[SKILLS.md](docs/SKILLS.md)**.
+👉 Riferimento completo delle funzionalità e architettura: **[PROJECT.md](docs/PROJECT.md)**. Creare Skill: **[SKILLS.md](docs/SKILLS.md)**. Creare Plugin: **[PLUGINS_it.md](docs/PLUGINS_it.md)**.
 
 ## Client da terminale (CLI)
 
@@ -257,6 +257,7 @@ Arkimede usa un **modello a capability**: ogni potere (rete, filesystem, operazi
 | [GUIDE.md](docs/GUIDE.md) | Guida uso & sviluppo (setup, overlay, LAN, note dev) |
 | [CLI_it.md](docs/CLI_it.md) | Client da terminale (TUI, REPL, pannello impostazioni) |
 | [SKILLS.md](docs/SKILLS.md) | Come creare Skill (schema, template, convenzioni) |
+| [PLUGINS_it.md](docs/PLUGINS_it.md) | Come creare Plugin (manifest, rotte, pagine, eventi, servizi, firme) |
 | [MEMORY.md](docs/MEMORY.md) | Design della memoria agentica (A-MEM) |
 | [BACKUP_it.md](docs/BACKUP_it.md) | Backup programmati (NAS / condivisione di rete), ripristino a un istante, ripristino |
 | [LICENSING_it.md](docs/LICENSING_it.md) | Licenza (AGPL-3.0) e termini di contribuzione |

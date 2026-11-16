@@ -12,7 +12,7 @@ import { ToolSourcesRegistry, type ToolSource } from '../../src/tool-sources/too
 
 const tool = (name: string) => ({ name, description: `${name} tool` }) as any;
 
-function catalog(sources: ToolSource[], mcpTools = [tool('mcp_home_assistant_HassTurnOn')]) {
+function catalog(sources: ToolSource[], mcpTools = [tool('mcp_home_assistant_HassTurnOn')], sandboxOn = false) {
   const registry = new ToolSourcesRegistry();
   sources.forEach((s) => registry.register(s));
   const none = { loadToolsForUser: async () => [] };
@@ -23,6 +23,8 @@ function catalog(sources: ToolSource[], mcpTools = [tool('mcp_home_assistant_Has
     flowsService: none,
     multiAgentService: none,
     nativeTools: registry,
+    userRepo: { findOne: async () => ({ id: 'u1', role: 'user' }) },
+    sandboxService: { isEnabledFor: async () => sandboxOn, buildSandboxTools: () => [tool('run_in_sandbox')] },
   };
   return AgentService.prototype.buildToolCatalog.call(self as any, 'u1');
 }
@@ -50,5 +52,16 @@ describe('tool catalog — native integrations', () => {
     reg.register({ name: 'acme', loadForUser: async () => [tool('acme_ping')] });
     expect((await reg.loadGroupsForUser('u1')).map((g) => g.label)).toEqual(['acme']);
     expect((await reg.loadForUser('u1')).map((t) => t.name)).toEqual(['acme_ping']);
+  });
+});
+
+describe('tool catalog — gated built-ins', () => {
+  it('lists the sandbox when it is on for the user, so an agent\'s filter can name it (not an orphan)', async () => {
+    const { groups } = await catalog([], [], true);
+    expect(groups).toEqual([{ source: 'builtin', label: 'Built-in', wildcard: null, tools: [{ name: 'run_in_sandbox', description: 'run_in_sandbox tool' }] }]);
+  });
+
+  it('not when it is off for the user', async () => {
+    expect((await catalog([], [], false)).groups).toEqual([]);
   });
 });

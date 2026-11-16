@@ -123,6 +123,14 @@
       "team": "The agent team is working"
     }
   },
+  "sequence": {
+    "running": "Sequence running",
+    "calls_one": "{{count}} action",
+    "calls_other": "{{count}} actions",
+    "failures_one": "{{count}} failed",
+    "failures_other": "{{count}} failed",
+    "time": "{{seconds}} s of {{planned}} s"
+  },
   "private": {
     "chatOn": "Private chat",
     "chatOff": "Not private",

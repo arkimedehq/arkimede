@@ -3,11 +3,11 @@
 
 import {
   BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus,
-  Inject, Optional, Param, Patch, Post, Query, UseGuards,
+  Inject, Optional, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import {
-  IsEmail, IsIn, IsInt, IsOptional, IsString, Max, Min, MinLength,
+  IsBoolean, IsEmail, IsIn, IsInt, IsOptional, IsString, IsUUID, Max, Min, MinLength, ValidateIf,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -61,6 +61,25 @@ class ResetPasswordDto {
   @IsString() @MinLength(6) newPassword: string;
 }
 
+/** The memory and voice settings an admin manages for a user. */
+class AdminMemoryDto {
+  @IsOptional() @IsBoolean() autoMemoryEnabled?: boolean;
+  @IsOptional() @IsBoolean() sharedMemoryEnabled?: boolean;
+  @IsOptional() @IsBoolean() episodicMemoryEnabled?: boolean;
+  @IsOptional() @IsIn(['personal', 'entity']) episodicMemoryMode?: 'personal' | 'entity';
+  /** The agent of the user's voice turns (null: the standard pipeline); one the user can see. */
+  @IsOptional() @ValidateIf((_, v) => v !== null) @IsUUID() voiceAgentId?: string | null;
+}
+
+function memoryView(p: any, voiceAgents: Array<{ id: string; name: string }>) {
+  return {
+    autoMemoryEnabled: p.autoMemoryEnabled, sharedMemoryEnabled: p.sharedMemoryEnabled,
+    episodicMemoryEnabled: p.episodicMemoryEnabled, episodicMemoryAvailable: p.episodicMemoryAvailable,
+    episodicMemoryStatus: p.episodicMemoryStatus, episodicMemoryMode: p.episodicMemoryMode,
+    voiceAgentId: p.voiceAgentId ?? null, voiceAgents,
+  };
+}
+
 /**
  * User management reserved for org administrators.
  * All routes are protected by JwtAuthGuard + AdminGuard.
@@ -110,6 +129,25 @@ export class AdminUsersController {
       outcome: 'ok', ctx: { targetUserId: id },
     });
     return u;
+  }
+
+  /**
+   * A user's memory and voice agent, managed by the admin (specs/VOICE_SATELLITES.md §3.6): a service account (the
+   * house's voice account) has nobody to sign in and set them.
+   */
+  @Get(':id/memory')
+  @ApiOperation({ summary: 'A user\'s memory settings' })
+  async getMemory(@Param('id', ParseUUIDPipe) id: string) {
+    const p: any = await this.users.getProfile(id);
+    return memoryView(p, await this.users.voiceAgentChoices(id));
+  }
+
+  @Patch(':id/memory')
+  @ApiOperation({ summary: 'Set a user\'s memory switches, Recordare mode and voice agent' })
+  async setMemory(@Param('id', ParseUUIDPipe) id: string, @Body() dto: AdminMemoryDto, @CurrentUser() current: { id: string }) {
+    const p: any = await this.users.updateProfile(id, dto);
+    await this.audit?.record({ actorId: current.id, action: 'user.memory', resource: id, outcome: 'ok', ctx: { targetUserId: id, ...dto } });
+    return memoryView(p, await this.users.voiceAgentChoices(id));
   }
 
   @Patch(':id/role')

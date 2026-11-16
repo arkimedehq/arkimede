@@ -26,6 +26,8 @@ export interface ScheduledTask {
   /** null = global default, 0 = no cap. */
   maxTokensPerRun: number | null;
   toolFilter: { mode: 'all' | 'names' | 'none'; names?: string[] };
+  /** Also said aloud on a voice satellite, where the user is confirmed present. */
+  voice: boolean;
   createdAt: string;
 }
 
@@ -38,6 +40,7 @@ export interface UpdateScheduledTask {
   timezone?: string | null;
   toolFilter?: ScheduledTask['toolFilter'];
   maxTokensPerRun?: number | null;
+  voice?: boolean;
 }
 
 export const scheduledTasksApi = {

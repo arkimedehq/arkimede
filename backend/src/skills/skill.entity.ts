@@ -252,6 +252,17 @@ export class Skill {
   @Column({ type: 'uuid', nullable: true, default: null })
   sourceSkillId: string | null;
 
+  /**
+   * `personal`: it uses one person's account, data or memory (SKILL.md `runtime.audience`) — each user installs their
+   * own copy, never shared with a team or the organization. `shared` (the default): generic.
+   */
+  @Column({ type: 'varchar', length: 16, default: 'shared' })
+  audience: 'personal' | 'shared';
+
+  /** The plugin that contributed it (specs/PLUGINS.md §5): managed with the plugin, not by hand. Null otherwise. */
+  @Column({ type: 'uuid', nullable: true, default: null })
+  pluginId: string | null;
+
   /** Configuration variables set by the user */
   @OneToMany(() => SkillConfigVar, (v) => v.skill, { cascade: true, eager: false })
   configVars: SkillConfigVar[];

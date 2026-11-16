@@ -42,6 +42,16 @@ export const adminUsersApi = {
   list: (params: ListUsersParams = {}) =>
     api.get<ListUsersResult>('/admin/users', { params }).then((r) => r.data),
 
+  /** Every user, page after page (the backend serves at most 100 a page): for pickers that list them all. */
+  listAll: async (): Promise<AdminUser[]> => {
+    const all: AdminUser[] = [];
+    for (let page = 1; ; page++) {
+      const r = await adminUsersApi.list({ page, pageSize: 100 });
+      all.push(...r.items);
+      if (!r.items.length || all.length >= r.total) return all;
+    }
+  },
+
   get: (id: string) => api.get<AdminUser>(`/admin/users/${id}`).then((r) => r.data),
 
   create: (payload: CreateUserPayload) =>
@@ -60,4 +70,21 @@ export const adminUsersApi = {
     api.post<void>(`/admin/users/${id}/reset-password`, { newPassword }).then((r) => r.data),
 
   remove: (id: string) => api.delete<void>(`/admin/users/${id}`).then((r) => r.data),
+
+  /** A user's memory and voice agent (a service account has nobody to sign in and set them). */
+  memory: (id: string) => api.get<UserMemorySettings>(`/admin/users/${id}/memory`).then((r) => r.data),
+  setMemory: (id: string, patch: Partial<Pick<UserMemorySettings, 'autoMemoryEnabled' | 'sharedMemoryEnabled' | 'episodicMemoryEnabled' | 'episodicMemoryMode' | 'voiceAgentId'>>) =>
+    api.patch<UserMemorySettings>(`/admin/users/${id}/memory`, patch).then((r) => r.data),
 };
+
+export interface UserMemorySettings {
+  autoMemoryEnabled: boolean;
+  sharedMemoryEnabled: boolean;
+  episodicMemoryEnabled: boolean;
+  episodicMemoryAvailable?: boolean;
+  episodicMemoryStatus?: 'off' | 'active' | 'unknown';
+  episodicMemoryMode?: 'personal' | 'entity' | null;
+  /** The agent of the user's voice turns (null: the standard pipeline), and the ones they can pick. */
+  voiceAgentId: string | null;
+  voiceAgents: Array<{ id: string; name: string }>;
+}

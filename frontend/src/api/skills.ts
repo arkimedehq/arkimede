@@ -70,6 +70,8 @@ export interface Skill {
   author:      string | null;
   license:     string | null;
   status:      SkillStatus;
+  /** Personal: uses one person's account or data, never shared (SKILL.md runtime.audience); shared otherwise. */
+  audience?:   'personal' | 'shared';
   /** 'typed' = scripts as typed tools; 'descriptive' = SKILL.md only, run via sandbox. */
   kind:        'typed' | 'descriptive';
   /** Successful sandbox runs attributed to the (descriptive) skill — compile suggestion at ≥5. */
@@ -99,6 +101,8 @@ export interface Skill {
    * Present → shows the "Sync from marketplace" button.
    */
   sourceSkillId: string | null;
+  /** The plugin that contributed it: managed with the plugin, not by hand (specs/PLUGINS.md §5). */
+  pluginId?:   string | null;
   createdAt:   string;
   updatedAt:   string;
 }
@@ -197,6 +201,10 @@ export const skillsApi = {
   /** List personal + approved shared skills */
   list: () =>
     api.get<Skill[]>('/skills').then((r) => r.data),
+
+  /** [ADMIN] Every user's skills, any scope or status */
+  listAll: () =>
+    api.get<Skill[]>('/skills/all').then((r) => r.data),
 
   /** Skills for a specific project */
   listByProject: (projectId: string) =>

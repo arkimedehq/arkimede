@@ -82,7 +82,7 @@ export interface MemberInput { agentId: string; position?: number; role?: string
 
 /** A source group of tools available to the user (for the agent tool picker). */
 export interface ToolCatalogGroup {
-  source: 'mcp' | 'skill' | 'integration' | 'flow' | 'agent' | 'custom';
+  source: 'mcp' | 'skill' | 'integration' | 'flow' | 'agent' | 'custom' | 'builtin';
   label: string;
   /** Wildcard token that selects the whole group (e.g. "mcp_home_assistant_*", "ha_*"), or null. */
   wildcard: string | null;

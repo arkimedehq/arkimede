@@ -30,7 +30,8 @@
     "enable": "Attiva",
     "resetPassword": "Reset password",
     "delete": "Elimina",
-    "apiKeys": "API key"
+    "apiKeys": "API key",
+    "memory": "Memoria e voce"
   },
   "confirm": {
     "deleteUser": "Eliminare definitivamente \"{{name}}\"?"
@@ -81,5 +82,21 @@
     "fieldExpiry": "Scadenza",
     "days": "giorni",
     "create": "Crea chiave"
+  },
+  "memory": {
+    "title": "Memoria e voce di {{name}}",
+    "autoMemoryEnabled": "Memoria automatica",
+    "autoMemoryEnabledHint": "Estrae i fatti durevoli dalle conversazioni.",
+    "sharedMemoryEnabled": "Note di team e organizzazione",
+    "sharedMemoryEnabledHint": "Usa anche le note condivise, oltre a quelle personali.",
+    "episodicMemoryEnabled": "Memoria episodica (Recordare)",
+    "episodicMemoryEnabledHint": "Ricorda ciò che accade e prende iniziative.",
+    "mode": "Modalità della memoria",
+    "modePersonal": "Personale (le parole dell'utente sono sue)",
+    "modeEntity": "Entità (un agente condiviso, per esempio la casa)",
+    "modeHint": "Si sceglie solo finché la memoria è vuota.",
+    "voiceAgent": "Agente per la voce",
+    "voiceStandard": "Pipeline standard (nessun agente)",
+    "voiceAgentHint": "L'agente con cui rispondono i satelliti assegnati a questo account (e quelli non assegnati, se è l'account predefinito). Solo agenti suoi, dei suoi team o dell'organizzazione."
   }
 }
