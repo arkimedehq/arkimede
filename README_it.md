@@ -180,6 +180,18 @@ Altre funzionalità: **tool custom** no-code (HTTP/SQL/RAG/prompt), **RAG con sc
 
 👉 Riferimento completo delle funzionalità e architettura: **[PROJECT.md](docs/PROJECT.md)**. Creare Skill: **[SKILLS.md](docs/SKILLS.md)**. Creare Plugin: **[PLUGINS_it.md](docs/PLUGINS_it.md)**.
 
+## Progetti fratelli: Recordare e Percezione
+
+Arkimede funziona da solo, ed è anche le mani di una famiglia di tre progetti self-hosted che danno il meglio insieme:
+
+| Progetto | Ruolo |
+|---|---|
+| **Arkimede** (questo) | **Agisce:** agenti, flow e automazioni; parla con le persone via chat, voce e notifiche |
+| [**Recordare**](https://github.com/arkimedehq/recordare) | **Ricorda:** una memoria a lungo termine per ogni persona, con date, fonti e storia; decide quando vale la pena tirare fuori qualcosa. Arkimede è il suo primo client |
+| [**Percezione**](https://github.com/arkimedehq/percezione) | **Vede:** chi è in casa, dove, cosa sta facendo, chi è alla porta, dalle tue camere. Il suo plugin per Arkimede porta gli eventi all'agente in diretta |
+
+Insieme: una camera vede Laura tornare a casa, Arkimede la saluta in cucina e le ricorda cosa aveva in programma per la sera, e più tardi lei può chiedere «chi ha suonato mentre ero fuori?». Ogni progetto funziona da solo; nessuno ha bisogno degli altri.
+
 ## Client da terminale (CLI)
 
 Preferisci la shell? La CLI `arkimede` (in `cli/`) replica login e chat da

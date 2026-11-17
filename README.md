@@ -180,6 +180,18 @@ More capabilities: no-code **custom tools** (HTTP/SQL/RAG/prompt), **scope-aware
 
 👉 Full feature reference and architecture: **[PROJECT.md](docs/PROJECT.md)**. Building Skills: **[SKILLS.md](docs/SKILLS.md)**. Building Plugins: **[PLUGINS.md](docs/PLUGINS.md)**.
 
+## Sister projects: Recordare and Percezione
+
+Arkimede runs alone, and it is also the hands of a family of three self-hosted projects that work best together:
+
+| Project | Role |
+|---|---|
+| **Arkimede** (this one) | **Acts:** agents, flows and automations; it talks to people by chat, voice and notifications |
+| [**Recordare**](https://github.com/arkimedehq/recordare) | **Remembers:** a long-term memory for each person, with dates, sources and history; it decides when something is worth bringing up. Arkimede is its first client |
+| [**Percezione**](https://github.com/arkimedehq/percezione) | **Sees:** who is home, where, what they are doing, who is at the door, from your own cameras. Its Arkimede plugin brings the events to the agent live |
+
+Together: a camera sees Laura come home, Arkimede greets her in the kitchen and reminds her of what she planned for the evening, and later she can ask "who rang while I was out?". Each project runs alone; none needs the others.
+
 ## Terminal client (CLI)
 
 Prefer the shell? The `arkimede` CLI (in `cli/`) replicates login and chat
