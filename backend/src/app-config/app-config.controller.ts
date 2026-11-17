@@ -2,10 +2,10 @@
 // Copyright © 2026 Andrea Genovese
 
 import {
-  Controller, Get, Patch, Post, Body, Query, UseGuards, Inject, forwardRef, BadRequestException,
+  Controller, Get, Patch, Post, Body, UseGuards, Inject, forwardRef, BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { IsString, IsOptional, IsIn, IsInt, Min, Max, IsPositive, IsBoolean, IsArray, IsUUID, MaxLength } from 'class-validator';
+import { IsString, IsOptional, IsIn, IsInt, Min, Max, IsPositive, IsBoolean, IsArray, MaxLength } from 'class-validator';
 import { Type } from 'class-transformer';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
