@@ -19,12 +19,26 @@ type AttachmentMode = 'embed' | 'inline' | 'attachment';
  */
 const CLAUDE_NATIVE_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
+/** Camera RAW and HEIF photos: browsers often upload them without an image MIME type. */
+const PHOTO_EXT = /\.(dng|cr2|cr3|crw|nef|nrw|arw|srf|sr2|raf|orf|rw2|pef|srw|x3f|3fr|iiq|erf|kdc|mrw|heic|heif)$/i;
+
+/** A photo the backend converts to JPEG for the model (camera RAW, HEIC, TIFF, BMP…). */
+function isConvertiblePhoto(mimeType: string, name: string): boolean {
+  return (mimeType.startsWith('image/') && mimeType !== 'image/svg+xml') || PHOTO_EXT.test(name);
+}
+
+/** Sent to the model as content it reads directly: PDFs and images, other photos through their JPEG. */
+function isNative(mimeType: string, name: string): boolean {
+  return CLAUDE_NATIVE_TYPES.includes(mimeType) || isConvertiblePhoto(mimeType, name);
+}
+
 /**
  * Returns true if the backend is able to extract text from the file
  * (used for "Embed in RAG" and "Extracted text").
  * Matches the cases handled by FilesService.extractText().
  */
-function canExtractText(mimeType: string): boolean {
+function canExtractText(mimeType: string, name = ''): boolean {
+  if (isConvertiblePhoto(mimeType, name)) return true;
   if (!mimeType) return false;
   if (mimeType.startsWith('text/')) return true;
   if (CLAUDE_NATIVE_TYPES.includes(mimeType)) return true;
@@ -286,8 +300,8 @@ export default function MessageInput({ onSend, disabled, chatId, projectId }: Pr
               </p>
 
               {/* Buttons contextual to the file type */}
-              <div className={`grid gap-2 ${canExtractText(pendingFile.record.mimeType) ? 'grid-cols-3' : 'grid-cols-1'}`}>
-                {canExtractText(pendingFile.record.mimeType) && (
+              <div className={`grid gap-2 ${canExtractText(pendingFile.record.mimeType, pendingFile.originalName) ? 'grid-cols-3' : 'grid-cols-1'}`}>
+                {canExtractText(pendingFile.record.mimeType, pendingFile.originalName) && (
                   <>
                     <button
                       onClick={() => { setSelectedScope(projectId ? 'project' : 'personal'); setCollectionPickerOpen(true); }}
@@ -323,11 +337,11 @@ export default function MessageInput({ onSend, disabled, chatId, projectId }: Pr
                   <div className="flex items-center gap-1.5">
                     <Paperclip size={14} className="text-violet-400" />
                     <span className="text-xs font-medium text-violet-300">
-                      {CLAUDE_NATIVE_TYPES.includes(pendingFile.record.mimeType) ? t('attach.native') : t('attach.toMessage')}
+                      {isNative(pendingFile.record.mimeType, pendingFile.originalName) ? t('attach.native') : t('attach.toMessage')}
                     </span>
                   </div>
                   <p className="text-xs text-gray-500 leading-relaxed">
-                    {CLAUDE_NATIVE_TYPES.includes(pendingFile.record.mimeType)
+                    {isNative(pendingFile.record.mimeType, pendingFile.originalName)
                       ? t('attach.nativeDesc')
                       : t('attach.skillDesc')}
                   </p>
@@ -335,7 +349,7 @@ export default function MessageInput({ onSend, disabled, chatId, projectId }: Pr
               </div>
 
               {/* Note for formats without text extraction */}
-              {!canExtractText(pendingFile.record.mimeType) && (
+              {!canExtractText(pendingFile.record.mimeType, pendingFile.originalName) && (
                 <p className="mt-2 text-[10px] text-gray-600 leading-relaxed">
                   {t('attach.binaryNotePre')} <code className="text-gray-500">file_path</code>.
                 </p>

@@ -421,7 +421,7 @@ describe('sequence carrying out a procedure of the memory', () => {
     return new SequencesService(DEFAULT_LIMITS, null, null, null, users as any);
   }
 
-  it('maps the outcome: completed → done, failures / failed / timeout → failed with why, stopped → nothing', () => {
+  it('maps the outcome: completed → done, failures / failed / timeout → failed with why, stopped → stopped', () => {
     const base = { calls: 4, failures: 0, elapsedMs: 2000, errors: [] as string[] };
     expect(sequenceProcedureRun({ ...base, status: 'completed' }, { id: 'p1' })).toEqual({ outcome: 'done' });
     expect(sequenceProcedureRun({ ...base, status: 'completed' }, { id: 'p1', step: 3 })).toEqual({ outcome: 'done', step: 3 });
@@ -430,7 +430,8 @@ describe('sequence carrying out a procedure of the memory', () => {
     expect(sequenceProcedureRun({ ...base, status: 'failed', errors: ['device unavailable'] }, { id: 'p1' }))
       .toEqual({ outcome: 'failed', note: 'device unavailable' });
     expect(sequenceProcedureRun({ ...base, status: 'timeout' }, { id: 'p1' })).toEqual({ outcome: 'failed', note: 'time limit reached' });
-    expect(sequenceProcedureRun({ ...base, status: 'stopped' }, { id: 'p1' })).toBeNull();
+    expect(sequenceProcedureRun({ ...base, status: 'stopped' }, { id: 'p1', step: 2 }))
+      .toEqual({ outcome: 'stopped', step: 2, note: 'stopped before the end, after 4 actions' });
   });
 
   it('accepts a procedure in the program and refuses a malformed one', () => {
@@ -455,17 +456,23 @@ describe('sequence carrying out a procedure of the memory', () => {
     expect(run.note.length).toBeLessThanOrEqual(PROCEDURE_NOTE_MAX);
   });
 
-  it('reports nothing without a procedure, when stopped, or when the user\'s memory is not Recordare', async () => {
+  it('reports nothing without a procedure, or when the user\'s memory is not Recordare', async () => {
+    make().start({ steps: [call('light')] }, { userId: 'u1', chatId: 'c1', tools: [tool('light')] });
+    make(false).start({ steps: [call('light')], procedure: { id: 'p1' } }, { userId: 'u1', chatId: 'c1', tools: [tool('light')] });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(report).not.toHaveBeenCalled();
+  });
+
+  it('a sequence the user stops reports the procedure stopped, at its step', async () => {
     const svc = make();
-    svc.start({ steps: [call('light')] }, { userId: 'u1', chatId: 'c1', tools: [tool('light')] });
-    const r = svc.start({ key: 'k', steps: [{ repeat: { forSeconds: 30, steps: [call('light'), wait(1)] } }], procedure: { id: 'p1' } },
+    const r = svc.start({ key: 'k', steps: [{ repeat: { forSeconds: 30, steps: [call('light'), wait(1)] } }], procedure: { id: 'p1', step: 4 } },
       { userId: 'u1', chatId: 'c1', tools: [tool('light')] });
     await vi.advanceTimersByTimeAsync(1500);
     if (r.ok) svc.stop('u1', r.sequenceId);
     await vi.advanceTimersByTimeAsync(100);
-    make(false).start({ steps: [call('light')], procedure: { id: 'p1' } }, { userId: 'u1', chatId: 'c1', tools: [tool('light')] });
-    await vi.advanceTimersByTimeAsync(10);
-    expect(report).not.toHaveBeenCalled();
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report.mock.calls[0][1]).toBe('p1');
+    expect(report.mock.calls[0][2]).toMatchObject({ outcome: 'stopped', step: 4 });
   });
 
   it('a Recordare error never breaks the sequence', async () => {

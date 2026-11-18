@@ -21,6 +21,7 @@
  *   - invoke()          → Synchronous response (used internally or for tests)
  */
 import { ActionReplyGate, isActionTool, withReplyArg } from './action-replies';
+import { guardTools } from '../voice-id/voice-clearance';
 import { ToolSourcesRegistry } from '../tool-sources/tool-sources.registry';
 import {forwardRef, Inject, Injectable, Logger, OnModuleInit, Optional} from '@nestjs/common';
 import {InjectRepository} from '@nestjs/typeorm';
@@ -51,12 +52,13 @@ import {MultiAgentService} from '../agents/multi-agent.service';
 import {SchedulingService} from '../scheduling/scheduling.service';
 import {SandboxService} from '../sandbox/sandbox.service';
 import { SequencesService } from '../sequences/sequences.service';
-import {LlmUsage, sumUsageFromMessages} from '../common/llm-usage.util';
+import {LlmUsage, emptyUsage, sumUsageFromMessages} from '../common/llm-usage.util';
 import {runWithLlmCallContext} from '../usage/llm-call-context';
 import {withAgentSpan} from '../observability/genai-tracing';
 import {AgentMemoryService} from '../agent-memory/agent-memory.service';
 import {TranscriptionService} from '../transcription/transcription.service';
 import {toolMediaModifier} from './tool-media';
+import {StepGuard, isStepLimitError} from './step-guard';
 import {withTurnContext} from './turn-context';
 import {APP_NAME} from '../config/app.config';
 
@@ -251,11 +253,13 @@ export class AgentService implements OnModuleInit {
     // Words only: the history's tool calls are not replayed (no tool is defined for this turn, and some providers refuse
     // a tool call in the history without one — Anthropic).
     if (opts?.textOnly) history = history.map(({ toolCalls: _omit, ...m }) => m as Message);
-    const { agent, contextBreakdown, effectiveMaxHistoryTokens, model, effectiveHistory, provider, modelName, actionTools } = await this.resolveAgent(userId, projectId, userInput, history, chatId, opts?.toolOverride, opts?.agentPromptOverride, opts?.llmConfigId, opts?.memoryContext, conversationId, opts?.textOnly, opts?.actionReplies, opts?.turnBlocks);
+    const { agent, contextBreakdown, effectiveMaxHistoryTokens, model, effectiveHistory, provider, modelName, actionTools, stepGuard } = await this.resolveAgent(userId, projectId, userInput, history, chatId, opts?.toolOverride, opts?.agentPromptOverride, opts?.llmConfigId, opts?.memoryContext, conversationId, opts?.textOnly, opts?.actionReplies, opts?.turnBlocks);
     // Action replies: only when the option is on and the turn has action tools (else the stream is untouched).
     const gate = actionTools?.size ? new ActionReplyGate(actionTools) : null;
     const emit = gate ? (chunk: string) => gate.text(chunk) : onChunk;
     let actionReply = false;
+    // Attached images reach a model that cannot see them as the vision model's description.
+    ({ attachmentBlocks, inlineContents } = await this.imagesForModel(attachmentBlocks, inlineContents, opts?.llmConfigId));
     const messages = await this.buildMessages(userInput, effectiveHistory, attachments, inlineContents, attachmentBlocks, isReasoning, effectiveMaxHistoryTokens, model, provider);
 
     // ── Context breakdown log ─────────────────────────────────────────────────
@@ -322,6 +326,8 @@ export class AgentService implements OnModuleInit {
       : null;
     let writingText = false;
 
+    const recursionLimit = opts?.maxIterations ?? AgentService.AGENT_RECURSION_LIMIT;
+    stepGuard.setRecursionLimit(recursionLimit);
     try {
       // Scheduling class + attribution (P1-F2): the whole graph consumption runs
       // inside the call context — the dispatcher and the metrics handler read it
@@ -333,7 +339,7 @@ export class AgentService implements OnModuleInit {
         { messages },
         {
           streamMode: 'messages', signal,
-          recursionLimit: opts?.maxIterations ?? AgentService.AGENT_RECURSION_LIMIT,
+          recursionLimit,
           // LangGraph does NOT fire the model's instance callbacks (verified on
           // langgraph 1.4/core 1.1): the serving-metrics handler attached by
           // buildModelForConfig must be re-passed via config. Direct invokes
@@ -477,7 +483,13 @@ export class AgentService implements OnModuleInit {
         this.logger.log(`Stream interrupted by the user (${userId})`);
         return null;
       }
-      throw err;
+      // Out of steps: one last call without tools tells the user what was done and what blocked it.
+      if (!isStepLimitError(err) || !stepGuard.hasRun()) throw err;
+      this.logger.warn(`Step limit reached (${recursionLimit}) for ${userId}: answering with what was done`);
+      const usage = await runWithLlmCallContext({ priority: 'interactive', userId, origin: opts?.origin ?? 'chat', conversationId },
+        () => { onChunk('\n\n'); return this.answerAfterStepLimit(model, stepGuard, onChunk, signal); });
+      totalInputTokens  += usage.inputTokens;
+      totalOutputTokens += usage.outputTokens;
     }
 
     // ── Per-step log ──────────────────────────────────────────────────────────
@@ -637,7 +649,8 @@ export class AgentService implements OnModuleInit {
     const isReasoning = await this.llmProviderService.isReasoningModel();
     // invoke() is a one-off path with no persisted chat → resolveAgent does not
     // receive chatId, so no compaction: effectiveHistory === history.
-    const { agent, effectiveMaxHistoryTokens, model, effectiveHistory, provider, modelName } = await this.resolveAgent(userId, projectId, userInput, history, undefined, toolFilter);
+    const { agent, effectiveMaxHistoryTokens, model, effectiveHistory, provider, modelName, stepGuard } = await this.resolveAgent(userId, projectId, userInput, history, undefined, toolFilter);
+    stepGuard.setRecursionLimit(AgentService.AGENT_RECURSION_LIMIT);
     const messages = await this.buildMessages(userInput, effectiveHistory, [], [], [], isReasoning, effectiveMaxHistoryTokens, model, provider);
     // Headless runs (automations) never compete with interactive traffic (P1-F2).
     const run      = () => runWithLlmCallContext({ priority: 'background', userId, origin: 'automation' }, () =>
@@ -648,7 +661,18 @@ export class AgentService implements OnModuleInit {
         callbacks: Array.isArray((model as any).callbacks) ? (model as any).callbacks : undefined,
       }));
     // invoke_agent span (OpenTelemetry, opt-in; pass-through when off).
-    const result   = await withAgentSpan<Awaited<ReturnType<typeof run>>>({ name: APP_NAME, userId }, run);
+    let result: Awaited<ReturnType<typeof run>>;
+    try {
+      result = await withAgentSpan<Awaited<ReturnType<typeof run>>>({ name: APP_NAME, userId }, run);
+    } catch (err) {
+      // Out of steps: one last call without tools tells what was done and what blocked it.
+      if (!isStepLimitError(err) || !stepGuard.hasRun()) throw err;
+      this.logger.warn(`Step limit reached (${AgentService.AGENT_RECURSION_LIMIT}) in a headless run for ${userId}`);
+      let text = '';
+      const usage = await runWithLlmCallContext({ priority: 'background', userId, origin: 'automation' },
+        () => this.answerAfterStepLimit(model, stepGuard, (c) => { text += c; }));
+      return { text, usage: { ...emptyUsage(), ...usage }, provider: provider ?? null, model: modelName ?? null };
+    }
     const lastMsg  = result.messages[result.messages.length - 1];
     const text = typeof lastMsg.content === 'string' ? lastMsg.content : JSON.stringify(lastMsg.content);
     return { text, usage: sumUsageFromMessages(result.messages), provider: provider ?? null, model: modelName ?? null };
@@ -1051,7 +1075,7 @@ export class AgentService implements OnModuleInit {
     actionReplies?: boolean,
     /** StreamResponseOptions.turnBlocks: this turn's own context lines. */
     turnBlocks?: string[],
-  ): Promise<{ agent: any; contextBreakdown: ContextBreakdown; effectiveMaxHistoryTokens: number; model: any; effectiveHistory: Message[]; provider: string; modelName: string | null; actionTools: Set<string> }> {
+  ): Promise<{ agent: any; contextBreakdown: ContextBreakdown; effectiveMaxHistoryTokens: number; model: any; effectiveHistory: Message[]; provider: string; modelName: string | null; actionTools: Set<string>; stepGuard: StepGuard }> {
     // Per-agent model override: resolved once (cached per config id), BEFORE the
     // parallel loads so the bundle is not built twice concurrently.
     const overrideBundle = llmConfigOverride
@@ -1162,12 +1186,16 @@ export class AgentService implements OnModuleInit {
     //   tools         → effective tools for createReactAgent
     //   selectedNames → RAG-selected names for the SKILL.md filter (null = all)
     //   toolListText  → <available_tools>…</available_tools> (non-null only if deferred)
-    const { tools: optimizedExtraTools, selectedNames: selectedToolNames, toolListText, excludedListText } =
+    const { tools: selectedExtraTools, selectedNames: selectedToolNames, toolListText, excludedListText } =
       await this.toolSelection.applyStrategy(
         allExtraManifests,
         selectionQuery,
         effectiveConfig,
       );
+    // A voice turn: the actions only a recognised voice may do are guarded here, at the source, so the sequences
+    // built from these tools and the wrappers below check them too (voice-clearance.ts; a no-op outside voice turns).
+    const optimizedExtraTools = guardTools(selectedExtraTools);
+    const builtInTools = guardTools(this.builtInTools);
 
     // ── Phase 2b: skills system prompt / tool list ────────────────────────────
     let skillsPrompt: string;
@@ -1328,24 +1356,24 @@ export class AgentService implements OnModuleInit {
     // Sequences: timed calls of this turn's own tools, run without the model (specs/RUN_SEQUENCE.md). Bound to the
     // tools as they run (without the action-reply wrapper); absent when none of them may run in a sequence.
     const sequenceTools = userId && !textOnly
-      ? this.sequences.buildTools(userId, chatId ?? conversationId ?? null, [...this.builtInTools, ...optimizedExtraTools])
+      ? this.sequences.buildTools(userId, chatId ?? conversationId ?? null, [...builtInTools, ...optimizedExtraTools])
       : [];
 
     // The memory tools first (the charter says to search memory before other
     // tools), the rest sorted by name: the sources load concurrently or without
     // an ORDER BY, and a different order between requests would defeat the prompt cache.
     const memoryTools = memory?.tools ?? [];
-    const allTools = textOnly ? [] : [
+    const allTools = textOnly ? [] : guardTools([
       ...memoryTools,
       ...[
-        ...this.builtInTools,
+        ...builtInTools,
         ...turnExtraTools,
         ...schedulingTools,
         ...sandboxTools,
         ...sequenceTools,
         ...(deferredMetaTool ? [deferredMetaTool] : []),
       ].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)),
-    ];
+    ]);
 
     // ── Context breakdown (token estimates) ──────────────────────────────────
     const est = (s: string) => Math.ceil(s.length / 4);
@@ -1371,14 +1399,17 @@ export class AgentService implements OnModuleInit {
       (deferredMetaTool ? ' + get_tool_instructions' : ''),
     );
 
+    // Notes when the run loops or nears the step limit, and what a last call needs after it (agent/step-guard.ts).
+    const stepGuard = new StepGuard();
     return {
       agent: createReactAgent({
         llm:             model,
         tools:           allTools,
         // The system prompt, then the conversation with the content of the files
         // tools returned (images, transcripts) after their results.
-        messageModifier: await this.withToolMedia(messageModifier, llmConfigOverride, user?.language, turnContext),
+        messageModifier: stepGuard.wrap(await this.withToolMedia(messageModifier, llmConfigOverride, user?.language, turnContext)),
       }),
+      stepGuard,
       contextBreakdown,
       effectiveMaxHistoryTokens,
       model,
@@ -1387,6 +1418,54 @@ export class AgentService implements OnModuleInit {
       modelName,
       actionTools,
     };
+  }
+
+  /**
+   * After the step limit: one call to the model without tools (plain text, valid for every provider) with the run told
+   * in words, streamed to `onChunk`. Returns the tokens it used.
+   */
+  private async answerAfterStepLimit(
+    model: any, guard: StepGuard, onChunk: (chunk: string) => void, signal?: AbortSignal,
+  ): Promise<{ inputTokens: number; outputTokens: number }> {
+    let inputTokens = 0;
+    let outputTokens = 0;
+    const stream = await model.stream(guard.finalAnswerMessages(), signal ? { signal } : undefined);
+    for await (const chunk of stream) {
+      const content: any = chunk.content;
+      const text = typeof content === 'string'
+        ? content
+        : Array.isArray(content) ? content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('') : '';
+      if (text) onChunk(text);
+      const usage = (chunk as any).usage_metadata;
+      if (usage) { inputTokens += usage.input_tokens ?? 0; outputTokens += usage.output_tokens ?? 0; }
+    }
+    return { inputTokens, outputTokens };
+  }
+
+  /**
+   * Attached images for the turn's model: as images when it sees them (or when no vision model is designated, so it is
+   * not known — they go as they always did); when it does not and a vision model is designated, as that model's
+   * description (with any visible text verbatim), in the message's text. Other blocks (PDFs) are untouched.
+   */
+  private async imagesForModel(
+    blocks: { name: string; mimeType: string; base64: string }[],
+    inline: { name: string; content: string }[],
+    llmConfigId: string | undefined,
+  ): Promise<{ attachmentBlocks: typeof blocks; inlineContents: typeof inline }> {
+    const images = blocks.filter((b) => b.mimeType.startsWith('image/'));
+    if (!images.length) return { attachmentBlocks: blocks, inlineContents: inline };
+    const support = await this.llmProviderService.getImageSupport(llmConfigId)
+      .catch(() => ({ seesImages: false, describe: null }));
+    if (support.seesImages || !support.describe) return { attachmentBlocks: blocks, inlineContents: inline };
+    const described = await Promise.all(images.map(async (b) => {
+      try {
+        return { name: b.name, content: `[Image, described by the vision model]\n${await support.describe!(b.base64, b.mimeType)}` };
+      } catch (err: any) {
+        this.logger.warn(`Describing the attached image ${b.name} failed: ${err?.message}`);
+        return { name: b.name, content: '[Image: it could not be described]' };
+      }
+    }));
+    return { attachmentBlocks: blocks.filter((b) => !b.mimeType.startsWith('image/')), inlineContents: [...inline, ...described] };
   }
 
   /**

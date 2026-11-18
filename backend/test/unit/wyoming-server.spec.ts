@@ -8,6 +8,7 @@
  * the buffered PCM wrapped as WAV), the TTS flow (synthesize → PCM chunks
  * with the WAV's real format), the client allowlist and the runtime toggle.
  */
+import { currentVoiceClearance } from '../../src/voice-id/voice-clearance';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as net from 'node:net';
 import { WyomingService, expectsReply, spokenFailure, voiceBlocks, workingOn, keepTalking, stoppedWork } from '../../src/wyoming/wyoming.service';
@@ -29,9 +30,11 @@ function makeService(opts: { enabled?: boolean; cidrs?: string | null; sttEnable
     voiceAccounts: vi.fn(async () => ({ memoryUserId: opts.handleUser ?? null, defaultUserId: opts.handleUser ?? null, satellites: opts.satellites ?? {} })),
   };
   const agent = { id: VOICE_AGENT, name: 'Voce Casa', systemPrompt: 'Rispondi in una frase.', toolFilter: { mode: 'names', names: ['mcp_home_assistant_*'] }, maxIterations: 3, llmConfigId: null };
+  const clearances: unknown[] = [];
   const agentService = {
     // Echoes the input plus how many history messages it received; emits one tool event.
     streamResponse: vi.fn(async (input: string, _userId: string, _p: any, _c: any, history: any[], _a: any, _i: any, _b: any, onChunk: (s: string) => void, onToolCall: any, signal: AbortSignal, onToolResult: any) => {
+      clearances.push(currentVoiceClearance());
       if (opts.runMs) await new Promise((r) => setTimeout(r, opts.runMs));
       if (signal?.aborted) return null;   // as AgentService: a stopped run returns no usage
       if (opts.runFails) throw new Error('Recursion limit of 101 reached');
@@ -84,7 +87,7 @@ function makeService(opts: { enabled?: boolean; cidrs?: string | null; sttEnable
   };
   const moduleRef = { get: (token: any) => ({ ChatRunsService: opts.noRuns ? undefined : chatRuns, VoiceDeliveryService: voiceDelivery, NotificationsService: notifications, NotificationsGateway: gateway, AgentService: agentService, AgentsService: agentsService, UsersService: usersService, InvocationsService: invocations, ConversationFocusService: focus, ExternalChatsService: externalChats, VoiceIdService: opts.voiceId, HomeAssistantService: homeAssistant, RecordareInitiativesService: opts.initiatives } as any)[token.name] };
   const svc = new WyomingService(appConfig as any, transcription as any, tts as any, env as any, moduleRef as any);
-  return { svc, appConfig, transcription, tts, agentService, agentsService, usersService, invocations, focus, externalChats, voiceDelivery, notifications, gateway, chatRuns };
+  return { clearances, svc, appConfig, transcription, tts, agentService, agentsService, usersService, invocations, focus, externalChats, voiceDelivery, notifications, gateway, chatRuns };
 }
 
 /** Sends events on a fresh connection and collects the replies until the socket idles. */
@@ -409,6 +412,8 @@ describe('WyomingService — who is speaking (voice recognition)', () => {
     expect(opts.turnBlocks[0]).toContain('The person speaking is Alex');
     expect(ctx.externalChats.recordAnswer).toHaveBeenCalledWith('chat-9', expect.objectContaining({ answer: expect.stringContaining('risposta') }));
     expect(ctx.externalChats.recordTurn).not.toHaveBeenCalled();
+    // The run sees who spoke (voice clearance): the actions only a recognised voice may do.
+    expect(ctx.clearances[0]).toEqual({ speaker: { profileId: 'v-alex', name: 'Alex', score: 0.7 }, satellite: 'assist_satellite.living' });
     // The presence of the turn carries who spoke.
     expect(heard[0]).toMatchObject({ satelliteId: 'assist_satellite.living', speaker: { identity: { channel: 'voice', externalId: 'v-alex' }, confidence: 0.8 } });
     await ctx.svc.onModuleDestroy();
@@ -423,6 +428,7 @@ describe('WyomingService — who is speaking (voice recognition)', () => {
     expect(voiceId.embed).not.toHaveBeenCalled();
     await exchange(port, [{ type: 'transcript', data: { text: 'ciao', context: { conversation_id: 'A' } } }]);
     expect(ctx.agentService.streamResponse.mock.calls[0][12]).toEqual({ origin: 'voice', conversationId: 'wyoming:A', onProgress: expect.any(Function) });
+    expect(ctx.clearances[0]).toEqual({ speaker: null, satellite: null });
     expect(ctx.externalChats.recordUserMessage).not.toHaveBeenCalled();
     expect(ctx.externalChats.recordTurn).toHaveBeenCalled();
     await ctx.svc.onModuleDestroy();

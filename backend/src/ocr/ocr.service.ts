@@ -33,6 +33,13 @@ import {
 const CONFIG_ID = 1;
 const HEALTH_TTL_MS = 30_000;
 const HEALTH_TIMEOUT_MS = 2_000;
+/** Image types every vision model takes as they are; other photos (camera RAW, HEIC, TIFF…) are converted to JPEG. */
+export const WEB_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+/** Camera RAW and HEIF photo extensions: a browser may upload them with no image MIME type (application/octet-stream). */
+const PHOTO_EXT = /\.(dng|cr2|cr3|crw|nef|nrw|arw|srf|sr2|raf|orf|rw2|pef|srw|x3f|3fr|iiq|erf|kdc|mrw|heic|heif)$/i;
+export function isPhotoName(name: string): boolean {
+  return PHOTO_EXT.test(name);
+}
 /** Pages rendered per /v1/render call (bounds the size of each JSON response). */
 const RENDER_BATCH = 8;
 
@@ -172,10 +179,34 @@ export class OcrService {
       }
     }
     try {
-      return await this.visionTranscribe(buf.toString('base64'), mimeType, OCR_IMAGE_PROMPT, 1024);
+      // The vision model takes web image types only: another photo goes as its JPEG.
+      const jpeg = WEB_IMAGE_TYPES.includes(mimeType) ? null : await this.toJpeg(buf, mimeType, name);
+      return await this.visionTranscribe((jpeg ?? buf).toString('base64'), jpeg ? 'image/jpeg' : mimeType, OCR_IMAGE_PROMPT, 1024);
     } catch (err: any) {
       this.logger.warn(`Image OCR via vision model failed for ${name}: ${err?.message}`);
       return '';
+    }
+  }
+
+  /**
+   * The photo as a JPEG a model can take (camera RAW such as DNG, HEIC/HEIF, TIFF, BMP…), scaled down by the
+   * ocr-service; null when the service is not deployed, too old to convert, or cannot read the file.
+   */
+  async toJpeg(buf: Buffer, mimeType: string, name: string): Promise<Buffer | null> {
+    try {
+      const form = new FormData();
+      form.append('file', new Blob([new Uint8Array(buf)], { type: mimeType }), name);
+      const res = await fetch(`${this.baseUrl}/v1/convert`, { method: 'POST', body: form, signal: AbortSignal.timeout(this.timeoutMs) });
+      if (!res.ok) {
+        this.logger.warn(`Photo conversion failed for ${name}: HTTP ${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`);
+        return null;
+      }
+      const jpeg = Buffer.from(await res.arrayBuffer());
+      this.logger.log(`Photo ${name} (${mimeType}) converted to JPEG: ${buf.length} → ${jpeg.length} bytes`);
+      return jpeg;
+    } catch (err: any) {
+      this.logger.warn(`Photo conversion unavailable for ${name}: ${err?.message}`);
+      return null;
     }
   }
 

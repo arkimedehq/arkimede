@@ -8,6 +8,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { HaToolsService, needsConfirmation, resolveTargets } from '../../src/home-assistant/ha-tools.service';
+import { DEFAULT_VOICE_CLEARANCE, guardTool, runWithVoiceClearance, setVoiceClearancePolicy } from '../../src/voice-id/voice-clearance';
 
 const STATES = [
   { entity_id: 'light.cucina', state: 'off', attributes: { friendly_name: 'Luce cucina' } },
@@ -171,5 +172,36 @@ describe('HaToolsService', () => {
     const t = setup();
     expect(await t.svc.contextFor('u1')).toBe('<home>Home Assistant now — Andrea (the user): home, Cucina; Chloé: away. The user is person.andrea. Use the ha_* tools for devices and states.</home>');
     expect(await setup(false).svc.contextFor('u1')).toBeNull();
+  });
+});
+
+describe('ha_call_service by voice (voice clearance)', () => {
+  it('tells the entities a call acts on — given, or resolved from a name or an area — each with its sensitivity', async () => {
+    const t = setup();
+    const call: any = byName(await t.svc.loadForUser('u1'), 'ha_call_service');
+    const targets = call.metadata.voiceTargets;
+    expect(targets({ domain: 'light', area: 'Cucina' })).toEqual([
+      { id: 'light.cucina', sensitive: false }, { id: 'light.cucina_isola', sensitive: false },
+    ]);
+    expect(targets({ domain: 'lock', name: 'porta di casa' })).toEqual([{ id: 'lock.porta', sensitive: true }]);
+    expect(targets({ domain: 'cover', entity_id: 'cover.garage' })).toEqual([{ id: 'cover.garage', sensitive: true }]);
+    expect(targets({ domain: 'light', name: 'luce' })).toEqual([]); // ambiguous: the tool itself refuses
+  });
+
+  it('a voice it does not recognise turns the lights on but cannot open the door, even by name and confirmed', async () => {
+    setVoiceClearancePolicy({ enabled: true });
+    try {
+      const t = setup();
+      const call: any = byName(await t.svc.loadForUser('u1'), 'ha_call_service');
+      await runWithVoiceClearance({ speaker: null, satellite: 'sat.ingresso' }, async () => {
+        const g = guardTool(call);
+        expect(JSON.parse(await g.invoke({ domain: 'light', service: 'turn_on', area: 'Cucina' }) as string).ok).toBe(true);
+        const out = JSON.parse(await g.invoke({ domain: 'lock', service: 'unlock', name: 'porta di casa', confirmed: true }) as string);
+        expect(out.error).toBe('voice_not_authorized');
+      });
+      expect(t.commands.filter((c) => c.type === 'call_service').map((c) => c.domain)).toEqual(['light']);
+    } finally {
+      setVoiceClearancePolicy(DEFAULT_VOICE_CLEARANCE);
+    }
   });
 });

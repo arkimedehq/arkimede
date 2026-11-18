@@ -190,7 +190,7 @@ SAVE -. "on the next turn:<br/>replay in the history (Diagram A)" .-> CTX
 | Base / user / project system prompt | Admin / profile / project | — | The 4 prompt levels |
 | LLM default + summarizer + vision | `llm_configs` | — | Agent-loop model, rolling-summary model, model for multimodal tasks (image OCR) |
 | `maxRows`, `timeoutMs`, `prefetchTables`, `prefetchAllColumns` | `executorConfig` of the individual SQL tool | 10000 / 60s / on | Tool output size (heavily affects history weight) |
-| `AGENT_RECURSION_LIMIT` | backend env (`.env`) | 100 (~50 LLM rounds, min 10) | LangGraph step limit per message on `stream()`/`invoke()`; exceeded → `GraphRecursionError` |
+| `AGENT_RECURSION_LIMIT` | backend env (`.env`) | 100 (~50 LLM rounds, min 10) | LangGraph step limit per message on `stream()`/`invoke()`; reached → `GraphRecursionError`, answered by one last call without tools (what was done, what blocked it) — `agent/step-guard.ts` |
 | `REPLAY_TOOL_OUTPUT_MAX_CHARS` | backend env (`.env`) | 3000 char (min 500) | Cap for tool output re-injected into the history (replay of previous turns) |
 
 ### Hardcoded 🔒

@@ -3,12 +3,12 @@
 
 /**
  * Voice recognition settings (admin): the switch, the voices the house knows, enrolling a voice on a satellite, each
- * voice's samples scored (the suspect ones removed one by one), and the latest recognitions with their scores (to
- * calibrate).
+ * voice's samples scored (the suspect ones removed one by one), the latest recognitions with their scores (to
+ * calibrate), and which actions by voice need a recognised voice (clearance).
  */
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseIntPipe, ParseUUIDPipe, Patch, Post, Put, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { IsBoolean, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { VoiceIdService } from './voice-id.service';
@@ -21,6 +21,15 @@ class VoiceDto {
   @IsOptional() @IsString() @MaxLength(100) name?: string;
   @IsOptional() @IsString() @MaxLength(200) haPerson?: string | null;
   @IsOptional() @IsUUID() userId?: string | null;
+}
+
+class ClearanceDto {
+  @IsOptional() @IsBoolean() enabled?: boolean;
+  @IsOptional() @IsNumber() @Min(0) @Max(1) minScore?: number;
+  @IsOptional() @IsArray() @ArrayMaxSize(100) @IsUUID('all', { each: true }) people?: string[];
+  @IsOptional() @IsArray() @ArrayMaxSize(100) @IsString({ each: true }) @MaxLength(200, { each: true }) tools?: string[];
+  @IsOptional() @IsArray() @ArrayMaxSize(100) @IsString({ each: true }) @MaxLength(200, { each: true }) entities?: string[];
+  @IsOptional() @IsBoolean() sensitiveTargets?: boolean;
 }
 
 class EnrollDto {
@@ -36,7 +45,17 @@ export class VoiceIdController {
 
   @Get()
   async get() {
-    return { enabled: await this.voiceId.enabled(0), voices: await this.voiceId.list(), recognitions: this.voiceId.lastRecognitions() };
+    return {
+      enabled: await this.voiceId.enabled(0), voices: await this.voiceId.list(), recognitions: this.voiceId.lastRecognitions(),
+      clearance: this.voiceId.clearancePolicy(),
+    };
+  }
+
+  /** Sensitive actions by voice only for a recognised voice: the policy (partial update). */
+  @Put('clearance')
+  async setClearance(@Body() dto: ClearanceDto) {
+    await this.voiceId.setClearancePolicy(dto);
+    return this.get();
   }
 
   @Put('enabled')

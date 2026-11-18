@@ -42,3 +42,5 @@ frontend/.env
 /publish-arkimede.sh
 .env.bak*
 .env.pre-*
+
+__pycache__/

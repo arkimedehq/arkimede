@@ -29,6 +29,7 @@ import { FilesService } from '../files/files.service';
 import { toolFileLine, type ToolFile } from '../files/tool-files';
 import { HomeAssistantService } from './home-assistant.service';
 import { markActionTool } from '../agent/action-replies';
+import { markVoiceTargets } from '../voice-id/voice-clearance';
 
 /** Actions that need the user's confirmation first (security: a door opened by a misunderstanding). */
 const CONFIRM_DOMAINS = new Set(['lock', 'alarm_control_panel']);
@@ -202,14 +203,11 @@ export class HaToolsService implements ToolSource, OnModuleInit, OnModuleDestroy
       }),
       func: async ({ domain, service, entity_id, name, area, data, confirmed }) => {
         if (BLOCKED_DOMAINS.has(domain)) return JSON.stringify({ error: `the ${domain} services are not available to the agent` });
-        let ids = entity_id === undefined ? [] : Array.isArray(entity_id) ? entity_id : [entity_id];
-        if (!ids.length && (name || area)) {
-          const target = resolveTargets(this.ha.exposedStates(), (id) => this.ha.areaOf(id), { domain, name, area });
-          if ('error' in target) {
-            return JSON.stringify({ error: target.error, ...(target.candidates ? { candidates: target.candidates.map((s) => this.view(s)) } : {}) });
-          }
-          ids = target.ids;
+        const target = this.targetsOf({ domain, entity_id, name, area });
+        if ('error' in target) {
+          return JSON.stringify({ error: target.error, ...(target.candidates ? { candidates: target.candidates.map((s) => this.view(s)) } : {}) });
         }
+        const ids = target.ids;
         const states = new Map(this.ha.exposedStates().map((s) => [s.entity_id, s]));
         const unknown = ids.filter((id) => !states.has(id));
         if (!ids.length || unknown.length) return JSON.stringify({ error: `not exposed to Assist: ${unknown.join(', ') || '(no entity)'}` });
@@ -400,6 +398,21 @@ export class HaToolsService implements ToolSource, OnModuleInit, OnModuleDestroy
 
     // Action tools (agent/action-replies.ts): they act and answer only whether it worked.
     for (const t of [callService, calendarAdd, todoAdd, todoComplete, notify]) markActionTool(t);
+    // What a call acts on, for the actions only a recognised voice may do by voice (voice-clearance.ts): the entities
+    // a name or an area resolves to, each sensitive by the same rule as the confirmation.
+    markVoiceTargets(callService, (args) => {
+      const target = this.targetsOf(args as any);
+      if ('error' in target) return [];
+      const states = new Map(this.ha.exposedStates().map((st) => [st.entity_id, st]));
+      return target.ids.map((id) => ({ id, sensitive: needsConfirmation(states.get(id)) }));
+    });
     return [find, getState, callService, history, logbook, calendarEvents, calendarAdd, todoItems, todoAdd, todoComplete, camera, notify];
+  }
+
+  /** The entities a service call targets: its entity ids as given, else those its name / area resolve to. */
+  private targetsOf(a: { domain: string; entity_id?: string | string[]; name?: string; area?: string }): TargetResolution {
+    const ids = a.entity_id === undefined ? [] : Array.isArray(a.entity_id) ? a.entity_id : [a.entity_id];
+    if (ids.length || !(a.name || a.area)) return { ids };
+    return resolveTargets(this.ha.exposedStates(), (id) => this.ha.areaOf(id), { domain: a.domain, name: a.name, area: a.area });
   }
 }

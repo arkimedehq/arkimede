@@ -2174,7 +2174,7 @@ A built-in tool to run **arbitrary code/shell** (`python`/`node`/`shell`) in an 
 - **Isolation**: container-job via broker (cap-drop ALL, read-only, non-root uid, limits). **Fail-closed** without a broker (in-process only with `SANDBOX_ALLOW_INPROCESS=1`, dev).
 - **Network**: `none` (default) | `egress` (allowlist proxy) | `open` (full internet). With `open` the agent installs deps at runtime: `pip install --user <pkg>` / `npm install <pkg>` (they persist in the workspace).
 - **`apt`/system packages**: NOT installable (non-root container + read-only rootfs) — only language packages.
-- **Hygiene**: per-TTL workspace GC, per-session disk quota, download of files generated from the chat.
+- **Hygiene**: per-TTL workspace GC, per-session disk quota (default 4 GB; a command always runs, so a full workspace can still be cleaned), 1 GB of memory per command, download of files generated from the chat.
 
 ### Compile to tool (descriptive → typed)
 

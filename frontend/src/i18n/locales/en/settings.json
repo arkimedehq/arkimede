@@ -849,7 +849,24 @@
     "sampleOther": "{{name}} {{score}}",
     "sampleSuspect": "suspect",
     "sampleRemove": "Remove this sample",
-    "sampleRemoveConfirm": "Remove sample #{{n}} from {{name}}'s voice?"
+    "sampleRemoveConfirm": "Remove sample #{{n}} from {{name}}'s voice?",
+    "clearance": {
+      "title": "Sensitive actions only for recognised voices",
+      "hint": "With this on, a protected action asked for by voice runs only when the speaker was recognised with a score at least the threshold. Otherwise the agent does not do it and says so. It also covers sequences, automations created by voice and agents the turn delegates to; chat and the app are unchanged.",
+      "recognitionOff": "Voice recognition is off: with this on, no protected action can be done by voice.",
+      "minScore": "Voice score threshold",
+      "minScoreHint": "0–1, the same score as the latest recognitions above (0.65 or more recommended)",
+      "people": "Who may",
+      "peopleAny": "None selected: any recognised voice.",
+      "peopleSome": "Only the selected voices.",
+      "sensitive": "Also protect what Home Assistant deems sensitive (locks, alarms, garage doors, gates)",
+      "entities": "Protected entities",
+      "entitiesHint": "One per line: an id, a domain (e.g. lock) or with * (e.g. cover.garage*).",
+      "tools": "Protected tools",
+      "toolsHint": "One per line, with * (e.g. skill_gmail_*). Any tool.",
+      "limits": "It protects only the commands that go through Arkimede: if the Home Assistant pipeline handles commands locally, remove the sensitive entities from Assist or turn that option off. A voiceprint is not strong authentication.",
+      "save": "Save"
+    }
   },
   "voiceProfile": {
     "title": "Voice",

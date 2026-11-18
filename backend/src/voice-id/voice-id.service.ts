@@ -14,7 +14,7 @@
  * from whisper-service (`/v1/speaker/embed`); no audio is kept, the samples are encrypted at rest. Off, nothing is
  * computed and every turn goes as before.
  */
-import { BadRequestException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleInit, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { Repository } from 'typeorm';
@@ -27,6 +27,7 @@ import {
   MAX_SAMPLES, centroid, checkSample, matchVoice, normalize, scoreSamples, speakerIdentity, turnKey,
   type SampleRejection, type SampleScore, type SpeakerIdentity,
 } from './voice-match';
+import { normalizePolicy, setVoiceClearancePolicy, voiceClearancePolicy, type VoiceClearancePolicy } from './voice-clearance';
 
 const CONFIG_ID = 1;
 /** A turn's voiceprint waits this long for the hub to hand its text to the conversation. */
@@ -63,7 +64,7 @@ export interface Recognition {
 }
 
 @Injectable()
-export class VoiceIdService {
+export class VoiceIdService implements OnModuleInit {
   private readonly logger = new Logger(VoiceIdService.name);
   private settings: { on: boolean; at: number } | null = null;
   private voices: Array<{ profile: VoiceProfile; centroid: number[] | null }> | null = null;
@@ -82,6 +83,30 @@ export class VoiceIdService {
   ) {}
 
   // ── Settings ─────────────────────────────────────────────────────────────
+
+  /** The voice clearance policy is loaded at boot (the agent reads it from voice-clearance.ts, no DI). */
+  async onModuleInit(): Promise<void> {
+    try {
+      const row = await this.configRepo.findOne({ where: { id: CONFIG_ID }, select: { id: true, voiceClearance: true } });
+      setVoiceClearancePolicy(row?.voiceClearance as Partial<VoiceClearancePolicy> | null);
+      const p = voiceClearancePolicy();
+      if (p.enabled) this.logger.log(`Voice clearance on: score ≥ ${p.minScore}, ${p.tools.length} tool and ${p.entities.length} entity rules${p.sensitiveTargets ? ' + sensitive targets' : ''}${p.people.length ? `, ${p.people.length} people` : ', any recognised voice'}`);
+    } catch (err: any) {
+      this.logger.warn(`Voice clearance policy not loaded (off): ${err?.message ?? err}`);
+    }
+  }
+
+  clearancePolicy(): VoiceClearancePolicy {
+    return voiceClearancePolicy();
+  }
+
+  /** Saves the policy (normalised) and puts it in force at once. */
+  async setClearancePolicy(next: Partial<VoiceClearancePolicy>): Promise<VoiceClearancePolicy> {
+    const p = normalizePolicy({ ...voiceClearancePolicy(), ...next });
+    await this.configRepo.update(CONFIG_ID, { voiceClearance: p as unknown as Record<string, unknown> });
+    setVoiceClearancePolicy(p);
+    return p;
+  }
 
   async enabled(now = Date.now()): Promise<boolean> {
     if (this.settings && now - this.settings.at < SETTINGS_TTL_MS) return this.settings.on;

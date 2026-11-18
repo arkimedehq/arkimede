@@ -423,3 +423,49 @@ export function ocrPagePrompt(nativeText: string): string {
     hint
   );
 }
+
+/**
+ * The result a protected tool gives in a voice turn whose voice does not clear it (voice-id/voice-clearance.ts):
+ * nothing was done; the agent tells the person, in their language, without retrying.
+ */
+export function voiceNotAuthorized(reason: 'not_recognised' | 'low_confidence' | 'not_allowed'): string {
+  const why = reason === 'not_recognised' ? 'the voice speaking was not recognised'
+    : reason === 'low_confidence' ? 'the voice was not recognised with enough certainty'
+      : 'the person recognised is not allowed to do it by voice';
+  return `Not done: this action is allowed by voice only to a recognised person, and ${why}. Do not retry it and do not ` +
+    'try another way to do it in this turn: tell the person, briefly, that you cannot do it for a voice you do not ' +
+    'recognise (they can do it from the app, or ask someone you know).';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Step guard: notes for an agent run going nowhere (agent/step-guard.ts)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The previous reply stopped at the output limit (a tool call too long to fit). */
+export const STEP_TRUNCATED_NOTE =
+  '[Note from the system] Your previous reply was cut off at your output limit, so it was incomplete. Keep each ' +
+  'reply and each tool call short: write long code or content in parts (several calls, each writing a piece of a ' +
+  'file), not in one call.';
+
+/** The same tool returned the same result `n` times in a row. */
+export function STEP_REPEATED_NOTE(n: number): string {
+  return `[Note from the system] Your last ${n} tool calls got the same result. Repeating them will not change it: ` +
+    'read that result and do something different that addresses it, or stop and tell the user what is blocking you ' +
+    'and what they can do.';
+}
+
+/** This is the last model call the step limit allows. */
+export const STEP_LAST_CALL_NOTE =
+  '[Note from the system] This is your last step for this request: do not call tools. Answer the user now with what ' +
+  'you have done and found, what is still missing and why, and what they can do next.';
+
+/** A last call without tools after the step limit: the run told in words. */
+export function STEP_FINAL_ANSWER_PROMPT(request: string, steps: string): string {
+  return 'You were working on this request from the user and used up all the steps you have for it before finishing.\n\n' +
+    `The request:\n${request}\n\n` +
+    `What you did (your tool calls and their results):\n${steps || '(nothing recorded)'}\n\n` +
+    'Now, without tools, answer the user in their language: what you did and found so far (give any result you ' +
+    'already have), what you could not finish and the reason (the error or obstacle, in plain words), and what they ' +
+    'can do next (for example ask you to continue, or change something). Be brief and concrete; do not mention steps ' +
+    'or limits as technical terms.';
+}

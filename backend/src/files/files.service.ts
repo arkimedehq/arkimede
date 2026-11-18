@@ -35,7 +35,7 @@ import { TeamsService } from '../teams/teams.service';
 const pdfParse = require('pdf-parse');
 import * as mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
-import { OcrService } from '../ocr/ocr.service';
+import { OcrService, WEB_IMAGE_TYPES, isPhotoName } from '../ocr/ocr.service';
 import type { OcrLevel } from '../ocr/ocr.types';
 import type { DocScope } from '../custom-tools/custom-tool.types';
 import { File } from './files.entity';
@@ -464,6 +464,18 @@ export class FilesService {
   }
 
   /**
+   * An image file as a model can take it: a web image (JPEG, PNG, GIF, WebP) as it is, any other photo (camera RAW
+   * such as DNG, HEIC/HEIF, TIFF, BMP…) converted to JPEG by the ocr-service. Null when it is not an image or the
+   * conversion is not available.
+   */
+  async readAsModelImage(file: File, mimeType = file.mimeType): Promise<{ mimeType: string; base64: string } | null> {
+    if (WEB_IMAGE_TYPES.includes(mimeType)) return { mimeType, base64: this.readAsBase64(file) };
+    if (!this.ocr || !(mimeType.startsWith('image/') || isPhotoName(file.originalName ?? ''))) return null;
+    const jpeg = await this.ocr.toJpeg(fs.readFileSync(file.storagePath), mimeType, file.originalName ?? 'photo');
+    return jpeg ? { mimeType: 'image/jpeg', base64: jpeg.toString('base64') } : null;
+  }
+
+  /**
    * Extracts the raw text from a file, based on its MIME type.
    *
    * The extracted text is used by EmbedService for RAG vectorization.
@@ -516,7 +528,9 @@ export class FilesService {
       return buf.toString('utf-8');
     }
 
-    if (IMAGE_MIME_TYPES.includes(mimeType as ImageMimeType)) {
+    // Web images, and the other photos the ocr-service reads (camera RAW such as DNG, HEIC, TIFF, BMP).
+    const isPhoto = (mimeType.startsWith('image/') && mimeType !== 'image/svg+xml') || isPhotoName(name);
+    if (IMAGE_MIME_TYPES.includes(mimeType as ImageMimeType) || isPhoto) {
       return this.ocr ? this.ocr.extractImage(buf, mimeType, name, opts?.ocrLevel) : '';
     }
 

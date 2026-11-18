@@ -1013,7 +1013,7 @@ Il campo `kind`, derivato all'install, distingue:
 - **Gating** (admin → Impostazioni → AI → Sandbox): master switch globale (default OFF) + allowlist team/progetti; admin sempre permesso.
 - **Isolamento**: via `broker` (container-job, cap-drop ALL, read-only, uid non-root). **Fail-closed**: senza broker rifiuta, salvo `SANDBOX_ALLOW_INPROCESS=1` (solo dev, non isolato).
 - **Rete** (tier unificati): `none` (nessuna rete) | `internal` (solo backend `/internal/*`, no WAN) | `internet` (domini in allowlist via egress-proxy) | `open` (internet pieno → `pip install`/`npm install` a runtime; richiede la rete open in `BROKER_ALLOWED_NETWORKS`). Stesso vocabolario dei job skill; `internal` è il pavimento sempre attivo sotto i tier superiori.
-- **Hygiene**: GC dei workspace per-TTL, quota disco per-sessione, download dei file generati dalla chat (`GET /api/sandbox/file`, scoped sull'accesso alla chat).
+- **Hygiene**: GC dei workspace per-TTL, quota disco per-sessione (`SANDBOX_SESSION_MAX_BYTES`, default 4 GB: un comando viene sempre eseguito, così un workspace pieno si può ancora pulire; fallisce solo se lascia il workspace oltre la quota senza ridurlo; pip non vi tiene la cache dei download), 1 GB di memoria per comando (`JOB_MEMORY`), download dei file generati dalla chat (`GET /api/sandbox/file`, scoped sull'accesso alla chat).
 
 ### 12.12 Compila a tool (descriptive → typed)
 
@@ -1087,7 +1087,7 @@ Chiedi *"accendi e spegni le luci di cucina e soggiorno per 10 secondi"* e l'age
 - **Passi**: `call` (strumento + argomenti) · `wait` (≥ 0,2 s, `jitterSeconds` opzionale) · `repeat` (`count` o `forSeconds`) · `parallel` (fino a 8) · `choose.random` (uno a caso); `finally` gira alla fine, anche se fermata o fallita (rimette le cose a posto).
 - **Sostituzione**: una nuova sequenza con la stessa `key` (o, senza, con le stesse chiamate e gli stessi argomenti) sostituisce quella in corso — "più veloce" funziona da sé.
 - **Mai**: agenti, team, flow, sandbox, pianificazione o memoria dentro una sequenza; mai una conferma al posto dell'utente (`confirmed: true` rifiutato, un risultato che la chiede fa fallire il passo). Una chiamata fallita è registrata e si va avanti; la stessa che fallisce 3 volte di fila la ferma (`stopOnError` si ferma alla prima).
-- **Una procedura della memoria**: quando la sequenza esegue una procedura che Recordare conosce (o un suo passo), il modello passa `procedure: {id, step?}` e Arkimede riporta l'esecuzione a Recordare alla fine — completata con tutte le chiamate riuscite = done; fallita, scaduta o con chiamate fallite = failed con gli errori; fermata dall'utente = niente. Solo se la memoria dell'utente è Recordare; un errore di Recordare non tocca la sequenza.
+- **Una procedura della memoria**: quando la sequenza esegue una procedura che Recordare conosce (o un suo passo), il modello passa `procedure: {id, step?}` e Arkimede riporta l'esecuzione a Recordare alla fine — completata con tutte le chiamate riuscite = done; fallita, scaduta o con chiamate fallite = failed con gli errori; fermata dall'utente (o sostituita da una nuova sequenza) = stopped; un passo completato = done con quel passo, che Recordare conta come ongoing (la procedura continua). Solo se la memoria dell'utente è Recordare; un errore di Recordare non tocca la sequenza.
 - **Limiti** (env): `RUN_SEQUENCE_MAX_SECONDS` (600; oltre → `schedule_task`), `RUN_SEQUENCE_MAX_CALLS` (1000), `RUN_SEQUENCE_MAX_PER_USER` (3).
 - **Stop**: a voce o in chat ("basta", "ferma") tramite `stop_sequences`; nella chat da cui è partita (un riquadro con l'avanzamento e **Ferma**); nel cassetto del pannello a parete.
 - **Fine**: una riga in quella chat (completata / fermata / interrotta, con il motivo); niente voce.
@@ -1176,9 +1176,14 @@ l'eccedenza oltre il budget viene buttata via dal trim invece che riassunta.
 
 Il limite di passi dell'agente (chiamate LLM ↔ tool per un singolo messaggio) è
 configurabile via env `AGENT_RECURSION_LIMIT` nel `.env` del backend (default 100 step ≈ 50
-giri LLM, minimo applicato 10): superarlo produce l'errore `GraphRecursionError` — di norma
-indica che l'agente sta cercando dati che non esistono o che gli manca contesto (vedi
-`DATAFLOW_AGENT.md` per il flusso completo con diagrammi).
+giri LLM, minimo applicato 10). Raggiungerlo di norma indica che l'agente cerca dati che non
+esistono, gli manca contesto o è bloccato su un errore (vedi `DATAFLOW_AGENT.md` per il flusso
+completo con diagrammi). L'utente non riceve mai l'errore nudo: l'agente risponde con cosa ha
+fatto, cosa ha trovato, cosa l'ha bloccato e cosa fare (un'ultima chiamata al modello senza
+strumenti). Lungo il percorso un guardiano dei passi aggiunge una breve nota a ciò che il modello
+legge quando lo stesso strumento restituisce lo stesso risultato tre volte di fila (cambiare
+strada o dire cosa blocca), quando una risposta è stata troncata al limite di output del modello
+(scrivere i contenuti lunghi a pezzi), e all'ultimo passo consentito.
 
 ### 13.3 Prompt Caching
 

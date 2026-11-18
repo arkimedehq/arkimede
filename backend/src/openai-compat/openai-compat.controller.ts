@@ -46,6 +46,7 @@ import { ExternalChatsService } from '../chats/external-chats.service';
 import { ConversationFocusService, FOCUS_HISTORY_MESSAGES, satelliteName } from '../chats/conversation-focus.service';
 import { SpeechRequestDto } from './openai-audio.dto';
 import { withTraceUser } from '../observability/genai-tracing';
+import { runWithVoiceClearance } from '../voice-id/voice-clearance';
 import {
   agentSlug, chunkFrame, completionBody, errorBody, mapOpenAiMessages,
   OpenAiChatRequest, toOpenAiUsage, usageFrame,
@@ -164,6 +165,11 @@ export class OpenAiCompatController {
       }),
     };
 
+    // A satellite's turn is a voice turn whose speaker this endpoint cannot know: the actions only a recognised voice
+    // may do are refused (voice-clearance.ts). Without a satellite it is an API client, the key's holder: unchecked.
+    const asVoice = <T>(fn: () => Promise<T>): Promise<T> =>
+      (satellite ? runWithVoiceClearance({ speaker: null, satellite }, fn) : fn());
+
     // Invocation log: external calls are otherwise invisible (no chat rows).
     const tools = makeToolCollector();
     const logInvocation = (outputText: string, usage: any, error?: string) =>
@@ -214,7 +220,7 @@ export class OpenAiCompatController {
 
       let text = '';
       try {
-        const usage = await this.agentService.streamResponse(
+        const usage = await asVoice(() => this.agentService.streamResponse(
           userInput, user.id, undefined, undefined, historyMessages,
           [], [], [],
           (chunk) => { text += chunk; res.write(chunkFrame(id, created, modelId, { content: chunk })); },
@@ -222,7 +228,7 @@ export class OpenAiCompatController {
           abort.signal,
           tools.onToolResult,
           opts,
-        );
+        ));
         res.write(chunkFrame(id, created, modelId, {}, 'stop'));
         if (body?.stream_options?.include_usage) {
           res.write(usageFrame(id, created, modelId, toOpenAiUsage(usage)));
@@ -246,7 +252,7 @@ export class OpenAiCompatController {
     // Non-streaming: buffer the deltas and return the complete body.
     let text = '';
     try {
-      const usage = await this.agentService.streamResponse(
+      const usage = await asVoice(() => this.agentService.streamResponse(
         userInput, user.id, undefined, undefined, historyMessages,
         [], [], [],
         (chunk) => { text += chunk; },
@@ -254,7 +260,7 @@ export class OpenAiCompatController {
         abort.signal,
         tools.onToolResult,
         opts,
-      );
+      ));
       finished = true;
       this.logger.log(`← [${modelId}] sync done in ${Date.now() - t0}ms, ${text.length} chars`);
       logInvocation(text, usage);

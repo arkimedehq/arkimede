@@ -22,7 +22,7 @@
  *   BROKER_RUNNER_IMAGE  runner image (default pa-executor:test)
  *   BROKER_NETWORK       job network: 'none' (default) | validated docker network name
  *   BROKER_ALLOW_RUNSC   '1' to allow runtime=runsc (gVisor)
- *   JOB_MEMORY / JOB_PIDS / JOB_TIMEOUT_MS  limits (default 256m / 128 / 120000)
+ *   JOB_MEMORY / JOB_PIDS / JOB_TIMEOUT_MS  limits (default 1g / 128 / 120000)
  */
 const http = require('http');
 const {execFile} = require('child_process');
@@ -77,7 +77,7 @@ const ALLOW_RUNSC = process.env.BROKER_ALLOW_RUNSC === '1';
 // under gVisor (runsc) or a trusted single-tenant deploy. Without this, a 'trusted'
 // request from the admin config falls back to the hardened profile.
 const ALLOW_PRIVILEGED_SANDBOX = process.env.BROKER_ALLOW_PRIVILEGED_SANDBOX === '1';
-const JOB_MEMORY = process.env.JOB_MEMORY || '256m';
+const JOB_MEMORY = process.env.JOB_MEMORY || '1g';
 const JOB_PIDS = process.env.JOB_PIDS || '128';
 // Default 120s: apt-get/pip/npm installs (esp. the 'trusted' sandbox profile) easily
 // exceed 30s. Matches the executor's SANDBOX_TIMEOUT_MS default so the two layers align.
@@ -215,6 +215,8 @@ function buildDockerArgs(body) {
                 '--network', nets[0],
                 ...runtimeFlags,
                 '-e', 'HOME=/workspace',
+                // pip keeps no download cache in the workspace: it would count toward the chat's disk quota.
+                '-e', 'PIP_NO_CACHE_DIR=1',
                 ...envFlags,
                 ...outputFlags,
                 '-v', `${ws}:/workspace`,

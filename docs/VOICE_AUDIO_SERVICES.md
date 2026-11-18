@@ -77,7 +77,11 @@ piper-service/
     (`audio/wav`). Support `wav` first; `mp3` optional later (needs
     ffmpeg — skip in v1, return 400 for unsupported formats).
   - Piper python API: load `PiperVoice` once per voice (LRU cache of
-    loaded voices), synthesize to an in-memory WAV.
+    loaded voices), synthesize to an in-memory WAV. A long text is
+    synthesized in pieces of at most `PIPER_CHUNK_CHARS` (default 400) cut
+    at sentence ends, their audio joined into one WAV: memory stays bounded
+    by the piece (a ~5000-char message used to kill the container at its
+    512 MB limit). A line ending without punctuation counts as a sentence end.
 - `GET /v1/models` — list the downloaded voices (scan the models dir),
   same envelope style as `whisper-service/main.py:81`.
 - `GET /health` — `{"status": "ok"}` once the default voice is loaded
@@ -245,6 +249,18 @@ image, so going back to Whisper never needs a download.
   and the Wyoming `info` treat an internal provider that is not deployed as
   disabled, so the microphone/read-aloud buttons stay hidden.
 
+## Part 2d — Reading a message aloud in pieces (2026-11-17)
+
+The chat's read-aloud button (`MessageBubble.tsx` `SpeakButton`, helpers in
+`frontend/src/utils/ttsText.ts`) no longer synthesizes the whole message at
+once (it waited ~9 s on a long message before any sound, and cut at 4096
+chars). The markdown is reduced to plain text (a heading or list item gets a
+final period, so the voice pauses there), then cut at sentence ends: a first
+piece of at most 200 chars, the next ones of at most 600. The first piece plays
+after well under a second; each next piece is requested while the previous one
+plays. A click while loading or playing stops it. Works with any TTS provider
+(it only uses the speech route).
+
 ## Part 3 — Wyoming voice server (Home Assistant & co.)
 
 Status: IMPLEMENTED (2026-09-15) — `backend/src/wyoming/`, migration 084,
@@ -396,3 +412,32 @@ same person as a Home Assistant person and an Arkimede user.
   sees the latest recognitions with their scores, to calibrate the thresholds, and each voice's samples scored against
   its other samples and the closest other voice: a suspect one (another voice, noise) is removed alone
   (`GET`/`DELETE /api/admin/voice-id/voices/:id/samples[/:index]`).
+
+## Part 6 — Sensitive actions only for recognised voices (2026-11-17)
+
+Opt-in (Settings → Voice & audio → Recognised voices → *Sensitive actions only for recognised voices*;
+`app_config.voiceClearance`, migration 117; `PUT /api/admin/voice-id/clearance`). A voice turn runs as the satellite's
+account whoever speaks: with this on, a **protected** call made in a voice turn runs only when the voice was recognised
+with a similarity score at least `minScore` (default 0.65, the same score as the recognitions list) and, if a list of
+voices is set, is one of them (none set = any recognised voice). Otherwise the tool does nothing and answers
+`{error: "voice_not_authorized", reason}` (`not_recognised` / `low_confidence` / `not_allowed`): the agent says it
+cannot do it for a voice it does not recognise.
+
+- **What is protected**: any tool by name (`tools`, `*` allowed, e.g. `skill_gmail_*`); entities a call acts on
+  (`entities`: an id, a domain such as `lock`, or with `*`); and, with `sensitiveTargets` (default on), what the
+  integration itself deems sensitive — Home Assistant's locks, alarms, garage doors and gates, the same rule as the
+  confirmation. `ha_call_service` tells the entities a call acts on, resolved from a name or an area too, so a
+  protected entity is caught however the model names it; `confirmed: true` does not clear it.
+- **Where it holds** (`voice-id/voice-clearance.ts`): the turn's clearance (who spoke, score, satellite) travels in an
+  AsyncLocalStorage set around the Wyoming run; the tools are guarded where the agent is built (`AgentService`,
+  `MultiAgentService`), so the agents a turn delegates to, the sequences it starts (`run_sequence` calls the guarded
+  tools) and the work that goes on after the hub stops waiting are checked too. An automation created by voice keeps
+  the clearance (`scheduled_tasks.voiceClearance`) and runs under it; changing what it does from the app clears it.
+  A turn on the OpenAI-compatible endpoint that names a satellite (`user`) counts as an unrecognised voice; without a
+  satellite it is an API client (the key's holder) and is not checked.
+- **Off, or outside voice turns**: nothing is wrapped, every turn goes as before. With this on and recognition off, no
+  protected action can be done by voice.
+- **Limits**: only commands that go through Arkimede are covered — a Home Assistant pipeline that handles commands
+  locally acts without asking Arkimede, so remove the sensitive entities from Assist or turn that option off. A
+  voiceprint is not strong authentication (a recording can fool it): for locks and alarms a spoken confirmation code is
+  a further step.

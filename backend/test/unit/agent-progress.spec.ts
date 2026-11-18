@@ -17,6 +17,7 @@ import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { createReactAgent } from '@langchain/langgraph/prebuilt';
 import { AgentService, type AgentProgressEvent } from '../../src/agent/agent.service';
+import { StepGuard } from '../../src/agent/step-guard';
 
 /** Streams one scripted response per call, as a provider does (token callbacks with the chunk). */
 class ScriptedModel extends BaseChatModel {
@@ -47,6 +48,7 @@ function serviceWith(agent: unknown, model: unknown): AgentService {
   svc.resolveAgent = async () => ({
     agent, model, effectiveHistory: [], effectiveMaxHistoryTokens: 0, provider: 'scripted', modelName: 'scripted',
     contextBreakdown: { systemTok: 0, skillsTok: 0, toolsTok: 0, toolsCount: 0, historyTok: 0, queryTok: 0 },
+    stepGuard: new StepGuard(),
   });
   svc.buildMessages = async (input: string) => [{ role: 'user', content: input }];
   return svc as AgentService;
@@ -130,5 +132,40 @@ describe('streamResponse progress', () => {
     expect(seen[0][1]).toEqual({ id: 'm2', role: 'assistant', content: 'Te lo attivo?' });
     expect(seen[1][1].toolCalls).toHaveLength(1);
     expect(history[1].toolCalls).toHaveLength(1); // the caller's history is not changed
+  });
+});
+
+describe('streamResponse at the step limit', () => {
+  it('answers with what was done instead of failing, through a last call without tools', async () => {
+    const check = tool(async () => 'quota exceeded', { name: 'check', description: 'checks', schema: z.object({}) });
+    // Calls the tool on every graph call; the 4th scripted reply is the last call, made outside the graph.
+    const model = new ScriptedModel([
+      toolCall('check', ['{}']), toolCall('check', ['{}']), toolCall('check', ['{}']),
+      [new AIMessageChunk({ content: 'I could not finish: the workspace is full.' })],
+    ]);
+    const guard = new StepGuard();
+    const agent = createReactAgent({ llm: model, tools: [check], messageModifier: guard.wrap(async (m) => m) });
+    const svc: any = serviceWith(agent, model);
+    const resolve = svc.resolveAgent;
+    svc.resolveAgent = async () => ({ ...(await resolve()), stepGuard: guard });
+    let text = '';
+    const usage = await svc.streamResponse(
+      'clean up', 'u1', undefined, 'c1', [], [], [], [],
+      (chunk: string) => { text += chunk; }, () => {}, undefined, undefined, { maxIterations: 6 },
+    );
+    expect(text).toContain('I could not finish: the workspace is full.');
+    expect(usage === null || typeof usage === 'object').toBe(true);
+  });
+
+  it('still throws errors that are not the step limit', async () => {
+    const boom = tool(async () => 'x', { name: 'boom', description: 'x', schema: z.object({}) });
+    class Failing extends ScriptedModel {
+      async *_streamResponseChunks(): AsyncGenerator<any> { throw new Error('429 rate limit'); }
+    }
+    const model = new Failing([]);
+    const agent = createReactAgent({ llm: model, tools: [boom] });
+    const svc: any = serviceWith(agent, model);
+    await expect(svc.streamResponse('x', 'u1', undefined, 'c1', [], [], [], [], () => {}, () => {}))
+      .rejects.toThrow(/429/);
   });
 });

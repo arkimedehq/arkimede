@@ -27,7 +27,10 @@ accented Italian text is read correctly by both.
 
 - **`ocr-service/`** (FastAPI, port 9200, not host-exposed): `GET /health` (engines
   available), `POST /v1/extract` (multipart `file`, `engine=fast|structured`),
-  `POST /v1/render` (per-page PNG + native text, batched with `first_page`/`max_pages`).
+  `POST /v1/render` (per-page PNG + native text, batched with `first_page`/`max_pages`),
+  `POST /v1/convert` (a photo as a JPEG a model takes: camera RAW such as DNG, CR2/CR3, NEF,
+  ARW — developed by LibRaw — HEIC/HEIF, TIFF, BMP; longer side scaled to `max_side`, default
+  `OCR_CONVERT_MAX_SIDE`=2048). `extract` and `render` read those photos too.
   All models are baked into the image at build time: it works offline.
 - **`backend/src/ocr/`**: `OcrService` resolves the level (request or admin default,
   capped by the admin maximum, degraded to the nearest available level) and calls the
@@ -38,6 +41,13 @@ accented Italian text is read correctly by both.
   `pdf-parse` when OCR is off, unavailable or failing, exactly as before the service
   existed. Images: `fast`/`structured` first, the vision model when they find no text
   (photos keep getting a searchable description), nothing for an explicit `none`.
+  Photos in other formats (RAW, HEIC, TIFF…) are read by the service directly; for the
+  vision model they go as their JPEG (`OcrService.toJpeg`).
+- **Chat attachments**: a photo attached in a format models do not take (a DNG from a phone,
+  a HEIC) reaches the model as its JPEG (`FilesService.readAsModelImage`), so the agent reads
+  it without converting it in the sandbox. When the chat's model does not see images and a
+  vision model is designated, attached images arrive as that model's description, with any
+  visible text verbatim.
 - **Indexing is queued**: `POST /api/embed/:fileId` and `POST /api/embed/datasource`
   accept `ocrLevel` and go through the BullMQ `embed-ingest` queue; the user is notified
   when done (the file list refreshes on that notification).

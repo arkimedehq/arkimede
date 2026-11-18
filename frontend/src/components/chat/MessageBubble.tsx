@@ -16,6 +16,7 @@ import { openInlineWithAuth } from '../../utils/openInlineWithAuth';
 import api from '../../api/client';
 import { ttsApi } from '../../api/tts';
 import { feedbackApi } from '../../api/feedback';
+import { ttsChunks, ttsPlainText } from '../../utils/ttsText';
 import type { Feedback, FeedbackRating } from '../../api/feedback';
 
 interface Props {
@@ -264,63 +265,69 @@ const markdownComponents: React.ComponentProps<typeof ReactMarkdown>['components
 // ── SpeakButton (read the assistant message aloud) ───────────────────────────
 //
 // Synthesizes the message text via the OpenAI-compatible TTS route
-// (POST /api/openai/v1/audio/speech — the session JWT is enough) and plays the
-// returned audio blob. Click again while playing to stop. Whole-utterance
-// synthesis: the button only appears once streaming is finished.
-
-/** Reduces markdown to speakable plain text (code blocks and tables are skipped). */
-export function ttsPlainText(md: string): string {
-  return md
-    .replace(/```[\s\S]*?```/g, ' ')          // fenced code blocks
-    .replace(/`([^`]+)`/g, '$1')              // inline code → its content
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')    // images
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')  // links → their label
-    .replace(/^\s*\|.*\|\s*$/gm, ' ')         // table rows
-    .replace(/^#{1,6}\s+/gm, '')              // heading markers
-    .replace(/^\s*[-*+]\s+/gm, '')            // list bullets
-    .replace(/[*_~>#]/g, '')                  // emphasis leftovers
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+// (POST /api/openai/v1/audio/speech — the session JWT is enough) piece by piece
+// (utils/ttsText.ts): the first, short piece starts playing soon, and each next
+// piece is synthesized while the previous one plays. Click again to stop. The
+// button only appears once streaming is finished.
 
 function SpeakButton({ text }: { text: string }) {
   const { t } = useTranslation('chat');
   const [state, setState] = useState<'idle' | 'loading' | 'playing' | 'error'>('idle');
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  // Bumped on stop: a playback still going on (awaiting a piece) sees it changed and ends.
+  const runRef = useRef(0);
 
-  const stop = () => {
+  const release = () => {
     const audio = audioRef.current;
     if (audio) {
       audio.pause();
       URL.revokeObjectURL(audio.src);
       audioRef.current = null;
     }
+  };
+
+  const stop = () => {
+    runRef.current++;
+    release();
     setState('idle');
   };
 
   // Stop the audio if the message unmounts (chat change, truncate).
   useEffect(() => stop, []);
 
-  const handleClick = async () => {
-    if (state === 'playing') { stop(); return; }
-    if (state === 'loading') return;
+  const synthesize = async (input: string): Promise<Blob> =>
+    (await api.post('/openai/v1/audio/speech', { input }, { responseType: 'blob' })).data as Blob;
 
+  /** Plays one piece to its end (false when stopped meanwhile). */
+  const play = (blob: Blob, run: number) => new Promise<boolean>((resolve, reject) => {
+    if (run !== runRef.current) { resolve(false); return; }
+    release();
+    const audio = new Audio(URL.createObjectURL(blob));
+    audioRef.current = audio;
+    audio.onended = () => resolve(run === runRef.current);
+    audio.onpause = () => { if (run !== runRef.current) resolve(false); };
+    audio.onerror = () => reject(new Error('audio playback failed'));
+    audio.play().then(() => { if (run === runRef.current) setState('playing'); }, reject);
+  });
+
+  const handleClick = async () => {
+    if (state === 'playing' || state === 'loading') { stop(); return; }
+
+    const pieces = ttsChunks(ttsPlainText(text));
+    if (!pieces.length) return;
+    const run = ++runRef.current;
     setState('loading');
     try {
-      // The DTO caps input at 4096 chars — trim client-side to avoid a 400.
-      const input = ttsPlainText(text).slice(0, 4096);
-      const res = await api.post('/openai/v1/audio/speech', { input }, { responseType: 'blob' });
-      const audio = new Audio(URL.createObjectURL(res.data as Blob));
-      audioRef.current = audio;
-      audio.onended = stop;
-      audio.onerror = () => {
-        stop();
-        setState('error');
-        setTimeout(() => setState('idle'), 3000);
-      };
-      await audio.play();
-      setState('playing');
+      let next: Promise<Blob> = synthesize(pieces[0]);
+      for (let i = 0; i < pieces.length; i++) {
+        const blob = await next;
+        // The next piece is synthesized while this one plays.
+        if (i + 1 < pieces.length) next = synthesize(pieces[i + 1]);
+        if (!(await play(blob, run))) return;
+      }
+      if (run === runRef.current) stop();
     } catch (err) {
+      if (run !== runRef.current) return;
       console.error('[SpeakButton] synthesis failed:', err);
       stop();
       setState('error');

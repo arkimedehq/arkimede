@@ -43,35 +43,57 @@ export function sandboxBrokerEnabled(): boolean {
   return brokerEnabled();
 }
 
-// Per-session disk quota: blocks execution if the workspace exceeds the limit.
-const SESSION_MAX_BYTES = parseInt(process.env.SANDBOX_SESSION_MAX_BYTES ?? '524288000', 10); // 500MB, 0=off
+// Per-session disk quota (0 = off). A run always executes — a workspace over the quota must stay able to free space
+// (rm, pip uninstall) — and is reported failed when it leaves the workspace over the quota without shrinking it.
+const SESSION_MAX_BYTES = parseInt(process.env.SANDBOX_SESSION_MAX_BYTES ?? '4294967296', 10); // 4GB, 0=off
 
-/** Sums the file sizes in dir (early-exit beyond the limit). */
-function dirSizeBytes(dir: string): number {
+/** Sums the file sizes in dir; with `cap`, stops counting once past it (enough to decide). */
+export function dirSizeBytes(dir: string, cap = 0): number {
   let total = 0;
   let entries: fs.Dirent[];
   try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return 0; }
   for (const e of entries) {
     const p = path.join(dir, e.name);
     try {
-      if (e.isDirectory()) total += dirSizeBytes(p);
+      if (e.isDirectory()) total += dirSizeBytes(p, cap ? cap - total : 0);
       else if (e.isFile()) total += fs.statSync(p).size;
     } catch { /* */ }
-    if (SESSION_MAX_BYTES && total > SESSION_MAX_BYTES) return total; // enough to decide
+    if (cap && total > cap) return total;
   }
   return total;
 }
 
-/** If the workspace exceeds the quota, returns an error result (otherwise null). */
-function quotaResult(workspace: string): SandboxResult | null {
-  if (!SESSION_MAX_BYTES) return null;
-  const bytes = dirSizeBytes(workspace);
-  if (bytes <= SESSION_MAX_BYTES) return null;
+/**
+ * The run's result under the quota. `before` is the workspace size before the run (exact when over the quota, else
+ * capped). Under the quota after the run → the result as is. Still over but smaller than before (a cleanup) → the
+ * result, with a note of what is left to free. Over and not smaller → failed, with the command's output kept.
+ */
+export function applyQuota(result: SandboxResult, before: number, after: number, max: number): SandboxResult {
+  if (!max || after <= max) return result;
   const mb = (n: number) => Math.round(n / 1048576);
+  const size = `~${mb(after)}MB > ${mb(max)}MB`;
+  if (before > max && after < before) {
+    return { ...result, stderr: `${result.stderr}\n[workspace still over quota: ${size}. Keep deleting files from /workspace (caches, packages, intermediate outputs).]` };
+  }
   return {
-    stdout: '', exit_code: 1, duration_ms: 0,
-    stderr: `[workspace quota exceeded: ~${mb(bytes)}MB > ${mb(SESSION_MAX_BYTES)}MB. Delete files from /workspace (or uninstall deps) before continuing.]`,
+    ...result,
+    exit_code: result.exit_code || 1,
+    stderr: `${result.stderr}\n[workspace quota exceeded: ${size}. Commands still run: delete files from /workspace (caches, packages, intermediate outputs) or uninstall deps, then continue.]`,
   };
+}
+
+/** In-process runs (dev): pip keeps no download cache in the workspace (the broker sets the same for its jobs). */
+const PACKAGE_CACHE_ENV = { PIP_NO_CACHE_DIR: '1' };
+
+/** Runs `run` under the session's quota (see applyQuota). */
+async function withQuota(workspace: string, run: () => Promise<SandboxResult>): Promise<SandboxResult> {
+  if (!SESSION_MAX_BYTES) return run();
+  let before = dirSizeBytes(workspace, SESSION_MAX_BYTES);
+  if (before > SESSION_MAX_BYTES) before = dirSizeBytes(workspace);   // exact: a cleanup must show as smaller
+  const result = await run();
+  let after = dirSizeBytes(workspace, SESSION_MAX_BYTES);
+  if (after > SESSION_MAX_BYTES && before > SESSION_MAX_BYTES) after = dirSizeBytes(workspace);
+  return applyQuota(result, before, after, SESSION_MAX_BYTES);
 }
 
 // GC of session workspaces: removes those unused for longer than TTL (mtime).
@@ -292,8 +314,10 @@ function stage(req: SandboxRequest): { workspace: string; fileName: string } {
  */
 export async function runSandbox(req: SandboxRequest): Promise<SandboxResult> {
   const { workspace, fileName } = stage(req);
-  const over = quotaResult(workspace);
-  if (over) return over;
+  return withQuota(workspace, () => runInProcess(req, workspace, fileName));
+}
+
+async function runInProcess(req: SandboxRequest, workspace: string, fileName: string): Promise<SandboxResult> {
   const scriptPath = path.join(workspace, fileName);
   const timeout_ms = req.timeout_ms ?? MAX_TIMEOUT;
 
@@ -315,6 +339,7 @@ export async function runSandbox(req: SandboxRequest): Promise<SandboxResult> {
     TMPDIR: '/tmp',
     PYTHONDONTWRITEBYTECODE: '1',
     PYTHONUNBUFFERED: '1',
+    ...PACKAGE_CACHE_ENV,
     NO_COLOR: '1',
     USER_ID:              req.user_id ?? '',
     INTERNAL_TOKEN:       req.run_token ?? '',
@@ -394,8 +419,10 @@ export async function runSandbox(req: SandboxRequest): Promise<SandboxResult> {
 export async function runSandboxViaBroker(req: SandboxRequest): Promise<SandboxResult> {
   const t0 = Date.now();
   const { workspace, fileName } = stage(req);          // executor-visible workspace
-  const over = quotaResult(workspace);
-  if (over) return over;
+  return withQuota(workspace, () => runViaBroker(req, workspace, fileName, t0));
+}
+
+async function runViaBroker(req: SandboxRequest, workspace: string, fileName: string, t0: number): Promise<SandboxResult> {
   const safe = path.basename(workspace);
   const hostWorkspace = path.join(SESSION_HOST_BASE, safe); // what the broker mounts
 

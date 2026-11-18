@@ -36,6 +36,7 @@ import { SCHEDULE_TASK_DESC, CONFIRM_SCHEDULED_TASK_DESC, AUTOMATION_RUN_NOTE } 
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
 import { VoiceDeliveryService } from '../notifications/voice-delivery.service';
+import { currentVoiceClearance, runWithVoiceClearance } from '../voice-id/voice-clearance';
 import { getLlmCallContext } from '../usage/llm-call-context';
 import { ScheduledTask } from './scheduled-task.entity';
 import { Chat } from '../chats/chats.entity';
@@ -268,6 +269,8 @@ export class SchedulingService implements OnModuleInit, OnModuleDestroy {
       chatId: scheduleType === 'scheduled' ? (origin?.id ?? null) : null,
       toolFilter: data.toolFilter ?? { mode: 'none' },
       voice: data.voice ?? (!!data.fromVoice || VOICE_SOURCES.has(origin?.externalSource ?? '')),
+      // Asked for by voice: who spoke — its runs are checked as that turn was (voice-clearance.ts).
+      voiceClearance: currentVoiceClearance(),
       enabled: true,
       status: 'pending', // awaits confirmation
     });
@@ -365,6 +368,10 @@ export class SchedulingService implements OnModuleInit, OnModuleDestroy {
         if (task.status === 'done' || task.status === 'error') task.status = 'active';
       }
     }
+
+    // What it does changed: it now runs as whoever changed it — a voice turn's speaker, or the account's own user
+    // (the app), whose runs are not checked (voice-clearance.ts).
+    if (data.instruction !== undefined || data.toolFilter !== undefined) task.voiceClearance = currentVoiceClearance();
 
     if (data.toolFilter !== undefined) {
       const names = (data.toolFilter.names ?? []).map((n) => n.trim()).filter(Boolean);
@@ -480,7 +487,9 @@ export class SchedulingService implements OnModuleInit, OnModuleDestroy {
       const agent = this.agentService();
       // Tool-subset decided at scheduling time (default: none → cheap run).
       // Told first that its reply is the delivery (chat, notification, voice): it writes the message, never "I can't".
-      const r = await agent.invokeWithUsage(`${AUTOMATION_RUN_NOTE(task.voice)}\n\n${task.instruction}`, [], task.userId, task.projectId ?? undefined, task.toolFilter);
+      const run = () => agent.invokeWithUsage(`${AUTOMATION_RUN_NOTE(task.voice)}\n\n${task.instruction}`, [], task.userId, task.projectId ?? undefined, task.toolFilter);
+      // Asked for by voice: it runs as that turn did, so a voice that could not act cannot act later either.
+      const r = task.voiceClearance ? await runWithVoiceClearance(task.voiceClearance, run) : await run();
       result = r.text;
       inTok = r.usage?.inputTokens ?? null;
       outTok = r.usage?.outputTokens ?? null;

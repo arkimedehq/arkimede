@@ -231,10 +231,14 @@ export class MessagesController {
         } else if (att.mode === 'attachment') {
           const file  = await this.filesService.findOneReadable(att.fileId, user.id);
           const absPath = resolve(file.storagePath); // absolute path accessible from skills
-          // Reads base64 only for types natively supported by Claude (images + PDF)
+          // Reads base64 only for types natively supported by Claude (images + PDF). Another photo (camera RAW such
+          // as DNG, HEIC, TIFF…) goes as its JPEG, so the model reads it without converting it itself.
           if (CLAUDE_NATIVE_MIMES.includes(att.mimeType)) {
             const base64 = this.filesService.readAsBase64(file);
             attachmentBlocks.push({ name: att.name, mimeType: att.mimeType, base64 });
+          } else {
+            const image = await this.filesService.readAsModelImage(file, att.mimeType);
+            if (image) attachmentBlocks.push({ name: att.name, ...image });
           }
           enrichedAttachments.push({ ...att, storagePath: absPath });
         } else {

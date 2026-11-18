@@ -86,15 +86,64 @@ def load_voice(voice_id: str) -> PiperVoice:
     return PiperVoice.load(str(onnx))
 
 
-def synthesize_wav(voice: PiperVoice, text: str) -> bytes:
-    """Synthesizes `text` to an in-memory WAV (piper-tts ≥1.3 / ≤1.2 APIs)."""
+# Longest piece synthesized at once: a long text is split at sentence boundaries and its pieces' audio joined, so
+# memory stays bounded by the piece, not by the text (a long message used to exhaust the container).
+CHUNK_CHARS = int(os.getenv("PIPER_CHUNK_CHARS", "400"))
+_SENTENCE_END = re.compile(r"(?<=[.!?…;:])\s+|\n+")
+
+
+def split_text(text: str, limit: int = CHUNK_CHARS) -> list[str]:
+    """Pieces of at most `limit` chars, cut at sentence ends (then at commas, then at spaces for a run-on sentence)."""
+    # A line that ends without punctuation (a heading, a list item) still ends there when spoken.
+    text = re.sub(r"(?<![.!?…;:,\s])[ \t]*\n", ".\n", text.strip())
+    pieces: list[str] = []
+    current = ""
+    for sentence in (s.strip() for s in _SENTENCE_END.split(text)):
+        if not sentence:
+            continue
+        while len(sentence) > limit:
+            cut = max(sentence.rfind(", ", 0, limit), sentence.rfind(" ", 0, limit))
+            cut = cut + 1 if cut > 0 else limit
+            head, sentence = sentence[:cut].strip(), sentence[cut:].strip()
+            if current:
+                pieces.append(current)
+                current = ""
+            pieces.append(head)
+        if current and len(current) + 1 + len(sentence) > limit:
+            pieces.append(current)
+            current = sentence
+        else:
+            current = f"{current} {sentence}" if current else sentence
+    if current:
+        pieces.append(current)
+    return pieces
+
+
+def _synthesize_piece(voice: PiperVoice, text: str) -> tuple[tuple, bytes]:
+    """One piece as (wav params, PCM frames) (piper-tts ≥1.3 / ≤1.2 APIs)."""
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wav_file:
         if hasattr(voice, "synthesize_wav"):
             voice.synthesize_wav(text, wav_file)
         else:  # piper-tts ≤1.2 sets the wav params itself
             voice.synthesize(text, wav_file)
-    return buf.getvalue()
+    buf.seek(0)
+    with wave.open(buf, "rb") as r:
+        return r.getparams(), r.readframes(r.getnframes())
+
+
+def synthesize_wav(voice: PiperVoice, text: str) -> bytes:
+    """Synthesizes `text` to an in-memory WAV, piece by piece (see CHUNK_CHARS)."""
+    out = io.BytesIO()
+    with wave.open(out, "wb") as wav_file:
+        params_set = False
+        for piece in split_text(text) or [text]:
+            params, frames = _synthesize_piece(voice, piece)
+            if not params_set:
+                wav_file.setparams(params)
+                params_set = True
+            wav_file.writeframes(frames)
+    return out.getvalue()
 
 
 @asynccontextmanager

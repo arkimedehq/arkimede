@@ -348,6 +348,10 @@ export class AppConfigEntity {
   @Column({ type: 'boolean', default: false })
   voiceIdEnabled: boolean;
 
+  /** Sensitive actions by voice only for a recognised voice (voice-id/voice-clearance.ts); null = off. */
+  @Column({ type: 'jsonb', nullable: true, default: null })
+  voiceClearance: Record<string, unknown> | null;
+
   /** Plugins with no valid signature from a trusted key may be installed (specs/PLUGINS.md §11). Default off. */
   @Column({ type: 'boolean', default: false })
   pluginsAllowUnsigned: boolean;

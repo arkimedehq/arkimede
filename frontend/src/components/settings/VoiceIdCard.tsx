@@ -6,13 +6,13 @@
  * the house's people (not Arkimede accounts: the voice account is one many people talk to), each optionally the same
  * person as a Home Assistant person and an Arkimede user; learned from what they say to a satellite; each voice's
  * samples with their scores (a suspect one removed alone); the latest recognitions with their scores, to see how sure
- * it is.
+ * it is; and which actions by voice need a recognised voice (clearance).
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, AudioLines, ChevronDown, ChevronRight, Loader2, Mic, Plus, RotateCcw, Trash2, X } from 'lucide-react';
-import { voiceIdApi, type VoiceIdState, type VoiceProfileView } from '../../api/voiceId';
+import { AlertTriangle, AudioLines, ChevronDown, ChevronRight, Loader2, Mic, Plus, RotateCcw, ShieldCheck, Trash2, X } from 'lucide-react';
+import { voiceIdApi, type VoiceClearancePolicy, type VoiceIdState, type VoiceProfileView } from '../../api/voiceId';
 import { appConfigApi } from '../../api/appConfig';
 import { adminUsersApi } from '../../api/adminUsers';
 
@@ -87,7 +87,100 @@ export default function VoiceIdCard() {
           </ul>
         </div>
       )}
+      {data?.clearance && (
+        <ClearanceSection policy={data.clearance} recognition={enabled} voices={data.voices} onSaved={refresh} onError={fail} />
+      )}
       {error && <p className="text-xs text-red-400 flex items-center gap-1.5"><AlertTriangle size={13} />{error}</p>}
+    </div>
+  );
+}
+
+const lines = (s: string) => s.split(/[\n,]/).map((x) => x.trim()).filter(Boolean);
+
+/** Which actions by voice need a recognised voice: off by default; the threshold, who, and what is protected. */
+function ClearanceSection({ policy, recognition, voices, onSaved, onError }: {
+  policy: VoiceClearancePolicy; recognition: boolean; voices: VoiceProfileView[];
+  onSaved: (d: VoiceIdState) => void; onError: (e: any) => void;
+}) {
+  const { t } = useTranslation('settings');
+  const [draft, setDraft] = useState(policy);
+  const [tools, setTools] = useState(policy.tools.join('\n'));
+  const [entities, setEntities] = useState(policy.entities.join('\n'));
+  useEffect(() => { setDraft(policy); setTools(policy.tools.join('\n')); setEntities(policy.entities.join('\n')); }, [JSON.stringify(policy)]);
+  const save = useMutation({
+    mutationFn: (p: Partial<VoiceClearancePolicy>) => voiceIdApi.setClearance(p),
+    onSuccess: onSaved, onError,
+  });
+  const next = { ...draft, tools: lines(tools), entities: lines(entities) };
+  const dirty = JSON.stringify(next) !== JSON.stringify(policy);
+  const togglePerson = (id: string) => setDraft({ ...draft, people: draft.people.includes(id) ? draft.people.filter((p) => p !== id) : [...draft.people, id] });
+
+  return (
+    <div className="border-t border-gray-700/50 pt-4 space-y-3">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <ShieldCheck size={18} className="text-indigo-400 mt-0.5 flex-shrink-0" />
+          <div>
+            <h4 className="text-sm font-semibold text-gray-100">{t('voiceId.clearance.title')}</h4>
+            <p className="text-xs text-gray-400 mt-1 max-w-xl">{t('voiceId.clearance.hint')}</p>
+          </div>
+        </div>
+        <button
+          role="switch" aria-checked={policy.enabled} disabled={save.isPending} onClick={() => save.mutate({ enabled: !policy.enabled })}
+          className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${policy.enabled ? 'bg-indigo-600' : 'bg-gray-600'} disabled:opacity-50`}
+        >
+          <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${policy.enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+        </button>
+      </div>
+      {policy.enabled && !recognition && (
+        <p className="text-xs text-amber-400 flex items-center gap-1.5"><AlertTriangle size={13} />{t('voiceId.clearance.recognitionOff')}</p>
+      )}
+
+      <label className="block text-xs text-gray-400">{t('voiceId.clearance.minScore')}
+        <div className="flex items-center gap-2 mt-1">
+          <input type="number" min={0} max={1} step={0.01} className={`${input} w-24`} value={draft.minScore}
+            onChange={(e) => setDraft({ ...draft, minScore: Number(e.target.value) })} />
+          <span className="text-gray-500">{t('voiceId.clearance.minScoreHint')}</span>
+        </div>
+      </label>
+
+      <div className="text-xs text-gray-400">
+        <p>{t('voiceId.clearance.people')}</p>
+        <div className="flex flex-wrap gap-3 mt-1">
+          {voices.map((v) => (
+            <label key={v.id} className="inline-flex items-center gap-1.5 text-gray-300">
+              <input type="checkbox" checked={draft.people.includes(v.id)} onChange={() => togglePerson(v.id)} />{v.name}
+            </label>
+          ))}
+        </div>
+        <p className="text-gray-500 mt-1">{draft.people.length ? t('voiceId.clearance.peopleSome') : t('voiceId.clearance.peopleAny')}</p>
+      </div>
+
+      <label className="flex items-center gap-2 text-xs text-gray-300">
+        <input type="checkbox" checked={draft.sensitiveTargets} onChange={(e) => setDraft({ ...draft, sensitiveTargets: e.target.checked })} />
+        {t('voiceId.clearance.sensitive')}
+      </label>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <label className="block text-xs text-gray-400">{t('voiceId.clearance.entities')}
+          <textarea className={`${input} w-full mt-1 font-mono`} rows={4} value={entities} placeholder={'lock\ncover.garage*\nswitch.gate'}
+            onChange={(e) => setEntities(e.target.value)} />
+          <span className="text-gray-500">{t('voiceId.clearance.entitiesHint')}</span>
+        </label>
+        <label className="block text-xs text-gray-400">{t('voiceId.clearance.tools')}
+          <textarea className={`${input} w-full mt-1 font-mono`} rows={4} value={tools} placeholder={'ha_notify\nskill_gmail_*\nmcp_*_send_*'}
+            onChange={(e) => setTools(e.target.value)} />
+          <span className="text-gray-500">{t('voiceId.clearance.toolsHint')}</span>
+        </label>
+      </div>
+
+      <p className="text-xs text-gray-500">{t('voiceId.clearance.limits')}</p>
+      <div className="flex justify-end">
+        <button className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50"
+          disabled={!dirty || save.isPending} onClick={() => save.mutate(next)}>
+          {save.isPending && <Loader2 size={14} className="animate-spin" />}{t('voiceId.clearance.save')}
+        </button>
+      </div>
     </div>
   );
 }

@@ -145,7 +145,7 @@ export class LlmProviderService {
     return {
       seesImages: false,
       describe: async (base64, mimeType) => {
-        model ??= await this.llmConfigsService.buildModelForConfig(vision, { maxTokens: 1024 });
+        model ??= await this.llmConfigsService.buildModelForConfig(vision, { maxTokens: 4096 }); // room for a page of text read verbatim
         const response = await model.invoke([new HumanMessage({
           content: [
             { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}` } },

@@ -71,6 +71,10 @@ export class ScheduledTask {
   @Column({ type: 'boolean', default: false })
   voice: boolean;
 
+  /** Who spoke when it was asked for by voice (voice-id/voice-clearance.ts): its runs are checked as that turn was. */
+  @Column({ type: 'jsonb', nullable: true, default: null })
+  voiceClearance: { speaker: { profileId: string; name: string; score: number } | null; satellite: string | null } | null;
+
   @Column({ type: 'boolean', default: true })
   enabled: boolean;
 

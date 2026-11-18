@@ -1010,7 +1010,7 @@ The `kind` field, derived at install time, distinguishes:
 - **Gating** (admin → Settings → AI → Sandbox): global master switch (default OFF) + team/project allowlist; admin always allowed.
 - **Isolation**: via `broker` (container-job, cap-drop ALL, read-only, non-root uid). **Fail-closed**: without the broker it refuses, unless `SANDBOX_ALLOW_INPROCESS=1` (dev only, not isolated).
 - **Network** (unified tiers): `none` (no network) | `internal` (backend `/internal/*` only, no WAN) | `internet` (allowlisted domains via the egress proxy) | `open` (full internet → `pip install`/`npm install` at runtime; requires the open network in `BROKER_ALLOWED_NETWORKS`). Same vocabulary as skill jobs; `internal` is the always-on floor for the tiers above it.
-- **Hygiene**: per-TTL workspace GC, per-session disk quota, download of files generated from the chat (`GET /api/sandbox/file`, scoped to chat access).
+- **Hygiene**: per-TTL workspace GC, per-session disk quota (`SANDBOX_SESSION_MAX_BYTES`, default 4 GB: a command always runs, so a full workspace can still be cleaned; it fails only when it leaves the workspace over the quota without shrinking it; pip keeps no download cache there), 1 GB of memory per command (`JOB_MEMORY`), download of files generated from the chat (`GET /api/sandbox/file`, scoped to chat access).
 
 ### 12.12 Compile to tool (descriptive → typed)
 
@@ -1086,7 +1086,7 @@ Ask *"switch the kitchen and living-room lights on and off for 10 seconds"* and 
 - **Steps**: `call` (a tool + args) · `wait` (≥ 0.2 s, optional `jitterSeconds`) · `repeat` (`count` or `forSeconds`) · `parallel` (up to 8) · `choose.random` (one at random); `finally` runs at the end, also when stopped or failed (put things back).
 - **Replace**: a new sequence with the same `key` (or, without one, the same calls with the same arguments) replaces the running one — "faster" just works.
 - **Never**: agents, teams, flows, the sandbox, scheduling or memory inside a sequence; never a confirmation on the user's behalf (`confirmed: true` refused, a result asking for one fails the step). A failed call is recorded and the sequence goes on; the same call failing 3 times in a row stops it (`stopOnError` stops at the first).
-- **A procedure of the memory**: when the sequence carries out a procedure Recordare holds (or one step of it), the model passes `procedure: {id, step?}` and Arkimede reports the run to Recordare when it ends — completed with every call succeeding = done; failed, timed out or with failed calls = failed with the errors; stopped by the user = nothing. Only when the user's memory is Recordare; a Recordare error never touches the sequence.
+- **A procedure of the memory**: when the sequence carries out a procedure Recordare holds (or one step of it), the model passes `procedure: {id, step?}` and Arkimede reports the run to Recordare when it ends — completed with every call succeeding = done; failed, timed out or with failed calls = failed with the errors; stopped by the user (or replaced by a new sequence) = stopped; a step completed = done with that step, which Recordare counts as ongoing (the procedure goes on). Only when the user's memory is Recordare; a Recordare error never touches the sequence.
 - **Bounds** (env): `RUN_SEQUENCE_MAX_SECONDS` (600; longer → `schedule_task`), `RUN_SEQUENCE_MAX_CALLS` (1000), `RUN_SEQUENCE_MAX_PER_USER` (3).
 - **Stop**: by voice/chat ("stop", "basta") through `stop_sequences`; in the chat it came from (a box with its progress and **Stop**); on the wall panel's drawer.
 - **End**: one line in that chat (completed / stopped / failed, with why); no voice.
@@ -1175,9 +1175,13 @@ the excess beyond the budget is thrown away by the trim instead of being summari
 
 The agent's step limit (LLM ↔ tool calls for a single message) is
 configurable via the `AGENT_RECURSION_LIMIT` env in the backend `.env` (default 100 steps ≈ 50
-LLM turns, minimum applied 10): exceeding it produces the `GraphRecursionError` error — usually
-it indicates the agent is looking for data that doesn't exist or that it lacks context (see
-`DATAFLOW_AGENT.md` for the full flow with diagrams).
+LLM turns, minimum applied 10). Reaching it usually means the agent is looking for data that
+doesn't exist, lacks context, or is stuck on an error (see `DATAFLOW_AGENT.md` for the full flow
+with diagrams). The user never gets the bare error: the agent answers with what it did, what it
+found, what blocked it and what to do next (one last call to the model without tools). Along the
+way a step guard adds a short note to what the model reads when the same tool returns the same
+result three times in a row (change approach or say what blocks you), when a reply was cut at the
+model's output limit (write long content in parts), and on the last step the limit allows.
 
 ### 18.3 Prompt Caching
 

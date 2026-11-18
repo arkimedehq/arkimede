@@ -849,7 +849,24 @@
     "sampleOther": "{{name}} {{score}}",
     "sampleSuspect": "sospetto",
     "sampleRemove": "Togli questo campione",
-    "sampleRemoveConfirm": "Togliere il campione #{{n}} dalla voce di {{name}}?"
+    "sampleRemoveConfirm": "Togliere il campione #{{n}} dalla voce di {{name}}?",
+    "clearance": {
+      "title": "Azioni sensibili solo a voci riconosciute",
+      "hint": "Con questo acceso, un'azione protetta chiesta a voce parte solo se chi parla è stato riconosciuto con un punteggio almeno pari alla soglia. Altrimenti l'agente non la fa e lo dice. Vale anche per sequenze, automazioni create a voce e agenti a cui il turno delega; in chat e nell'app non cambia nulla.",
+      "recognitionOff": "Il riconoscimento delle voci è spento: con questo acceso, nessuna azione protetta si può fare a voce.",
+      "minScore": "Soglia del punteggio della voce",
+      "minScoreHint": "0–1, lo stesso punteggio delle ultime riconoscenze qui sopra (consigliato 0,65 o più)",
+      "people": "Chi può",
+      "peopleAny": "Nessuna selezionata: qualunque voce riconosciuta.",
+      "peopleSome": "Solo le voci selezionate.",
+      "sensitive": "Proteggi anche ciò che Home Assistant considera sensibile (serrature, allarmi, porte del garage, cancelli)",
+      "entities": "Entità protette",
+      "entitiesHint": "Una per riga: un id, un dominio (es. lock) o con * (es. cover.garage*).",
+      "tools": "Strumenti protetti",
+      "toolsHint": "Una per riga, con * (es. skill_gmail_*). Qualunque strumento.",
+      "limits": "Protegge solo i comandi che passano da Arkimede: se la pipeline di Home Assistant gestisce i comandi in locale, per le entità sensibili toglile da Assist o disattiva quell'opzione. L'impronta vocale non è un'autenticazione forte.",
+      "save": "Salva"
+    }
   },
   "voiceProfile": {
     "title": "Voce",

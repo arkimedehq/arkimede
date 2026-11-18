@@ -30,7 +30,10 @@ entrambi.
 
 - **`ocr-service/`** (FastAPI, porta 9200, non esposta sull'host): `GET /health` (motori
   disponibili), `POST /v1/extract` (multipart `file`, `engine=fast|structured`),
-  `POST /v1/render` (PNG per pagina + testo nativo, a blocchi con `first_page`/`max_pages`).
+  `POST /v1/render` (PNG per pagina + testo nativo, a blocchi con `first_page`/`max_pages`),
+  `POST /v1/convert` (una foto come JPEG che un modello accetta: RAW della fotocamera come DNG,
+  CR2/CR3, NEF, ARW — sviluppati da LibRaw — HEIC/HEIF, TIFF, BMP; lato lungo ridotto a
+  `max_side`, default `OCR_CONVERT_MAX_SIDE`=2048). Anche `extract` e `render` leggono queste foto.
   Tutti i modelli sono inclusi nell'immagine in fase di build: funziona offline.
 - **`backend/src/ocr/`**: `OcrService` risolve il livello (richiesto o predefinito admin,
   limitato dal massimo admin, degradato al livello disponibile più vicino) e chiama il
@@ -41,7 +44,13 @@ entrambi.
   `pdf-parse` quando l'OCR è spento, non disponibile o fallisce, esattamente come prima
   del servizio. Immagini: prima `fast`/`structured`, poi il modello di visione se non
   trovano testo (le foto continuano ad avere una descrizione ricercabile), niente con
-  `none` esplicito.
+  `none` esplicito. Le foto in altri formati (RAW, HEIC, TIFF…) le legge direttamente il
+  servizio; al modello di visione arrivano come JPEG (`OcrService.toJpeg`).
+- **Allegati in chat**: una foto allegata in un formato che i modelli non accettano (una DNG
+  dal telefono, una HEIC) arriva al modello come JPEG (`FilesService.readAsModelImage`), così
+  l'agente la legge senza convertirla nella sandbox. Quando il modello della chat non vede le
+  immagini ed è designato un modello di visione, le immagini allegate arrivano come sua
+  descrizione, con il testo visibile trascritto parola per parola.
 - **Indicizzazione in coda**: `POST /api/embed/:fileId` e `POST /api/embed/datasource`
   accettano `ocrLevel` e passano per la coda BullMQ `embed-ingest`; l'utente riceve una
   notifica al termine (la lista file si aggiorna su quella notifica).

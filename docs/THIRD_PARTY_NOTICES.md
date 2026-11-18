@@ -116,6 +116,12 @@ Full license text: https://www.apache.org/licenses/LICENSE-2.0
 | torch / torchvision (PyTorch, CPU) | BSD-3-Clause / Apache-2.0 (per package metadata) |
 | transformers | Apache-2.0 |
 | opencv-python | Apache-2.0 |
+| pillow | MIT-CMU (HPND) |
+| rawpy | MIT; its wheels bundle **LibRaw** — LGPL-2.1 (or CDDL-1.0), used as a shared library, unmodified |
+| pillow-heif | BSD-3-Clause source; its binary wheels bundle libheif and libde265 (LGPL-3.0) and **x265 (GPL-2.0-or-later)**, so the wheel as a whole is GPL — compatible with Arkimede's AGPL-3.0 (GPL-2.0-or-later code may be combined under the GPL-3.0 terms that AGPL-3.0 §13 allows) |
+| numpy (via rawpy) | BSD-3-Clause and permissive |
+
+`pillow`, `rawpy` and `pillow-heif` (added 2026-11-17) read photos in camera RAW (DNG…) and HEIC/HEIF formats.
 
 System package: **Tesseract OCR** (Debian `tesseract-ocr` + language data) — Apache-2.0,
 https://github.com/tesseract-ocr/tesseract. Transitive packages of the image were audited

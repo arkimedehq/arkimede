@@ -9,6 +9,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SchedulingService, whenOf } from '../../src/scheduling/scheduling.service';
 import { VoiceDeliveryService, speakable, SPOKEN_MAX_CHARS } from '../../src/notifications/voice-delivery.service';
+import { currentVoiceClearance, runWithVoiceClearance } from '../../src/voice-id/voice-clearance';
 
 const WYOMING_CHAT = '11111111-1111-4111-8111-111111111111';
 const WEB_CHAT = '22222222-2222-4222-8222-222222222222';
@@ -153,3 +154,39 @@ describe('whenOf', () => {
     expect(whenOf({ scheduleType: 'scheduled', cron: null, runAt, timezone: 'Not/AZone' } as any)).toBe('on 2026-11-10T14:02:00.000Z');
   });
 });
+
+describe('automations asked for by voice: voice clearance', () => {
+  const runAt = () => new Date(Date.now() + 60_000).toISOString();
+  const stranger = { speaker: null, satellite: 'sat.ingresso' };
+
+  it('keep who spoke and run as that turn did; one made in the app keeps none and runs unchecked', async () => {
+    const t = makeService();
+    let during: unknown = 'unset';
+    t.agent.invokeWithUsage.mockImplementation(async () => { during = currentVoiceClearance(); return { text: 'ok', usage: null } as any; });
+    const voiced = await runWithVoiceClearance(stranger, () => t.svc.createTask('u1', { instruction: 'apri il cancello', runAt: runAt(), fromVoice: true }));
+    expect(voiced.voiceClearance).toEqual(stranger);
+    await (t.svc as any).runTask('t1', true);
+    expect(during).toEqual(stranger);
+
+    const app = await t.svc.createTask('u1', { instruction: 'x', runAt: runAt() });
+    expect(app.voiceClearance).toBeNull();
+    await (t.svc as any).runTask('t1', true);
+    expect(during).toBeNull();
+  });
+
+  it('changing what it does in the app clears it; changing it by voice takes the new speaker', async () => {
+    const t = makeService();
+    await runWithVoiceClearance(stranger, () => t.svc.createTask('u1', { instruction: 'x', runAt: runAt(), fromVoice: true }));
+    (t.svc as any).removeJobs = vi.fn(async () => undefined);
+    (t.svc as any).registerJob = vi.fn(async () => undefined);
+    (t.svc as any).repo.findOne = vi.fn(async () => t.tasks.get('t1'));
+    const known = { speaker: { profileId: 'v-1', name: 'Alex', score: 0.8 }, satellite: 'sat.cucina' };
+    await runWithVoiceClearance(known, () => t.svc.update('t1', 'u1', false, { instruction: 'y' }));
+    expect(t.tasks.get('t1').voiceClearance).toEqual(known);
+    await t.svc.update('t1', 'u1', false, { title: 'only the title' });
+    expect(t.tasks.get('t1').voiceClearance).toEqual(known);
+    await t.svc.update('t1', 'u1', false, { instruction: 'z' });
+    expect(t.tasks.get('t1').voiceClearance).toBeNull();
+  });
+});
+

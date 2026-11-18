@@ -83,6 +83,11 @@ piper-service/
     supportati).
   - API python di Piper: caricare `PiperVoice` una volta per voce
     (cache LRU delle voci caricate), sintetizzare in un WAV in memoria.
+    Un testo lungo è sintetizzato a pezzi di al massimo `PIPER_CHUNK_CHARS`
+    (default 400) tagliati a fine frase, con l'audio unito in un solo WAV:
+    la memoria resta limitata dal pezzo (un messaggio di ~5000 caratteri
+    faceva morire il container al limite di 512 MB). Una riga che finisce
+    senza punteggiatura conta come fine frase.
 - `GET /v1/models` — elencare le voci scaricate (scansione della
   directory dei modelli), stesso stile di envelope di
   `whisper-service/main.py:81`.
@@ -262,6 +267,19 @@ nell'immagine, quindi tornare a Whisper non richiede mai un download.
   endpoint di stato e l'`info` Wyoming trattano un provider interno non
   installato come disabilitato, quindi microfono/lettura restano nascosti.
 
+## Parte 2d — Lettura di un messaggio a pezzi (2026-11-17)
+
+Il pulsante di lettura in chat (`SpeakButton` in `MessageBubble.tsx`, helper in
+`frontend/src/utils/ttsText.ts`) non sintetizza più tutto il messaggio in una
+volta (su un messaggio lungo aspettava ~9 s prima di sentire qualcosa, e
+tagliava a 4096 caratteri). Il markdown diventa testo semplice (un titolo o una
+voce di elenco prendono il punto finale, così la voce fa la pausa), poi viene
+tagliato a fine frase: un primo pezzo di al massimo 200 caratteri, i successivi
+di al massimo 600. Il primo pezzo suona in molto meno di un secondo; ogni pezzo
+successivo è chiesto mentre suona il precedente. Un clic durante il caricamento
+o la lettura la ferma. Funziona con qualsiasi provider TTS (usa solo la rotta
+speech).
+
 ## Parte 3 — Server vocale Wyoming (Home Assistant & co.)
 
 Stato: IMPLEMENTATO (2026-09-15) — `backend/src/wyoming/`, migration 084,
@@ -421,3 +439,32 @@ facoltativamente collegata a una persona di Home Assistant e a un utente di Arki
   L'admin vede gli ultimi riconoscimenti con i punteggi, per tarare le soglie, e i campioni di ogni voce con quanto
   somigliano agli altri suoi e alla voce più vicina: uno sospetto (un'altra voce, rumore) si toglie da solo
   (`GET`/`DELETE /api/admin/voice-id/voices/:id/samples[/:index]`).
+
+## Parte 6 — Azioni sensibili solo a voci riconosciute (2026-11-17)
+
+Opzionale (Impostazioni → Voce e audio → Voci riconosciute → *Azioni sensibili solo a voci riconosciute*;
+`app_config.voiceClearance`, migration 117; `PUT /api/admin/voice-id/clearance`). Un turno vocale gira con l'account
+del satellite, chiunque parli: con questo acceso, una chiamata **protetta** in un turno vocale parte solo se la voce è
+stata riconosciuta con un punteggio di somiglianza almeno `minScore` (default 0,65, lo stesso punteggio dell'elenco dei
+riconoscimenti) e, se è impostato un elenco di voci, è una di quelle (nessuna = qualunque voce riconosciuta).
+Altrimenti lo strumento non fa nulla e risponde `{error: "voice_not_authorized", reason}` (`not_recognised` /
+`low_confidence` / `not_allowed`): l'agente dice che non può farlo per una voce che non riconosce.
+
+- **Cosa è protetto**: qualunque strumento per nome (`tools`, con `*`, es. `skill_gmail_*`); le entità su cui agisce
+  una chiamata (`entities`: un id, un dominio come `lock`, o con `*`); e, con `sensitiveTargets` (acceso di default),
+  ciò che l'integrazione stessa considera sensibile — serrature, allarmi, porte del garage e cancelli di Home
+  Assistant, la stessa regola della conferma. `ha_call_service` dichiara le entità su cui agisce, risolte anche da un
+  nome o una stanza, quindi un'entità protetta viene presa comunque il modello la chiami; `confirmed: true` non basta.
+- **Dove vale** (`voice-id/voice-clearance.ts`): il permesso del turno (chi ha parlato, punteggio, satellite) viaggia
+  in un AsyncLocalStorage impostato intorno al turno Wyoming; gli strumenti sono avvolti dove nasce l'agente
+  (`AgentService`, `MultiAgentService`), quindi sono controllati anche gli agenti a cui il turno delega, le sequenze
+  che avvia (`run_sequence` chiama gli strumenti avvolti) e il lavoro che prosegue dopo che il satellite ha smesso di
+  aspettare. Un'automazione creata a voce tiene il permesso (`scheduled_tasks.voiceClearance`) e gira con quello;
+  cambiare cosa fa dall'app lo toglie. Un turno sull'endpoint OpenAI-compatibile che nomina un satellite (`user`)
+  vale come voce non riconosciuta; senza satellite è un client API (il titolare della chiave) e non è controllato.
+- **Spento, o fuori dai turni vocali**: nessuno strumento viene avvolto, ogni turno va come prima. Acceso con il
+  riconoscimento spento, nessuna azione protetta si può fare a voce.
+- **Limiti**: copre solo i comandi che passano da Arkimede — una pipeline di Home Assistant che gestisce i comandi in
+  locale agisce senza chiedere ad Arkimede, quindi togli da Assist le entità sensibili o spegni quell'opzione.
+  L'impronta vocale non è un'autenticazione forte (una registrazione può ingannarla): per serrature e allarmi un codice
+  di conferma a voce è un passo ulteriore.

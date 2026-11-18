@@ -181,6 +181,42 @@ Runs a small program of your tool calls in the background, with timing, and with
 Stops the user's running sequences (started with run_sequence) — all of them, or one by its sequenceId. Use it when the user says to stop ("basta", "ferma", "stop"). Each one runs its "finally" before it ends.
 ```
 
+### Refusal of a protected action by voice — `voiceNotAuthorized(reason)` (used in `voice-id/voice-clearance.ts`)
+The `message` of `{error: "voice_not_authorized"}`, returned instead of running a protected tool in a voice turn whose voice does not clear it:
+```
+Not done: this action is allowed by voice only to a recognised person, and <why>. Do not retry it and do not try another way to do it in this turn: tell the person, briefly, that you cannot do it for a voice you do not recognise (they can do it from the app, or ask someone you know).
+```
+`<why>`: "the voice speaking was not recognised" / "the voice was not recognised with enough certainty" / "the person recognised is not allowed to do it by voice".
+
+### Step guard notes — `STEP_TRUNCATED_NOTE`, `STEP_REPEATED_NOTE(n)`, `STEP_LAST_CALL_NOTE` (`agent/step-guard.ts`)
+Added as a user message at the end of what the model reads (after the tool results, the cached prefix untouched),
+only when due: the previous reply stopped at the output limit; the same tool returned the same result `n` (3)
+times in a row; this is the last model call the step limit allows.
+```
+[Note from the system] Your previous reply was cut off at your output limit, so it was incomplete. Keep each reply and each tool call short: write long code or content in parts (several calls, each writing a piece of a file), not in one call.
+```
+```
+[Note from the system] Your last <n> tool calls got the same result. Repeating them will not change it: read that result and do something different that addresses it, or stop and tell the user what is blocking you and what they can do.
+```
+```
+[Note from the system] This is your last step for this request: do not call tools. Answer the user now with what you have done and found, what is still missing and why, and what they can do next.
+```
+
+### Answer after the step limit — `STEP_FINAL_ANSWER_PROMPT(request, steps)` (`agent/step-guard.ts`)
+One last call **without tools** (system prompt + this message, plain text for every provider) when the run reaches
+`AGENT_RECURSION_LIMIT`; `<steps>` is the run told in words (each tool call and its result, clipped):
+```
+You were working on this request from the user and used up all the steps you have for it before finishing.
+
+The request:
+<request>
+
+What you did (your tool calls and their results):
+<steps>
+
+Now, without tools, answer the user in their language: what you did and found so far (give any result you already have), what you could not finish and the reason (the error or obstacle, in plain words), and what they can do next (for example ask you to continue, or change something). Be brief and concrete; do not mention steps or limits as technical terms.
+```
+
 ### `search_<collection>` (auto-created RAG tool) — `ragSearchToolDescription(collection, description?)`
 ```
 Semantic search in the "<collection>" knowledge base (vector collection). Use it when the user asks about topics or documents that may have been indexed there (uploaded files, embedded notes). Do not use it for questions unrelated to stored documents.[ Collection content: <description>]
@@ -248,9 +284,10 @@ CONVERSATION:
 Respond EXCLUSIVELY with a JSON array of objects, without any additional text. Example: [{"content":"Develops in TypeScript with NestJS","tags":["stack"],"keywords":["TypeScript","NestJS"],"context":"Useful when suggesting code or libraries.","category":"profile"}]. Empty array if there is nothing: []
 ```
 
-### Images tools return, for a model without vision — `TOOL_IMAGE_DESCRIBE_PROMPT` (`app-config/llm-provider.service.ts`)
+### Images tools return or the user attaches, for a model without vision — `TOOL_IMAGE_DESCRIBE_PROMPT` (`app-config/llm-provider.service.ts`)
 Run on the **designated vision model** (`llm_configs.isVision`, no default fallback) when the agent's model is
-another one; the description replaces the image in the message `agent/tool-media.ts` adds after the tool results.
+another one; the description replaces the image in the message `agent/tool-media.ts` adds after the tool results,
+and an image attached to a chat message (`AgentService.imagesForModel`).
 ```
 Describe this image for an assistant that cannot see it and must answer questions about it: the setting, the people (how many, what they look like and do), animals, vehicles and objects, any visible text verbatim, and anything unusual. Be factual and specific; do not guess identities. Respond only with the description, without preamble.
 ```

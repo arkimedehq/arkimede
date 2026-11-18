@@ -61,6 +61,7 @@ import { ConversationFocusService, FOCUS_HISTORY_MESSAGES, satelliteName } from 
 import { APP_NAME, APP_NAME_SLUG } from '../config/app.config';
 import { withTraceUser } from '../observability/genai-tracing';
 import { VoiceIdService, type VoiceTurnResult } from '../voice-id/voice-id.service';
+import { runWithVoiceClearance, type VoiceClearance } from '../voice-id/voice-clearance';
 import { HomeAssistantService } from '../home-assistant/home-assistant.service';
 import { RecordareInitiativesService } from '../recordare/recordare-initiatives.service';
 import { RecordareIdentityService } from '../recordare/recordare-identity.service';
@@ -656,7 +657,15 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
         let counted = true;
         const answered = () => { if (counted) { counted = false; this.turnsInProgress--; } };
         try {
-          const running = this.agentService.streamResponse(
+          // Who spoke, for the actions only a recognised voice may do (voice-clearance.ts): the whole run sees it, the
+          // sequences and the work that goes on after the detach included.
+          const clearance: VoiceClearance = {
+            speaker: voice.kind === 'speaker'
+              ? { profileId: voice.speaker.profileId, name: voice.speaker.displayName, score: voice.speaker.score }
+              : null,
+            satellite,
+          };
+          const running = runWithVoiceClearance(clearance, async () => this.agentService.streamResponse(
             text, userId, undefined, undefined, history,
             [], [], [],
             (chunk) => { answer += chunk; },
@@ -683,7 +692,7 @@ export class WyomingService implements OnModuleInit, OnModuleDestroy {
                 else runs?.update(run.chatId, run.runId, { phase: 'writing', tool: null });
               },
             },
-          );
+          ));
           // A long turn (an app to write, a long search) does not hold the satellite: past detachMs() the hub hears that
           // the work goes on, and the answer comes when it is done — said where the user is, and in the chat.
           const wait = detachMs();

@@ -79,12 +79,13 @@ export function endLine(state: SequenceState, outcome: SequenceOutcome, language
 
 /**
  * How a sequence that carries out a procedure of the memory went, as a procedure run: completed with every call
- * succeeding → done; failed, timed out or with failed calls → failed (at the procedure's step, with the errors). Null
- * when the user stopped it: stopping says nothing about the procedure.
+ * succeeding → done; failed, timed out or with failed calls → failed (at the procedure's step, with the errors);
+ * stopped (by the user, or replaced by a new sequence: the person gave up or changed their mind) → stopped. A done
+ * with a step counts as ongoing for Recordare: that step is done, the procedure goes on.
  */
-export function sequenceProcedureRun(outcome: SequenceOutcome, ref: ProcedureRef): Omit<ProcedureRun, 'conversation'> | null {
-  if (outcome.status === 'stopped') return null;
+export function sequenceProcedureRun(outcome: SequenceOutcome, ref: ProcedureRef): Omit<ProcedureRun, 'conversation'> {
   const step = ref.step !== undefined ? { step: ref.step } : {};
+  if (outcome.status === 'stopped') return { outcome: 'stopped', ...step, note: `stopped before the end, after ${outcome.calls} actions` };
   if (outcome.status === 'completed' && outcome.failures === 0) return { outcome: 'done', ...step };
   const why = outcome.status === 'timeout' ? ['time limit reached'] : [];
   const failed = outcome.failures ? [`${outcome.failures} of ${outcome.calls} calls failed`] : [];
@@ -197,7 +198,6 @@ export class SequencesService {
   /** The outcome to the memory's procedure the sequence carried out, when the user's memory is Recordare (best effort). */
   private async reportProcedure(state: SequenceState, outcome: SequenceOutcome, ref: ProcedureRef): Promise<void> {
     const run = sequenceProcedureRun(outcome, ref);
-    if (!run) return;
     const user = await this.users?.findOne({ where: { id: state.userId }, select: { id: true, episodicMemoryEnabled: true } }).catch(() => null);
     if (!user?.episodicMemoryEnabled) return;
     await reportProcedureRun(state.userId, ref.id, run, state.chatId);

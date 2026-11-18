@@ -17,8 +17,11 @@ Endpoints:
   POST /v1/extract   → text of a PDF/image with the chosen engine
   POST /v1/render    → per-page native text + PNG rendering (for the backend's
                        vision-LLM level, which transcribes each page image)
+  POST /v1/convert   → a photo as a JPEG a model can take (camera RAW such as DNG,
+                       HEIC/HEIF, TIFF, BMP…), scaled down to a maximum side
 
-Both PDFs and images (png/jpeg/webp/tiff/bmp/gif) are accepted. CPU-bound work
+Both PDFs and images (png/jpeg/webp/tiff/bmp/gif, and camera RAW/HEIC photos, read
+through the same conversion) are accepted. CPU-bound work
 runs in FastAPI's threadpool, bounded by OCR_CONCURRENCY.
 """
 import base64
@@ -31,7 +34,11 @@ import time
 from functools import lru_cache
 
 import pymupdf
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
+from PIL import Image, ImageOps
+from pillow_heif import register_heif_opener
+
+register_heif_opener()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -48,6 +55,11 @@ MIN_NATIVE_CHARS = int(os.getenv("OCR_MIN_NATIVE_CHARS", "20"))
 _slots = threading.BoundedSemaphore(int(os.getenv("OCR_CONCURRENCY", "1")))
 
 IMAGE_TYPES = {"png", "jpg", "jpeg", "webp", "tif", "tiff", "bmp", "gif"}
+# Camera RAW (read with LibRaw) and HEIF photos: converted to JPEG before anything else.
+RAW_TYPES = {"dng", "cr2", "cr3", "crw", "nef", "nrw", "arw", "srf", "sr2", "raf", "orf", "rw2", "pef", "srw", "x3f", "3fr", "iiq", "erf", "kdc", "mrw", "raw"}
+HEIF_TYPES = {"heic", "heif"}
+CONVERT_MAX_SIDE = int(os.getenv("OCR_CONVERT_MAX_SIDE", "2048"))
+JPEG_QUALITY     = int(os.getenv("OCR_JPEG_QUALITY", "85"))
 
 
 def _structured_available() -> bool:
@@ -65,12 +77,27 @@ app = FastAPI(title="OCR Service")
 
 # ── helpers ─────────────────────────────────────────────────────────────────
 
+def _photo_kind(filename: str, content_type: str | None) -> str | None:
+    """'raw' or 'heif' for a photo PyMuPDF cannot open (by extension, else MIME type); None otherwise."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    ct = (content_type or "").lower()
+    sub = ct.split("/", 1)[1] if "/" in ct else ""
+    if ext in RAW_TYPES or "dng" in sub or sub.endswith("-raw") or any(f"-{t}" in sub for t in RAW_TYPES):
+        return "raw"
+    if ext in HEIF_TYPES or sub in HEIF_TYPES or sub.startswith("heic") or sub.startswith("heif"):
+        return "heif"
+    return None
+
+
 def _kind(filename: str, content_type: str | None) -> str:
-    """'pdf' or an image filetype understood by PyMuPDF; 400 otherwise."""
+    """'pdf', 'raw'/'heif' (photos converted first) or an image filetype understood by PyMuPDF; 400 otherwise."""
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     ct = (content_type or "").lower()
     if ext == "pdf" or ct == "application/pdf":
         return "pdf"
+    photo = _photo_kind(filename, content_type)
+    if photo:
+        return photo
     if ext in IMAGE_TYPES:
         return "jpeg" if ext == "jpg" else ext
     if ct.startswith("image/"):
@@ -79,8 +106,33 @@ def _kind(filename: str, content_type: str | None) -> str:
     raise HTTPException(status_code=400, detail=f"Unsupported file type: {filename} ({content_type})")
 
 
+def _load_photo(data: bytes, kind: str) -> Image.Image:
+    """An RGB image of the photo, upright: RAW developed by LibRaw (camera white balance), anything else via Pillow."""
+    if kind == "raw":
+        import rawpy  # LibRaw; loaded on the first RAW photo only
+        with rawpy.imread(io.BytesIO(data)) as raw:
+            return Image.fromarray(raw.postprocess(use_camera_wb=True, output_bps=8))
+    img = Image.open(io.BytesIO(data))
+    return ImageOps.exif_transpose(img).convert("RGB")
+
+
+def to_jpeg(data: bytes, kind: str, max_side: int = CONVERT_MAX_SIDE) -> bytes:
+    """The photo as a JPEG, its longer side at most max_side (0 = full size)."""
+    try:
+        img = _load_photo(data, kind)
+    except Exception as err:
+        raise HTTPException(status_code=400, detail=f"Cannot read the photo: {err}")
+    if max_side > 0:
+        img.thumbnail((max_side, max_side), Image.LANCZOS)
+    out = io.BytesIO()
+    img.save(out, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+    return out.getvalue()
+
+
 def _open(data: bytes, kind: str) -> pymupdf.Document:
-    """Opens a PDF, or converts an image into a one-page PDF."""
+    """Opens a PDF, or converts an image into a one-page PDF (a RAW/HEIF photo through a full-size JPEG)."""
+    if kind in ("raw", "heif"):
+        data, kind = to_jpeg(data, kind, max_side=0), "jpeg"
     try:
         if kind == "pdf":
             return pymupdf.open(stream=data, filetype="pdf")
@@ -229,10 +281,27 @@ def render(
     return {"pages": pages, "totalPages": doc.page_count}
 
 
+@app.post("/v1/convert")
+def convert(
+    file: UploadFile = File(...),
+    max_side: int | None = Form(None),
+):
+    """A photo (camera RAW, HEIC/HEIF, TIFF, BMP, WebP…) as a JPEG, longer side at most max_side."""
+    data = file.file.read()
+    name = file.filename or "photo"
+    kind = _photo_kind(name, file.content_type) or "image"
+    t0 = time.time()
+    with _slots:
+        jpeg = to_jpeg(data, kind, CONVERT_MAX_SIDE if max_side is None else max_side)
+    logger.info(f"convert {name} ({kind}): {len(data)} → {len(jpeg)} bytes in {(time.time() - t0) * 1000:.0f}ms")
+    return Response(content=jpeg, media_type="image/jpeg")
+
+
 @app.get("/health")
 def health():
     return {
         "status": "ok",
         "engines": {"fast": True, "structured": STRUCTURED},
+        "convert": True,
         "languages": LANGUAGES,
     }

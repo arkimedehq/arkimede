@@ -17,6 +17,7 @@ import { ModuleRef } from '@nestjs/core';
 import { DataSource } from 'typeorm';
 import { I18nContext } from 'nestjs-i18n';
 import { createReactAgent } from '@langchain/langgraph/prebuilt';
+import { guardTools } from '../voice-id/voice-clearance';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
@@ -193,7 +194,8 @@ export class MultiAgentService {
       executor: createReactAgent({
         llm: model,
         // Memory tools first (the charter says to search memory before other tools).
-        tools: [...(memory?.tools ?? []), ...tools.filter((t) => !memoryNames.has(t.name))],
+        // A voice turn's clearance reaches the agents it delegates to (voice-clearance.ts; no-op otherwise).
+        tools: guardTools([...(memory?.tools ?? []), ...tools.filter((t) => !memoryNames.has(t.name))]),
         messageModifier: systemPrompt || undefined,
       }),
       // Serving-metrics handler attached by buildModelForConfig: the caller must
